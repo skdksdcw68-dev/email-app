@@ -1,0 +1,197 @@
+# Mail -- AI Gmail triage
+
+An iOS app that connects your Gmail and lets an AI read the inbox first, tagging
+every message so you know what actually needs you.
+
+Built entirely from Windows. No Mac, no simulator.
+
+```
+Windows (edit)  ->  GitHub (source)  ->  Codemagic (build + sign)  ->  TestFlight  ->  iPhone
+```
+
+## The app
+
+Two native tabs at the bottom:
+
+| Tab | What it does |
+|---|---|
+| **Mail** | Connect screen until Gmail is linked, then the tagged inbox |
+| **Settings** | Connected account, AI toggles, disconnect |
+
+Once connected, the AI tags each message and those tags become **filter chips
+pinned across the top of the inbox** -- tap one to narrow the list, tap it again
+to clear:
+
+| Tag | Meaning |
+|---|---|
+| Very Urgent | Has a deadline or a consequence attached |
+| Very Important | Matters, but is not on fire |
+| Important | Worth reading today |
+| Needs Reply | The sender is waiting on you |
+| No Reply Needed | Newsletters, receipts, automated noise |
+
+Tags also render as badges on each row, and the detail view shows a one-line
+**AI summary** of the thread above the body.
+
+## Current state
+
+The Gmail connection is **stubbed**. `MailStore.connect()` waits a beat and then
+loads pre-tagged sample mail, so the whole flow -- connect, tag, filter, read,
+reply, disconnect -- is real and testable on device today.
+
+Everything that real Gmail would touch lives behind that one method:
+
+```
+MailStore.connect()   <- sign in with Google, fetch profile, page the Gmail API
+MailStore.messages    <- what the API returns
+Message.tags          <- what the model assigns
+Message.aiSummary     <- what the model writes
+```
+
+Nothing in the views knows where the data came from, so wiring the real thing up
+does not touch the UI.
+
+### Not built yet
+
+- Real Google OAuth (needs a Google Cloud project, client ID, and the
+  Google Sign-In SDK via SPM)
+- Real Gmail API sync
+- Real model calls for tagging and summaries -- tags are hand-written in
+  `MailStore+Sample.swift` today
+- Sending actually sends nowhere; it appends to the local Sent folder
+- Sorting by priority. `AITag.priorityRank` and `Message.topPriority` exist for
+  it, the list just sorts by date for now
+
+---
+
+## One-time setup
+
+Everything below is done in a browser. None of it needs a Mac.
+
+### 1. Apple Developer portal
+
+<https://developer.apple.com/account/resources/identifiers>
+
+- **Identifiers -> +** -> App IDs -> App
+- Description: `Mail`, Bundle ID (explicit): `com.abelamare.emailapp`
+- No capabilities needed yet. Register.
+
+### 2. App Store Connect -- app record
+
+<https://appstoreconnect.apple.com/apps>
+
+- **+ -> New App**
+- Platform: iOS · Name: `Mail` (must be globally unique -- pick something else if taken)
+- Primary language, Bundle ID `com.abelamare.emailapp`, SKU: `emailapp` (any string)
+
+### 3. App Store Connect -- API key
+
+<https://appstoreconnect.apple.com/access/integrations/api>
+
+- **Team Keys -> +**, name it `Codemagic`, Access: **App Manager**
+- Download the `.p8`. **You get exactly one download.** Store it safely.
+- Note the **Key ID** and the **Issuer ID** shown at the top of the page.
+
+> Never commit the `.p8`. `.gitignore` already blocks it.
+
+### 4. TestFlight -- internal group
+
+App Store Connect -> your app -> **TestFlight -> Internal Testing -> +**
+
+- Name the group exactly `Internal Testers` (this string is in `codemagic.yaml`)
+- Add yourself as a tester using your Apple ID email
+
+Internal testers get builds with **no App Review wait**.
+
+### 5. Codemagic
+
+<https://codemagic.io> -- sign in with GitHub, give it access to this repo.
+
+- **Teams -> Personal Account -> Integrations -> Developer Portal -> Add key**
+  - Name: `AppStoreConnectKey` (this string is in `codemagic.yaml`)
+  - Issuer ID, Key ID, and the `.p8` from step 3
+- Add the app, and let it use the `codemagic.yaml` in the repo.
+
+### 6. On the iPhone 12 Pro Max
+
+Install **TestFlight** from the App Store and sign in with the same Apple ID you
+added as an internal tester.
+
+---
+
+## Daily loop
+
+```bash
+git add -A
+git commit -m "..."
+git push            # any branch  -> runs tests
+git push origin main  # main       -> builds, signs, uploads to TestFlight
+```
+
+Roughly 6-10 minutes later the build shows up in TestFlight on your phone.
+You get an email either way (success and failure are both configured).
+
+---
+
+## Changing the bundle ID
+
+It appears in **three** places and all three must match, or the build fails fast
+with a clear message from the `Check bundle id is in sync` step:
+
+| File | Key |
+|---|---|
+| `project.yml` | `PRODUCT_BUNDLE_IDENTIFIER` |
+| `codemagic.yaml` | `environment.ios_signing.bundle_identifier` |
+| `codemagic.yaml` | `environment.vars.BUNDLE_ID` |
+
+---
+
+## Layout
+
+```
+project.yml                  XcodeGen spec -- the "Xcode project"
+codemagic.yaml               CI: test workflow + TestFlight workflow
+Support/Info.plist           generated by XcodeGen, do not edit
+Sources/EmailApp/
+  EmailAppApp.swift          @main -- starts disconnected
+  Models/                    Contact, Mailbox, Message, AITag, GmailAccount
+  Stores/
+    MailStore.swift          @Observable @MainActor -- connection + filtering
+    MailStore+Sample.swift   pre-tagged stand-in for a first Gmail sync
+  Views/
+    RootView.swift           the two-tab TabView
+    MailTabView.swift        connect screen or inbox
+    ConnectGmailView.swift   Gmail sign-in screen
+    MessageListView.swift    inbox + tag chips + search + swipe actions
+    TagFilterBar.swift       the chip row pinned under the nav bar
+    TagBadge.swift           the tinted capsule on rows
+    MessageDetailView.swift  message + AI summary card
+    ComposeView.swift        new message sheet
+    SettingsView.swift       account, AI toggles, disconnect
+  Resources/Assets.xcassets  app icon + accent colour
+Tests/EmailAppTests/         17 unit tests over MailStore
+```
+
+---
+
+## Gotchas already handled
+
+- **`ITSAppUsesNonExemptEncryption: false`** in `Info.plist` -- without it,
+  TestFlight blocks every build behind a manual export-compliance question.
+- **App icon** -- a 1024x1024 PNG is required or the upload is rejected at
+  validation, well after the build "succeeds".
+- **`UILaunchScreen`** -- without it the app renders letterboxed at a smaller
+  screen size.
+- **Build numbers** -- App Store Connect rejects duplicates, so CI sets it from
+  Codemagic's `PROJECT_BUILD_NUMBER` on every build.
+- **`xcode-project use-profiles` runs after `xcodegen`** -- the project does not
+  exist during Codemagic's automatic pre-build signing step.
+- **Simulator name** -- picked at runtime, since names change each Xcode release.
+
+## Known limits of this setup
+
+- TestFlight builds expire after **90 days**.
+- Codemagic's free tier is ~500 macOS build minutes/month; each build here uses
+  roughly 6-10, plus the test workflow on every push.
+- No SwiftUI previews and no simulator. The `#Preview` blocks are in the source
+  so they work immediately if you ever get access to a Mac.
