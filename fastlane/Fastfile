@@ -63,14 +63,17 @@ platform :ios do
     UI.success("Info.plist carries every key App Store processing requires")
     # ITMS-90129: Apple rejects binaries whose bundle/display name collides
     # with an existing App Store app. Its own first-party names are the
-    # easiest to hit by accident.
-    reserved = ["Mail", "Messages", "Photos", "Notes", "Music", "Files", "Maps"]
-    name = plist[/<key>CFBundleDisplayName</key>s*<string>([^<]*)</string>/, 1]
-    if reserved.include?(name)
-      UI.user_error!("CFBundleDisplayName '#{name}' is an Apple first-party app name -- App Store Connect will reject this with ITMS-90129")
+    # easiest to hit by accident. plutil extracts the value directly -- no
+    # regex over XML, which is how the previous version of this guard broke.
+    reserved = ["Mail", "Messages", "Photos", "Notes", "Music", "Files", "Maps", "Calendar", "Weather"]
+    display_name = sh(
+      "unzip -p '#{ipa}' 'Payload/*.app/Info.plist' | plutil -extract CFBundleDisplayName raw -o - -",
+      log: false
+    ).strip
+    if reserved.include?(display_name)
+      UI.user_error!("CFBundleDisplayName #{display_name.inspect} is an Apple first-party app name -- App Store Connect rejects this with ITMS-90129")
     end
-    UI.success("Display name '#{name}' is not a reserved Apple name")
-
+    UI.success("Display name #{display_name.inspect} is not a reserved Apple name")
 
     upload_to_testflight(
       api_key: api_key,
