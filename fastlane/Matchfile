@@ -1,4 +1,4 @@
-git_url("git@github.com:abelabel16/email-app-ios-certs.git")
+git_url("git@github.com:skdksdcw68-dev/email-app-ios-certs.git")
 storage_mode("git")
 type("appstore")
 app_identifier(["emailapptest"])

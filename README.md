@@ -101,7 +101,7 @@ first run creates the certificate and profile):
 
 ```bash
 ssh-keygen -t ed25519 -f email-app-deploy-key -N ""
-gh repo deploy-key add email-app-deploy-key.pub -R abelabel16/email-app-ios-certs -w -t "email-app CI"
+gh repo deploy-key add email-app-deploy-key.pub -R skdksdcw68-dev/email-app-ios-certs -w -t "email-app CI"
 ```
 
 The private half becomes the `MATCH_GIT_PRIVATE_KEY` secret. Delete both local
@@ -119,15 +119,15 @@ files afterwards.
 ### 3. Repository secrets
 
 ```bash
-gh secret set APPLE_TEAM_ID                     -R abelabel16/email-app   # TDMFXRJYN7
-gh secret set APP_STORE_CONNECT_API_KEY_ID      -R abelabel16/email-app
-gh secret set APP_STORE_CONNECT_API_ISSUER_ID   -R abelabel16/email-app
-gh secret set MATCH_PASSWORD                    -R abelabel16/email-app   # invent one, store it
-gh secret set KEYCHAIN_PASSWORD                 -R abelabel16/email-app   # invent one
-gh secret set MATCH_GIT_PRIVATE_KEY             -R abelabel16/email-app < email-app-deploy-key
+gh secret set APPLE_TEAM_ID                     -R skdksdcw68-dev/email-app   # TDMFXRJYN7
+gh secret set APP_STORE_CONNECT_API_KEY_ID      -R skdksdcw68-dev/email-app
+gh secret set APP_STORE_CONNECT_API_ISSUER_ID   -R skdksdcw68-dev/email-app
+gh secret set MATCH_PASSWORD                    -R skdksdcw68-dev/email-app   # invent one, store it
+gh secret set KEYCHAIN_PASSWORD                 -R skdksdcw68-dev/email-app   # invent one
+gh secret set MATCH_GIT_PRIVATE_KEY             -R skdksdcw68-dev/email-app < email-app-deploy-key
 
 # base64, single line -- the Fastfile passes is_key_content_base64: true
-base64 -w0 AuthKey_XXXXXXXX.p8 | gh secret set APP_STORE_CONNECT_API_KEY_CONTENT -R abelabel16/email-app
+base64 -w0 AuthKey_XXXXXXXX.p8 | gh secret set APP_STORE_CONNECT_API_KEY_CONTENT -R skdksdcw68-dev/email-app
 ```
 
 `MATCH_PASSWORD` is the encryption password for the certs repo. Store it
@@ -142,7 +142,7 @@ tester.
 
 ```bash
 git push                       # -> compiles and runs tests
-gh workflow run ios-testflight.yml -R abelabel16/email-app   # -> TestFlight
+gh workflow run ios-testflight.yml -R skdksdcw68-dev/email-app   # -> TestFlight
 ```
 
 Roughly 10 minutes later the build appears in TestFlight on your phone.
