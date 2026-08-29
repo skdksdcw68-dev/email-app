@@ -84,59 +84,71 @@ The test workflow generates the project, compiles, and runs the unit tests with
 before any signing is set up -- which makes it the fast loop for "does this
 compile", the thing that cannot be checked on Windows.
 
-## One-time setup
+## Signing
 
-### 1. A dedicated certificates repo
+This app owns a **dedicated signing identity**, deliberately not shared with any
+other app on the team:
 
-Create a **private, empty** repo `email-app-ios-certs`.
+| | |
+|---|---|
+| Certificate | `iPhone Distribution: Abel Amare` (`2AVVD76TAA`, expires 2027-08-29) |
+| Profile | `email-app AppStore` (IOS_APP_STORE, `emailapptest`) |
 
-> Do **not** reuse `remi-ios-certs`. match re-encrypts the entire repo with
-> whatever `MATCH_PASSWORD` the running project supplies, so two projects
-> sharing one repo lock each other out. That is exactly what broke remi's
-> builds on 2026-08-26/28 and it surfaces as the misleading
-> `Invalid password passed via 'MATCH_PASSWORD'`.
+Both were created directly against the App Store Connect API and are delivered
+to CI as secrets. There is **no fastlane match**, no certificates repo, no shared
+`MATCH_PASSWORD`, and no SSH deploy key -- so no other project can ever
+re-encrypt or invalidate this app's signing.
 
-Generate a deploy key and register it on that repo **with write access** (the
-first run creates the certificate and profile):
+### Why the legacy certificate type
 
-```bash
-ssh-keygen -t ed25519 -f email-app-deploy-key -N ""
-gh repo deploy-key add email-app-deploy-key.pub -R skdksdcw68-dev/email-app-ios-certs -w -t "email-app CI"
-```
+Apple caps **Apple Distribution** certificates at **2 per account**, and both
+slots are held by other apps on this team. The legacy **iOS Distribution** type
+has a *separate* quota, so this app uses that. It signs App Store builds exactly
+the same way. This is why `code_sign_identity` is `"iPhone Distribution"` and
+not `"Apple Distribution"`.
 
-The private half becomes the `MATCH_GIT_PRIVATE_KEY` secret. Delete both local
-files afterwards.
+### Rotating the identity
 
-### 2. App Store Connect
-
-- **App record**: appstoreconnect.apple.com/apps -> **+** -> New App, bundle ID
-  `emailapptest`
-- **API key**: Users and Access -> Integrations -> Team Keys -> **+**, role
-  **App Manager**. Note the Key ID and Issuer ID, download the `.p8` once.
-- **TestFlight**: your app -> TestFlight -> Internal Testing -> **+**, add
-  yourself. Internal testers get builds with no App Review wait.
-
-### 3. Repository secrets
+When the certificate expires (2027-08-29), regenerate and re-upload:
 
 ```bash
-gh secret set APPLE_TEAM_ID                     -R skdksdcw68-dev/email-app   # TDMFXRJYN7
-gh secret set APP_STORE_CONNECT_API_KEY_ID      -R skdksdcw68-dev/email-app
-gh secret set APP_STORE_CONNECT_API_ISSUER_ID   -R skdksdcw68-dev/email-app
-gh secret set MATCH_PASSWORD                    -R skdksdcw68-dev/email-app   # invent one, store it
-gh secret set KEYCHAIN_PASSWORD                 -R skdksdcw68-dev/email-app   # invent one
-gh secret set MATCH_GIT_PRIVATE_KEY             -R skdksdcw68-dev/email-app < email-app-deploy-key
-
-# base64, single line -- the Fastfile passes is_key_content_base64: true
-base64 -w0 AuthKey_XXXXXXXX.p8 | gh secret set APP_STORE_CONNECT_API_KEY_CONTENT -R skdksdcw68-dev/email-app
+openssl genrsa -out key.pem 2048
+MSYS_NO_PATHCONV=1 openssl req -new -key key.pem -out req.csr   -subj "/CN=Email App Distribution/O=Abel Amare/C=US"
+# POST req.csr to /v1/certificates with certificateType IOS_DISTRIBUTION,
+# then POST a profile referencing it, then:
+openssl x509 -inform DER -in cert.der -out cert.pem
+MSYS_NO_PATHCONV=1 openssl pkcs12 -export -legacy   -inkey key.pem -in cert.pem -out identity.p12 -passout pass:YOURPASS
 ```
 
-`MATCH_PASSWORD` is the encryption password for the certs repo. Store it
-somewhere you will not lose it -- losing it means recreating the certificates.
+> `-legacy` is **required**. OpenSSL 3 defaults to AES-256 + SHA-256 for
+> PKCS#12, which macOS `security` cannot import -- it fails with
+> `MAC verification failed during PKCS12 import (wrong password?)`, which
+> misleadingly blames the password.
 
-### 4. On the iPhone 12 Pro Max
+Then update `BUILD_CERTIFICATE_BASE64` (base64 of the .p12), `P12_PASSWORD`,
+and `PROVISIONING_PROFILE_BASE64`.
 
-Install **TestFlight** and sign in with the Apple ID you added as an internal
-tester.
+## Repository secrets
+
+All 7 are already set. To recreate them:
+
+```bash
+R=skdksdcw68-dev/email-app
+gh secret set APPLE_TEAM_ID                   -R $R   # TDMFXRJYN7
+gh secret set APP_STORE_CONNECT_API_KEY_ID    -R $R
+gh secret set APP_STORE_CONNECT_API_ISSUER_ID -R $R
+gh secret set KEYCHAIN_PASSWORD               -R $R   # any random string, CI-local only
+base64 -w0 AuthKey_XXXXXXXXXX.p8 | gh secret set APP_STORE_CONNECT_API_KEY_CONTENT -R $R
+base64 -w0 identity.p12          | gh secret set BUILD_CERTIFICATE_BASE64          -R $R
+gh secret set P12_PASSWORD                    -R $R
+gh secret set PROVISIONING_PROFILE_BASE64     -R $R
+```
+
+## On the iPhone 12 Pro Max
+
+Install **TestFlight** and sign in with the Apple ID on this developer account.
+For builds to appear, add yourself to an Internal Testing group in App Store
+Connect (TestFlight -> Internal Testing -> +).
 
 ## Daily loop
 
@@ -149,21 +161,20 @@ Roughly 10 minutes later the build appears in TestFlight on your phone.
 
 ## Changing the bundle ID
 
-It appears in **four** places and all four must match:
+It appears in **three** places and all three must match:
 
 | File | Key |
 |---|---|
 | `project.yml` | `PRODUCT_BUNDLE_IDENTIFIER` |
 | `fastlane/Fastfile` | `BUNDLE_ID` |
 | `fastlane/Appfile` | `app_identifier` |
-| `fastlane/Matchfile` | `app_identifier` |
 
 ## Layout
 
 ```
 project.yml                  XcodeGen spec -- the "Xcode project"
 Gemfile                      fastlane, pinned to 2.237.0
-fastlane/                    Fastfile (beta lane), Appfile, Matchfile
+fastlane/                    Fastfile (beta lane), Appfile
 .github/workflows/           ios-tests.yml, ios-testflight.yml
 Support/Info.plist           generated by XcodeGen, do not edit
 Sources/EmailApp/
@@ -196,12 +207,13 @@ Tests/EmailAppTests/         17 unit tests over MailStore
 - **A dedicated CI keychain** -- the runner's default login keychain has no
   known password, so codesign raises a permission dialog that hangs forever on
   a headless machine. Carried over from remi, where it cost a debugging session.
-- **`profile_name` read from match's own return value** -- Apple appends a
-  numeric suffix when a profile of that name already exists, and a hardcoded
-  name breaks silently.
 - **Build numbers from `GITHUB_RUN_NUMBER`** -- App Store Connect rejects
   duplicates. Re-running a failed run reuses the number; bump
   `MARKETING_VERSION` instead.
+- **`openssl pkcs12 -export -legacy`** -- OpenSSL 3 otherwise writes AES-256 +
+  SHA-256, which macOS cannot import; the error blames the password.
+- **`security set-key-partition-list`** after import -- without it codesign
+  still raises a keychain prompt on first use of the key.
 - **`.gitattributes` forces LF** -- edited on Windows, run on macOS; a stray
   CRLF in a shell script breaks the runner.
 - **Simulator name picked at runtime** -- names change each Xcode release.
