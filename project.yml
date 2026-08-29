@@ -34,6 +34,15 @@ targets:
       path: Support/Info.plist
       properties:
         CFBundleDisplayName: Mail
+        # Xcode injects these automatically ONLY when it generates the
+        # Info.plist. GENERATE_INFOPLIST_FILE is NO here, so they must be
+        # declared by hand -- and without CFBundleIconName App Store Connect
+        # accepts the upload and then silently discards the build during
+        # processing (ITMS-90713), which looks exactly like "nothing happened".
+        CFBundleIconName: AppIcon
+        LSRequiresIPhoneOS: true
+        UIRequiredDeviceCapabilities:
+          - arm64
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
