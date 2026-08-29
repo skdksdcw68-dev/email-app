@@ -33,7 +33,14 @@ targets:
     info:
       path: Support/Info.plist
       properties:
-        CFBundleDisplayName: Mail
+        # NOT "Mail" -- that is Apple's own app and App Store Connect rejects
+        # the binary with ITMS-90129 ("bundle name or display name already
+        # taken"). The upload succeeds and the build is discarded during
+        # processing, so the only symptom is that nothing ever appears in
+        # TestFlight. This matches the app record registered on App Store
+        # Connect, which by definition cannot collide with anyone else.
+        CFBundleDisplayName: Email,testapp
+        CFBundleName: Email,testapp
         # Xcode injects these automatically ONLY when it generates the
         # Info.plist. GENERATE_INFOPLIST_FILE is NO here, so they must be
         # declared by hand -- and without CFBundleIconName App Store Connect
