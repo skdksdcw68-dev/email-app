@@ -1,0 +1,54 @@
+name: iOS Tests
+
+# Every push and PR. No signing, no secrets, no Apple credentials -- this is
+# purely "does it compile and do the tests pass", which is the fast feedback
+# loop when there is no Mac to build on locally.
+on:
+  push:
+  pull_request:
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # No .xcodeproj is committed -- it is generated from project.yml so the
+      # project file never has to be edited by hand on Windows.
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # Simulator names change with every Xcode release, so pick the newest
+      # available iPhone at runtime instead of pinning a name that will rot.
+      - name: Run unit tests
+        run: |
+          set -euo pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          runtimes = json.load(sys.stdin)['devices']
+          best = None
+          for runtime, devices in sorted(runtimes.items()):
+              if 'iOS' not in runtime:
+                  continue
+              for device in devices:
+                  if device['name'].startswith('iPhone'):
+                      best = device['name']
+          print(best)
+          ")
+          echo "Testing on: $DEVICE"
+          xcodebuild test \
+            -project EmailApp.xcodeproj \
+            -scheme EmailApp \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
+            CODE_SIGNING_ALLOWED=NO

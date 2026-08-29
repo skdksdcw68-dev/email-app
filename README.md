@@ -6,8 +6,16 @@ every message so you know what actually needs you.
 Built entirely from Windows. No Mac, no simulator.
 
 ```
-Windows (edit)  ->  GitHub (source)  ->  Codemagic (build + sign)  ->  TestFlight  ->  iPhone
+Windows (edit)  ->  GitHub (source + CI)  ->  fastlane match (signing)  ->  TestFlight  ->  iPhone
 ```
+
+Same pipeline as the `remi` repo: GitHub Actions on a `macos-15` runner,
+fastlane + match for signing, App Store Connect API key for auth. No Codemagic,
+no third-party CI, no Mac.
+
+The `.xcodeproj` is **not** committed. [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+generates it on the runner from `project.yml`, so the project file never has to
+be opened or edited by hand.
 
 ## The app
 
@@ -64,93 +72,99 @@ does not touch the UI.
 
 ---
 
+## CI
+
+| Workflow | Trigger | Needs secrets? |
+|---|---|---|
+| `.github/workflows/ios-tests.yml` | every push and PR | **No** |
+| `.github/workflows/ios-testflight.yml` | manual, Actions tab | Yes, all 7 |
+
+The test workflow generates the project, compiles, and runs the unit tests with
+`CODE_SIGNING_ALLOWED=NO`. It needs no Apple credentials at all, so it works
+before any signing is set up -- which makes it the fast loop for "does this
+compile", the thing that cannot be checked on Windows.
+
 ## One-time setup
 
-Everything below is done in a browser. None of it needs a Mac.
+### 1. A dedicated certificates repo
 
-### 1. Apple Developer portal
+Create a **private, empty** repo `email-app-ios-certs`.
 
-<https://developer.apple.com/account/resources/identifiers>
+> Do **not** reuse `remi-ios-certs`. match re-encrypts the entire repo with
+> whatever `MATCH_PASSWORD` the running project supplies, so two projects
+> sharing one repo lock each other out. That is exactly what broke remi's
+> builds on 2026-08-26/28 and it surfaces as the misleading
+> `Invalid password passed via 'MATCH_PASSWORD'`.
 
-- **Identifiers -> +** -> App IDs -> App
-- Description: `Mail`, Bundle ID (explicit): `com.abelamare.emailapp`
-- No capabilities needed yet. Register.
+Generate a deploy key and register it on that repo **with write access** (the
+first run creates the certificate and profile):
 
-### 2. App Store Connect -- app record
+```bash
+ssh-keygen -t ed25519 -f email-app-deploy-key -N ""
+gh repo deploy-key add email-app-deploy-key.pub -R abelabel16/email-app-ios-certs -w -t "email-app CI"
+```
 
-<https://appstoreconnect.apple.com/apps>
+The private half becomes the `MATCH_GIT_PRIVATE_KEY` secret. Delete both local
+files afterwards.
 
-- **+ -> New App**
-- Platform: iOS · Name: `Mail` (must be globally unique -- pick something else if taken)
-- Primary language, Bundle ID `com.abelamare.emailapp`, SKU: `emailapp` (any string)
+### 2. App Store Connect
 
-### 3. App Store Connect -- API key
+- **App record**: appstoreconnect.apple.com/apps -> **+** -> New App, bundle ID
+  `emailapptest`
+- **API key**: Users and Access -> Integrations -> Team Keys -> **+**, role
+  **App Manager**. Note the Key ID and Issuer ID, download the `.p8` once.
+- **TestFlight**: your app -> TestFlight -> Internal Testing -> **+**, add
+  yourself. Internal testers get builds with no App Review wait.
 
-<https://appstoreconnect.apple.com/access/integrations/api>
+### 3. Repository secrets
 
-- **Team Keys -> +**, name it `Codemagic`, Access: **App Manager**
-- Download the `.p8`. **You get exactly one download.** Store it safely.
-- Note the **Key ID** and the **Issuer ID** shown at the top of the page.
+```bash
+gh secret set APPLE_TEAM_ID                     -R abelabel16/email-app   # TDMFXRJYN7
+gh secret set APP_STORE_CONNECT_API_KEY_ID      -R abelabel16/email-app
+gh secret set APP_STORE_CONNECT_API_ISSUER_ID   -R abelabel16/email-app
+gh secret set MATCH_PASSWORD                    -R abelabel16/email-app   # invent one, store it
+gh secret set KEYCHAIN_PASSWORD                 -R abelabel16/email-app   # invent one
+gh secret set MATCH_GIT_PRIVATE_KEY             -R abelabel16/email-app < email-app-deploy-key
 
-> Never commit the `.p8`. `.gitignore` already blocks it.
+# base64, single line -- the Fastfile passes is_key_content_base64: true
+base64 -w0 AuthKey_XXXXXXXX.p8 | gh secret set APP_STORE_CONNECT_API_KEY_CONTENT -R abelabel16/email-app
+```
 
-### 4. TestFlight -- internal group
+`MATCH_PASSWORD` is the encryption password for the certs repo. Store it
+somewhere you will not lose it -- losing it means recreating the certificates.
 
-App Store Connect -> your app -> **TestFlight -> Internal Testing -> +**
+### 4. On the iPhone 12 Pro Max
 
-- Name the group exactly `Internal Testers` (this string is in `codemagic.yaml`)
-- Add yourself as a tester using your Apple ID email
-
-Internal testers get builds with **no App Review wait**.
-
-### 5. Codemagic
-
-<https://codemagic.io> -- sign in with GitHub, give it access to this repo.
-
-- **Teams -> Personal Account -> Integrations -> Developer Portal -> Add key**
-  - Name: `AppStoreConnectKey` (this string is in `codemagic.yaml`)
-  - Issuer ID, Key ID, and the `.p8` from step 3
-- Add the app, and let it use the `codemagic.yaml` in the repo.
-
-### 6. On the iPhone 12 Pro Max
-
-Install **TestFlight** from the App Store and sign in with the same Apple ID you
-added as an internal tester.
-
----
+Install **TestFlight** and sign in with the Apple ID you added as an internal
+tester.
 
 ## Daily loop
 
 ```bash
-git add -A
-git commit -m "..."
-git push            # any branch  -> runs tests
-git push origin main  # main       -> builds, signs, uploads to TestFlight
+git push                       # -> compiles and runs tests
+gh workflow run ios-testflight.yml -R abelabel16/email-app   # -> TestFlight
 ```
 
-Roughly 6-10 minutes later the build shows up in TestFlight on your phone.
-You get an email either way (success and failure are both configured).
-
----
+Roughly 10 minutes later the build appears in TestFlight on your phone.
 
 ## Changing the bundle ID
 
-It appears in **three** places and all three must match, or the build fails fast
-with a clear message from the `Check bundle id is in sync` step:
+It appears in **four** places and all four must match:
 
 | File | Key |
 |---|---|
 | `project.yml` | `PRODUCT_BUNDLE_IDENTIFIER` |
-| `codemagic.yaml` | `environment.ios_signing.bundle_identifier` |
-| `codemagic.yaml` | `environment.vars.BUNDLE_ID` |
-
----
+| `fastlane/Fastfile` | `BUNDLE_ID` |
+| `fastlane/Appfile` | `app_identifier` |
+| `fastlane/Matchfile` | `app_identifier` |
 
 ## Layout
 
 ```
 project.yml                  XcodeGen spec -- the "Xcode project"
-codemagic.yaml               CI: test workflow + TestFlight workflow
+Gemfile                      fastlane, pinned to 2.237.0
+fastlane/                    Fastfile (beta lane), Appfile, Matchfile
+.github/workflows/           ios-tests.yml, ios-testflight.yml
 Support/Info.plist           generated by XcodeGen, do not edit
 Sources/EmailApp/
   EmailAppApp.swift          @main -- starts disconnected
@@ -172,26 +186,29 @@ Sources/EmailApp/
 Tests/EmailAppTests/         17 unit tests over MailStore
 ```
 
----
-
 ## Gotchas already handled
 
-- **`ITSAppUsesNonExemptEncryption: false`** in `Info.plist` -- without it,
-  TestFlight blocks every build behind a manual export-compliance question.
+- **`ITSAppUsesNonExemptEncryption: false`** -- without it TestFlight blocks
+  every build behind a manual export-compliance question.
 - **App icon** -- a 1024x1024 PNG is required or the upload is rejected at
   validation, well after the build "succeeds".
-- **`UILaunchScreen`** -- without it the app renders letterboxed at a smaller
-  screen size.
-- **Build numbers** -- App Store Connect rejects duplicates, so CI sets it from
-  Codemagic's `PROJECT_BUILD_NUMBER` on every build.
-- **`xcode-project use-profiles` runs after `xcodegen`** -- the project does not
-  exist during Codemagic's automatic pre-build signing step.
-- **Simulator name** -- picked at runtime, since names change each Xcode release.
+- **`UILaunchScreen`** -- without it the app renders letterboxed.
+- **A dedicated CI keychain** -- the runner's default login keychain has no
+  known password, so codesign raises a permission dialog that hangs forever on
+  a headless machine. Carried over from remi, where it cost a debugging session.
+- **`profile_name` read from match's own return value** -- Apple appends a
+  numeric suffix when a profile of that name already exists, and a hardcoded
+  name breaks silently.
+- **Build numbers from `GITHUB_RUN_NUMBER`** -- App Store Connect rejects
+  duplicates. Re-running a failed run reuses the number; bump
+  `MARKETING_VERSION` instead.
+- **`.gitattributes` forces LF** -- edited on Windows, run on macOS; a stray
+  CRLF in a shell script breaks the runner.
+- **Simulator name picked at runtime** -- names change each Xcode release.
 
-## Known limits of this setup
+## Known limits
 
 - TestFlight builds expire after **90 days**.
-- Codemagic's free tier is ~500 macOS build minutes/month; each build here uses
-  roughly 6-10, plus the test workflow on every push.
-- No SwiftUI previews and no simulator. The `#Preview` blocks are in the source
-  so they work immediately if you ever get access to a Mac.
+- No SwiftUI previews and no simulator on Windows. The `#Preview` blocks are in
+  the source so they work immediately on any Mac.
+- The Gmail connection is stubbed (see **Current state** above).

@@ -1,0 +1,15 @@
+git_url("git@github.com:abelabel16/email-app-ios-certs.git")
+storage_mode("git")
+type("appstore")
+app_identifier(["emailapptest"])
+
+# Auth is via the App Store Connect API key set up in the Fastfile (api_key
+# lane variable) -- match never needs an Apple ID/password either.
+
+# DEDICATED REPO, deliberately. match re-encrypts the ENTIRE certificates
+# repo with whatever MATCH_PASSWORD the running project supplies, so two
+# projects sharing one repo will silently lock each other out -- this exact
+# failure hit remi on 2026-08-26/28 when a drobe build re-encrypted their
+# shared repo, and surfaced as the misleading "Invalid password passed via
+# 'MATCH_PASSWORD'". email-app gets its own repo, its own MATCH_PASSWORD,
+# and its own deploy key. Never point this at remi-ios-certs.
