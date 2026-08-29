@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The row of AI tag chips pinned under the navigation bar.
 /// Tapping the selected chip clears the filter.
@@ -41,18 +42,22 @@ private struct Chip: View {
             HStack(spacing: 5) {
                 Image(systemName: tag.systemImage)
                     .font(.caption2.weight(.bold))
+                    // Unselected: colour lives on the glyph so the label stays
+                    // readable. Selected: the capsule is the colour, so the
+                    // glyph takes the contrasting foreground.
+                    .foregroundStyle(isSelected ? tag.onColor : tag.color)
                 Text(tag.title)
                     .font(.footnote.weight(.medium))
+                    .foregroundStyle(isSelected ? tag.onColor : Color.primary)
                 Text("\(count)")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(isSelected ? Color.white.opacity(0.75) : tag.color.opacity(0.65))
+                    .foregroundStyle(isSelected ? tag.onColor.opacity(0.7) : Color.secondary)
             }
-            .foregroundStyle(isSelected ? Color.white : tag.color)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background {
                 Capsule()
-                    .fill(isSelected ? tag.color : tag.color.opacity(0.12))
+                    .fill(isSelected ? tag.color : Color(uiColor: .secondarySystemFill))
             }
         }
         .buttonStyle(.plain)
@@ -71,4 +76,8 @@ private struct PreviewHost: View {
     var body: some View {
         TagFilterBar(tags: AITag.allCases, count: { _ in 3 }, selection: $selection)
     }
+}
+
+#Preview("Dark") {
+    PreviewHost().preferredColorScheme(.dark)
 }

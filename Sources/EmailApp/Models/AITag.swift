@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A label the AI assigns to a message after it reads the thread.
 /// The user filters the inbox by tapping these at the top of the list.
@@ -31,16 +32,22 @@ enum AITag: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// Deliberately darker than the system colours -- these are drawn as text on
-    /// a tinted capsule, and `.yellow` on light yellow is unreadable.
+    /// Apple system colours, not fixed hex. These are dynamic -- UIKit shifts
+    /// each one between light and dark mode so contrast holds in both.
     var color: Color {
         switch self {
-        case .urgent:         Color(red: 0.84, green: 0.16, blue: 0.16)
-        case .veryImportant:  Color(red: 0.87, green: 0.45, blue: 0.05)
-        case .important:      Color(red: 0.72, green: 0.53, blue: 0.04)
-        case .needsReply:     Color(red: 0.11, green: 0.42, blue: 0.85)
-        case .noReplyNeeded:  Color(red: 0.13, green: 0.55, blue: 0.33)
+        case .urgent:         Color(uiColor: .systemRed)
+        case .veryImportant:  Color(uiColor: .systemOrange)
+        case .important:      Color(uiColor: .systemYellow)
+        case .needsReply:     Color(uiColor: .systemBlue)
+        case .noReplyNeeded:  Color(uiColor: .systemGreen)
         }
+    }
+
+    /// Readable foreground when `color` is used as a fill. System yellow is
+    /// light enough that white on it fails contrast in both modes; black holds.
+    var onColor: Color {
+        self == .important ? .black : .white
     }
 
     /// How loud the tag is. Lower sorts first; `nil` means it says nothing
