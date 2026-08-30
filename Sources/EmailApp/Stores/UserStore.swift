@@ -21,7 +21,6 @@ final class UserStore {
     private(set) var account: AppAccount?
     /// Answers keyed by question id. A single-select question holds one value.
     private(set) var answers: [String: Set<String>]
-    private(set) var isWorking = false
 
     private let defaults: UserDefaults
 
@@ -137,20 +136,25 @@ final class UserStore {
 
     // MARK: - Account
 
-    /// Real Sign in with Apple. `userID` is Apple's stable identifier for this
-    /// person and arrives every time; `email` and `fullName` arrive **only on
-    /// the first authorization**, so anything already stored wins over a nil.
+    /// Records a completed sign-in and moves the flow on.
     ///
-    /// Revoking the app in Settings and signing in again makes Apple treat it
-    /// as a first authorization once more.
-    func signInWithApple(userID: String, email: String?, fullName: PersonNameComponents?) {
-        let formattedName = fullName.map { PersonNameComponentsFormatter().string(from: $0) }
-            .flatMap { $0.isEmpty ? nil : $0 }
-
+    /// Deliberately takes plain values rather than a Supabase `User`, so the
+    /// store stays free of the auth SDK and remains testable without a network.
+    /// The view does the mapping.
+    ///
+    /// A nil email or name never overwrites something already stored: Apple
+    /// volunteers both **only on the first authorization**, and every later
+    /// sign-in carries the identifier alone.
+    func completeSignIn(
+        userID: String,
+        email: String?,
+        displayName: String?,
+        provider: AppAccount.Provider
+    ) {
         account = AppAccount(
-            email: email ?? account?.email ?? "Hidden by Apple",
-            displayName: formattedName ?? account?.displayName ?? "You",
-            provider: .apple,
+            email: email ?? account?.email ?? "Hidden by provider",
+            displayName: displayName ?? account?.displayName ?? "You",
+            provider: provider,
             createdAt: account?.createdAt ?? .now,
             externalID: userID
         )
@@ -158,22 +162,13 @@ final class UserStore {
         next()
     }
 
-    /// Stubbed sign-up, still used by Google. Real Google auth replaces the
-    /// body once a Cloud client ID exists; nothing outside this changes.
-    func createAccount(with provider: AppAccount.Provider) async {
-        guard !isWorking else { return }
-        isWorking = true
-        try? await Task.sleep(for: .seconds(0.9))
+    /// Convenience for Apple, which hands back `PersonNameComponents`.
+    func signInWithApple(userID: String, email: String?, fullName: PersonNameComponents?) {
+        let formatted = fullName
+            .map { PersonNameComponentsFormatter().string(from: $0) }
+            .flatMap { $0.isEmpty ? nil : $0 }
 
-        account = AppAccount(
-            email: "abelamare1633@gmail.com",
-            displayName: "Abel Amare",
-            provider: provider,
-            createdAt: .now
-        )
-        persistAccount()
-        isWorking = false
-        next()
+        completeSignIn(userID: userID, email: email, displayName: formatted, provider: .apple)
     }
 
     func signOut() {

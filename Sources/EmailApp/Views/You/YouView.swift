@@ -53,6 +53,9 @@ struct YouView: View {
                 Button("Sign out", role: .destructive) {
                     mail.disconnect()
                     user.signOut()
+                    // Ends the Supabase session as well; clearing only the
+                    // local copy would leave the device still authenticated.
+                    Task { await AuthService.signOut() }
                 }
             } message: {
                 Text("This clears your account and your AI preferences on this device.")

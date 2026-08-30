@@ -14,12 +14,25 @@ settings:
     MARKETING_VERSION: "1.0"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 
+packages:
+  Supabase:
+    url: https://github.com/supabase/supabase-swift
+    from: 2.0.0
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS
+    from: 7.1.0
+
 targets:
   EmailApp:
     type: application
     platform: iOS
     sources:
       - path: Sources/EmailApp
+    dependencies:
+      - package: Supabase
+        product: Supabase
+      - package: GoogleSignIn
+        product: GoogleSignIn
     settings:
       base:
         # Registered on the Developer Portal under team TDMFXRJYN7.
@@ -63,6 +76,13 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # Google Sign-In. GIDClientID is read by the SDK at launch, and the
+        # URL scheme is the client id with its dot-separated parts reversed --
+        # Google redirects back to the app through it.
+        GIDClientID: 154867130799-b46o1m27n9pnpe345urr9sv5sg24hc89.apps.googleusercontent.com
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - com.googleusercontent.apps.154867130799-b46o1m27n9pnpe345urr9sv5sg24hc89
         # Declares no non-exempt encryption. Without this TestFlight blocks
         # every build behind a manual export-compliance question.
         ITSAppUsesNonExemptEncryption: false

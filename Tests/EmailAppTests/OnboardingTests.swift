@@ -181,12 +181,13 @@ final class OnboardingTests: XCTestCase {
 
     // MARK: - Account and persistence
 
-    func testCreatingAnAccountMovesToConnectInbox() async {
+    func testCompletingSignInMovesToConnectInbox() {
         let store = makeStore(startAt: .createAccount)
-        await store.createAccount(with: .apple)
+        store.completeSignIn(userID: "u1", email: "a@b.com", displayName: "Abel", provider: .google)
 
         XCTAssertNotNil(store.account)
-        XCTAssertEqual(store.account?.provider, .apple)
+        XCTAssertEqual(store.account?.provider, .google)
+        XCTAssertEqual(store.account?.externalID, "u1")
         XCTAssertEqual(store.phase, .connectInbox)
     }
 
@@ -255,9 +256,9 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(store.account?.displayName, "You")
     }
 
-    func testSignOutClearsEverythingAndReturnsToWelcome() async {
+    func testSignOutClearsEverythingAndReturnsToWelcome() {
         let store = makeStore(startAt: .createAccount)
-        await store.createAccount(with: .google)
+        store.completeSignIn(userID: "u1", email: "a@b.com", displayName: "Abel", provider: .google)
         store.finish()
 
         store.signOut()

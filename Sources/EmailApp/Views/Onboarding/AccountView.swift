@@ -7,6 +7,8 @@ import AuthenticationServices
 /// This is the *app* account -- identity, subscription, AI preferences. It is
 /// deliberately a separate step from connecting Gmail, which only grants
 /// mailbox access. See `AppAccount`.
+///
+/// All three providers are real, and all three end at a Supabase session.
 struct AccountView: View {
     enum Mode {
         case create, signIn
@@ -40,9 +42,11 @@ struct AccountView: View {
 
     @State private var pending: AppAccount.Provider?
     @State private var authError: String?
+    @State private var isShowingEmail = false
+    /// The raw nonce for the in-flight Apple request; Supabase needs it to
+    /// verify the hash Apple embedded in the identity token.
+    @State private var appleNonce: String?
 
-    /// Every button is this tall and this round, Apple's included, so the stack
-    /// reads as one set rather than three unrelated controls.
     private let buttonHeight: CGFloat = 52
     private let buttonRadius: CGFloat = 14
 
@@ -65,8 +69,10 @@ struct AccountView: View {
 
             VStack(spacing: 11) {
                 appleButton
-                providerButton(.google) { GoogleGlyph() }
-                providerButton(.email) {
+
+                providerButton(.google, action: signInWithGoogle) { GoogleGlyph() }
+
+                providerButton(.email, action: { isShowingEmail = true }) {
                     Image(systemName: "envelope.fill")
                         .font(.system(size: 17))
                         .foregroundStyle(.tint)
@@ -92,29 +98,29 @@ struct AccountView: View {
                 .padding(.horizontal, 32)
                 .padding(.bottom, 8)
         }
+        .sheet(isPresented: $isShowingEmail) {
+            EmailAuthView(mode: mode)
+        }
     }
+
+    // MARK: - Apple
 
     /// Apple's own control, which their guidelines require -- it owns the
     /// sheet, the localisation and the light/dark treatment. Its default corner
-    /// radius is much tighter than the buttons beneath it, so it is clipped to
-    /// match rather than left looking like a different control.
+    /// radius is tighter than the buttons beneath it, so it is clipped to match.
     private var appleButton: some View {
         SignInWithAppleButton(mode == .create ? .signUp : .signIn) { request in
+            let nonce = AuthService.makeNonce()
+            appleNonce = nonce
             request.requestedScopes = [.fullName, .email]
+            // Apple embeds this hash in the identity token; Supabase compares
+            // it against the raw nonce we send. Without it a stolen token is
+            // replayable.
+            request.nonce = AuthService.sha256(nonce)
         } onCompletion: { result in
             switch result {
             case .success(let authorization):
-                guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else {
-                    authError = "Apple returned an unexpected credential."
-                    return
-                }
-                authError = nil
-                user.signInWithApple(
-                    userID: credential.user,
-                    email: credential.email,
-                    fullName: credential.fullName
-                )
-
+                handleApple(authorization)
             case .failure(let error):
                 // Cancelling is not an error worth showing.
                 if (error as? ASAuthorizationError)?.code == .canceled { return }
@@ -124,23 +130,81 @@ struct AccountView: View {
         .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
         .frame(height: buttonHeight)
         .clipShape(RoundedRectangle(cornerRadius: buttonRadius, style: .continuous))
+        .disabled(pending != nil)
     }
 
-    /// Google and email are still stubs. Google needs a Cloud project and an
-    /// iOS OAuth client id; email needs a backend. Both go through
-    /// `UserStore.createAccount`, so wiring either one up is a change in that
-    /// method and nowhere else.
+    private func handleApple(_ authorization: ASAuthorization) {
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let tokenData = credential.identityToken,
+              let idToken = String(data: tokenData, encoding: .utf8),
+              let nonce = appleNonce
+        else {
+            authError = "Apple did not return a usable identity token."
+            return
+        }
+
+        // Apple sends the name only on the first authorization, so capture it
+        // here rather than relying on Supabase metadata later.
+        let name = credential.fullName
+            .map { PersonNameComponentsFormatter().string(from: $0) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+
+        authError = nil
+        pending = .apple
+        Task {
+            do {
+                let supabaseUser = try await AuthService.signInWithApple(idToken: idToken, nonce: nonce)
+                user.completeSignIn(
+                    userID: supabaseUser.id.uuidString,
+                    email: supabaseUser.email ?? credential.email,
+                    displayName: name ?? supabaseUser.displayNameFromMetadata,
+                    provider: .apple
+                )
+            } catch {
+                authError = error.localizedDescription
+            }
+            pending = nil
+        }
+    }
+
+    // MARK: - Google
+
+    private func signInWithGoogle() {
+        authError = nil
+        pending = .google
+        Task {
+            do {
+                let supabaseUser = try await AuthService.signInWithGoogle()
+                user.completeSignIn(
+                    userID: supabaseUser.id.uuidString,
+                    email: supabaseUser.email,
+                    displayName: supabaseUser.displayNameFromMetadata,
+                    provider: .google
+                )
+            } catch {
+                // The SDK throws on a user-cancelled sheet too; that is not
+                // worth a red error line.
+                if !isCancellation(error) {
+                    authError = error.localizedDescription
+                }
+            }
+            pending = nil
+        }
+    }
+
+    private func isCancellation(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == "com.google.GIDSignIn" && nsError.code == -5
+    }
+
+    // MARK: - Chrome
+
     private func providerButton<Glyph: View>(
         _ provider: AppAccount.Provider,
+        action: @escaping () -> Void,
         @ViewBuilder glyph: () -> Glyph
     ) -> some View {
-        Button {
-            pending = provider
-            Task {
-                await user.createAccount(with: provider)
-                pending = nil
-            }
-        } label: {
+        Button(action: action) {
             Group {
                 if pending == provider {
                     ProgressView()

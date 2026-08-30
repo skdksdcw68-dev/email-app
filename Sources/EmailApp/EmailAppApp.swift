@@ -1,9 +1,11 @@
 import SwiftUI
+import GoogleSignIn
 
 @main
 struct EmailAppApp: App {
     /// Onboarding state persists, so a returning user launches straight into
-    /// the app. The mail store starts empty until an inbox is connected.
+    /// the app after the splash. The mail store starts empty until an inbox is
+    /// connected.
     @State private var user = UserStore()
     @State private var mail = MailStore()
 
@@ -12,6 +14,11 @@ struct EmailAppApp: App {
             RootView()
                 .environment(user)
                 .environment(mail)
+                // Google redirects back through the reversed-client-id URL
+                // scheme declared in Info.plist; the SDK completes the flow.
+                .onOpenURL { url in
+                    GIDSignIn.sharedInstance.handle(url)
+                }
         }
     }
 }
