@@ -30,6 +30,11 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Manual
+        # Sign in with Apple. The App ID carries APPLE_ID_AUTH and the
+        # provisioning profile was regenerated afterwards, so the profile
+        # grants this -- a profile minted before the capability would fail
+        # to sign.
+        CODE_SIGN_ENTITLEMENTS: Support/EmailApp.entitlements
     info:
       path: Support/Info.plist
       properties:

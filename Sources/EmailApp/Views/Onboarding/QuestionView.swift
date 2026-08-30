@@ -34,37 +34,37 @@ struct QuestionView: View {
             .controlSize(.large)
             .disabled(!user.canContinue(from: question))
             .padding(.horizontal, 20)
-            .padding(.top, 12)
+            .padding(.top, 10)
             .padding(.bottom, 8)
         }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             if let progress = user.questionProgress {
                 ProgressView(value: progress)
                     .tint(Color.accentColor)
-                    .padding(.bottom, 4)
+                    .padding(.bottom, 2)
             }
 
             Text(question.title)
-                .font(.title2.bold())
+                .font(.title3.bold())
                 .fixedSize(horizontal: false, vertical: true)
 
             if let subtitle = question.subtitle {
                 Text(subtitle)
-                    .font(.subheadline)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 16)
+        .padding(.bottom, 12)
     }
 
     private var grid: some View {
         LazyVGrid(
-            columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
-            spacing: 10
+            columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+            spacing: 8
         ) {
             ForEach(question.options) { option in
                 OptionTile(option: option, isSelected: selected.contains(option.id)) {
@@ -77,7 +77,7 @@ struct QuestionView: View {
     }
 
     private var list: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 7) {
             ForEach(question.options) { option in
                 OptionRow(option: option, isSelected: selected.contains(option.id)) {
                     toggle(option)
@@ -97,6 +97,8 @@ struct QuestionView: View {
 
 // MARK: - Option chrome
 
+/// Compact on purpose: some questions offer sixteen of these, so a tall tile
+/// turns the screen into a scroll marathon.
 private struct OptionTile: View {
     let option: OnboardingQuestion.Option
     let isSelected: Bool
@@ -104,21 +106,23 @@ private struct OptionTile: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                if let symbol = option.symbol {
-                    Image(systemName: symbol)
-                        .font(.title3)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
-                }
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: option.symbol)
+                    .font(.system(size: 14, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+                    .frame(width: 18, alignment: .leading)
+
                 Text(option.label)
-                    .font(.subheadline.weight(.medium))
+                    .font(.footnote.weight(.medium))
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, minHeight: option.symbol == nil ? 56 : 92, alignment: .topLeading)
-            .padding(12)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .topLeading)
             .background(background)
         }
         .buttonStyle(.plain)
@@ -126,11 +130,11 @@ private struct OptionTile: View {
     }
 
     private var background: some View {
-        RoundedRectangle(cornerRadius: 14)
+        RoundedRectangle(cornerRadius: 12)
             .fill(isSelected ? Color.accentColor.opacity(0.14) : Color(uiColor: .secondarySystemBackground))
             .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1.5)
             }
     }
 }
@@ -142,25 +146,31 @@ private struct OptionRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            HStack(spacing: 11) {
+                Image(systemName: option.symbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+                    .frame(width: 22)
+
                 Text(option.label)
-                    .font(.body)
+                    .font(.subheadline)
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
+                    .font(.body)
                     .foregroundStyle(isSelected ? Color.accentColor : Color(uiColor: .tertiaryLabel))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
             .background {
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: 12)
                     .fill(isSelected ? Color.accentColor.opacity(0.14) : Color(uiColor: .secondarySystemBackground))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 14)
-                            .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1.5)
                     }
             }
         }
@@ -170,8 +180,8 @@ private struct OptionRow: View {
 }
 
 #Preview("Grid") {
-    QuestionView(question: .role)
-        .environment(UserStore(defaults: .previews, startAt: .question(0)))
+    QuestionView(question: .priorities)
+        .environment(UserStore(defaults: .previews, startAt: .question(2)))
 }
 
 #Preview("List") {

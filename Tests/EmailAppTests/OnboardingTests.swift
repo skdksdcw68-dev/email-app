@@ -114,10 +114,23 @@ final class OnboardingTests: XCTestCase {
 
     // MARK: - Flow
 
-    func testSplashLeadsToWelcome() {
+    func testSplashLeadsToWelcomeForANewUser() {
         let store = makeStore(startAt: .splash)
         store.advanceFromSplash()
         XCTAssertEqual(store.phase, .welcome)
+    }
+
+    func testEveryLaunchStartsOnTheSplash() {
+        let suite = "maily.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+
+        let first = UserStore(defaults: defaults, startAt: .connectInbox)
+        first.next()
+        XCTAssertEqual(first.phase, .finished)
+
+        // A returning user still gets the brand moment on a cold launch.
+        let relaunched = UserStore(defaults: defaults)
+        XCTAssertEqual(relaunched.phase, .splash)
     }
 
     func testGetStartedEntersTheQuestions() {
@@ -189,7 +202,7 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(relaunched.selections(for: q), [q.options[2].id])
     }
 
-    func testAReturningUserSkipsOnboardingEntirely() {
+    func testAReturningUserLandsInTheAppAfterTheSplash() {
         let suite = "maily.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
 
@@ -197,9 +210,49 @@ final class OnboardingTests: XCTestCase {
         first.next()
         XCTAssertEqual(first.phase, .finished)
 
-        // No explicit start phase: this is what a cold launch does.
+        // Cold launch: splash first, then straight into the app -- never back
+        // through onboarding.
         let relaunched = UserStore(defaults: defaults)
+        relaunched.advanceFromSplash()
         XCTAssertEqual(relaunched.phase, .finished)
+    }
+
+    // MARK: - Sign in with Apple
+
+    func testAppleSignInStoresTheIdentifierAndMovesOn() {
+        let store = makeStore(startAt: .createAccount)
+        var name = PersonNameComponents()
+        name.givenName = "Abel"
+        name.familyName = "Amare"
+
+        store.signInWithApple(userID: "001234.abc", email: "abel@example.com", fullName: name)
+
+        XCTAssertEqual(store.account?.externalID, "001234.abc")
+        XCTAssertEqual(store.account?.email, "abel@example.com")
+        XCTAssertEqual(store.account?.provider, .apple)
+        XCTAssertEqual(store.phase, .connectInbox)
+    }
+
+    /// Apple sends name and email only on the first authorization; every later
+    /// sign-in carries the identifier alone.
+    func testLaterAppleSignInKeepsTheStoredNameAndEmail() {
+        let store = makeStore(startAt: .createAccount)
+        var name = PersonNameComponents()
+        name.givenName = "Abel"
+
+        store.signInWithApple(userID: "001234.abc", email: "abel@example.com", fullName: name)
+        store.signInWithApple(userID: "001234.abc", email: nil, fullName: nil)
+
+        XCTAssertEqual(store.account?.email, "abel@example.com")
+        XCTAssertEqual(store.account?.displayName, "Abel")
+    }
+
+    func testAppleSignInWithNothingStillProducesAnAccount() {
+        let store = makeStore(startAt: .createAccount)
+        store.signInWithApple(userID: "001234.xyz", email: nil, fullName: nil)
+
+        XCTAssertEqual(store.account?.email, "Hidden by Apple")
+        XCTAssertEqual(store.account?.displayName, "You")
     }
 
     func testSignOutClearsEverythingAndReturnsToWelcome() async {

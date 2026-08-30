@@ -3,32 +3,31 @@ import UIKit
 
 /// The Inbox tab, which is also the home screen.
 ///
-/// There is deliberately no separate "Home" tab: Apple's own guidance warns
-/// against a Home tab when another tab already holds the main content. Opening
-/// Maily should immediately answer "what needs me?", so the briefing sits above
-/// the mail rather than beside it.
+/// There is deliberately no separate "Home" tab: the Inbox already holds the
+/// main content, and Apple warns against a redundant Home beside it.
 ///
-/// The briefing hides while searching or filtering -- at that point the user has
-/// asked a specific question and wants results, not a summary.
+/// The briefing above the mail is deliberately tiny -- a status line, the
+/// counts, and a single row for anything that needs a person. Listing the
+/// urgent mail inline just duplicated the inbox underneath it, so that row
+/// links out to a dedicated screen instead.
 struct InboxHomeView: View {
     @Environment(MailStore.self) private var mail
-    @Environment(UserStore.self) private var user
 
     @State private var mailbox: Mailbox = .inbox
     @State private var tag: AITag?
-    @State private var query = ""
     @State private var isComposing = false
+    @State private var isSearching = false
 
-    private var isBrowsing: Bool { query.isEmpty && tag == nil && mailbox == .inbox }
-    private var messages: [Message] { mail.messages(in: mailbox, tag: tag, matching: query) }
+    private var isBrowsing: Bool { tag == nil && mailbox == .inbox }
+    private var messages: [Message] { mail.messages(in: mailbox, tag: tag) }
     private var availableTags: [AITag] { mail.availableTags(in: mailbox) }
+    private var attention: [Message] { mail.needsAttention(limit: .max) }
 
     var body: some View {
         List {
             if isBrowsing {
                 briefing
-                needsAttention
-                recommendations
+                attentionRow
                 yourDay
             }
 
@@ -46,7 +45,6 @@ struct InboxHomeView: View {
         .listStyle(.insetGrouped)
         .navigationTitle(isBrowsing ? "Maily" : mailbox.title)
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $query, prompt: "Search mail")
         .safeAreaInset(edge: .top, spacing: 0) {
             if !availableTags.isEmpty {
                 TagFilterBar(
@@ -56,6 +54,7 @@ struct InboxHomeView: View {
                 )
             }
         }
+        .overlay(alignment: .bottomTrailing) { composeButton }
         .overlay {
             if messages.isEmpty && !isBrowsing {
                 emptyState
@@ -76,9 +75,9 @@ struct InboxHomeView: View {
 
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    isComposing = true
+                    isSearching = true
                 } label: {
-                    Label("Compose", systemImage: "square.and.pencil")
+                    Label("Search", systemImage: "magnifyingglass")
                 }
             }
         }
@@ -86,6 +85,7 @@ struct InboxHomeView: View {
             if let tag, mail.count(of: tag, in: newValue) == 0 { self.tag = nil }
         }
         .sheet(isPresented: $isComposing) { ComposeView() }
+        .sheet(isPresented: $isSearching) { SearchView() }
     }
 
     // MARK: - Briefing
@@ -93,73 +93,55 @@ struct InboxHomeView: View {
     private var briefing: some View {
         Section {
             VStack(alignment: .leading, spacing: 10) {
-                Text(greeting)
-                    .font(.title2.bold())
-
                 Text(mail.inboxStatus)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(.subheadline.weight(.medium))
 
                 CountsStrip(counts: mail.counts)
-                    .padding(.top, 4)
             }
-            .padding(.vertical, 6)
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 12, trailing: 4))
+            .padding(.vertical, 4)
         }
     }
 
-    private var greeting: String {
-        guard let name = user.account?.displayName.split(separator: " ").first else {
-            return Date.greeting
-        }
-        return "\(Date.greeting), \(name)"
-    }
-
+    /// One row, not a list. Tapping it opens the full set -- the point is to
+    /// say "something needs you" without reprinting the inbox.
     @ViewBuilder
-    private var needsAttention: some View {
-        let items = mail.needsAttention()
-        if !items.isEmpty {
-            Section("Needs your attention") {
-                ForEach(items) { message in
-                    NavigationLink(value: message.id) {
-                        AttentionCard(message: message)
-                    }
-                }
-            }
-        }
-    }
+    private var attentionRow: some View {
+        if !attention.isEmpty {
+            Section {
+                NavigationLink {
+                    AttentionListView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(Color(uiColor: .systemRed))
+                            .frame(width: 28)
 
-    @ViewBuilder
-    private var recommendations: some View {
-        let items = mail.recommendations
-        if !items.isEmpty {
-            Section("Maily recommends") {
-                ForEach(items) { recommendation in
-                    Button {
-                        withAnimation(.snappy(duration: 0.2)) { tag = recommendation.tag }
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: recommendation.symbol)
-                                .font(.title3)
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(.tint)
-                                .frame(width: 28)
-
-                            Text(recommendation.text)
-                                .font(.subheadline)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(attentionTitle)
+                                .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.primary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            Text(recommendation.actionLabel)
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.tint)
+                            Text(attentionDetail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
-                        .padding(.vertical, 2)
                     }
+                    .padding(.vertical, 3)
                 }
             }
         }
+    }
+
+    private var attentionTitle: String {
+        attention.count == 1
+            ? "1 email needs your attention"
+            : "\(attention.count) emails need your attention"
+    }
+
+    private var attentionDetail: String {
+        attention.prefix(2).map(\.sender.name).joined(separator: ", ")
+            + (attention.count > 2 ? " and others" : "")
     }
 
     @ViewBuilder
@@ -189,6 +171,23 @@ struct InboxHomeView: View {
         }
     }
 
+    private var composeButton: some View {
+        Button {
+            isComposing = true
+        } label: {
+            Image(systemName: "square.and.pencil")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 54, height: 54)
+                .background(Circle().fill(Color.accentColor))
+                .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 20)
+        .padding(.bottom, 20)
+        .accessibilityLabel("Compose")
+    }
+
     @ViewBuilder
     private var emptyState: some View {
         if let tag {
@@ -197,8 +196,6 @@ struct InboxHomeView: View {
                 systemImage: tag.systemImage,
                 description: Text("Nothing in \(mailbox.title) is tagged \(tag.title).")
             )
-        } else if !query.isEmpty {
-            ContentUnavailableView.search(text: query)
         } else {
             ContentUnavailableView(
                 "No Messages",
@@ -242,29 +239,6 @@ private struct CountsStrip: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-    }
-}
-
-private struct AttentionCard: View {
-    let message: Message
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                if let priority = message.topPriority {
-                    TagBadge(tag: priority)
-                }
-                Text("\(message.sender.name) · \(message.subject)")
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-            }
-
-            Text(message.aiSummary ?? message.preview)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-        }
-        .padding(.vertical, 3)
     }
 }
 

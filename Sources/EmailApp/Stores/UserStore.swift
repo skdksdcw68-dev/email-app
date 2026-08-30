@@ -30,14 +30,9 @@ final class UserStore {
         self.answers = Self.loadAnswers(from: defaults)
         self.account = Self.loadAccount(from: defaults)
 
-        if let phase {
-            self.phase = phase
-        } else if defaults.bool(forKey: Key.completed) {
-            // A returning user never sees onboarding again.
-            self.phase = .finished
-        } else {
-            self.phase = .splash
-        }
+        // The splash shows on every launch, not only the first, so it is always
+        // the starting phase. `advanceFromSplash` decides where to go next.
+        self.phase = phase ?? .splash
     }
 
     // MARK: - Questions
@@ -86,9 +81,11 @@ final class UserStore {
 
     // MARK: - Flow
 
+    /// A returning user still sees the splash -- they just land in the app
+    /// rather than in onboarding when it finishes.
     func advanceFromSplash() {
         guard phase == .splash else { return }
-        phase = .welcome
+        phase = defaults.bool(forKey: Key.completed) ? .finished : .welcome
     }
 
     func startOnboarding() {
@@ -140,8 +137,29 @@ final class UserStore {
 
     // MARK: - Account
 
-    /// Stubbed sign-up. Real Apple/Google/email auth replaces the body; nothing
-    /// outside this method needs to change.
+    /// Real Sign in with Apple. `userID` is Apple's stable identifier for this
+    /// person and arrives every time; `email` and `fullName` arrive **only on
+    /// the first authorization**, so anything already stored wins over a nil.
+    ///
+    /// Revoking the app in Settings and signing in again makes Apple treat it
+    /// as a first authorization once more.
+    func signInWithApple(userID: String, email: String?, fullName: PersonNameComponents?) {
+        let formattedName = fullName.map { PersonNameComponentsFormatter().string(from: $0) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+
+        account = AppAccount(
+            email: email ?? account?.email ?? "Hidden by Apple",
+            displayName: formattedName ?? account?.displayName ?? "You",
+            provider: .apple,
+            createdAt: account?.createdAt ?? .now,
+            externalID: userID
+        )
+        persistAccount()
+        next()
+    }
+
+    /// Stubbed sign-up, still used by Google. Real Google auth replaces the
+    /// body once a Cloud client ID exists; nothing outside this changes.
     func createAccount(with provider: AppAccount.Provider) async {
         guard !isWorking else { return }
         isWorking = true

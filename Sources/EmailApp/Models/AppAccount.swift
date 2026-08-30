@@ -24,6 +24,11 @@ struct AppAccount: Identifiable, Hashable, Codable {
     var displayName: String
     var provider: Provider
     var createdAt: Date
+    /// The provider's own stable identifier for this user -- Apple's
+    /// `ASAuthorizationAppleIDCredential.user`, for example. Apple hands back
+    /// the name and email only on the very first authorization, so this is the
+    /// only field guaranteed to arrive on every subsequent sign-in.
+    var externalID: String? = nil
 
     var initials: String {
         let parts = displayName.split(separator: " ").prefix(2)
