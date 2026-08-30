@@ -252,7 +252,7 @@ final class OnboardingTests: XCTestCase {
         let store = makeStore(startAt: .createAccount)
         store.signInWithApple(userID: "001234.xyz", email: nil, fullName: nil)
 
-        XCTAssertEqual(store.account?.email, "Hidden by Apple")
+        XCTAssertEqual(store.account?.email, "Hidden by provider")
         XCTAssertEqual(store.account?.displayName, "You")
     }
 

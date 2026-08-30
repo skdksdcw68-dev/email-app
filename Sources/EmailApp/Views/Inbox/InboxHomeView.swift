@@ -3,11 +3,13 @@ import UIKit
 
 /// The Inbox tab, which is also the home screen.
 ///
-/// Everything above the mail lives in one card -- the status line and four
-/// counts, with no dividers and no separate filter bar. The counts are the
-/// filter: tapping Urgent shows the urgent mail. That replaced a cramped chip
-/// strip sitting under a hairline, and it means the numbers do real work
-/// instead of decorating the top of the screen.
+/// Everything above the mail shares one card: the red "needs your attention"
+/// row, the four counts, and the tag chips. No hairline between the chips and
+/// the rest, and no separate pinned bar -- that separation was what made the
+/// chips look bolted on.
+///
+/// The counts and the chips drive the *same* filter, so selecting Urgent in
+/// either place highlights both.
 struct InboxHomeView: View {
     @Environment(MailStore.self) private var mail
 
@@ -19,10 +21,21 @@ struct InboxHomeView: View {
     private var isBrowsing: Bool { mailbox == .inbox }
 
     private var messages: [Message] {
-        mail.messages(
-            in: mailbox,
-            tag: filter?.tag,
-            unreadOnly: filter == .unread
+        mail.messages(in: mailbox, tag: filter?.tag, unreadOnly: filter == .unread)
+    }
+
+    private var attention: [Message] { mail.needsAttention(limit: .max) }
+    private var availableTags: [AITag] { mail.availableTags(in: mailbox) }
+
+    /// Chips speak in tags; the shared filter also has an unread case.
+    private var tagSelection: Binding<AITag?> {
+        Binding(
+            get: { if case .tag(let tag) = filter { tag } else { nil } },
+            set: { newValue in
+                withAnimation(.snappy(duration: 0.2)) {
+                    filter = newValue.map { InboxFilter.tag($0) }
+                }
+            }
         )
     }
 
@@ -48,9 +61,7 @@ struct InboxHomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .overlay(alignment: .bottomTrailing) { composeButton }
         .overlay {
-            if messages.isEmpty {
-                emptyState
-            }
+            if messages.isEmpty { emptyState }
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -80,30 +91,70 @@ struct InboxHomeView: View {
 
     // MARK: - The one card
 
+    @ViewBuilder
     private var summaryCard: some View {
         Section {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(mail.inboxStatus)
-                    .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if !attention.isEmpty {
+                NavigationLink {
+                    AttentionListView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(Color(uiColor: .systemRed))
+                            .frame(width: 26)
 
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(attentionTitle)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(attentionDetail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+
+            VStack(spacing: 12) {
                 HStack(spacing: 4) {
-                    ForEach(InboxFilter.allCases) { option in
+                    ForEach(CountOption.all) { option in
                         StatColumn(
-                            value: count(for: option),
+                            value: count(for: option.filter),
                             label: option.label,
                             tint: option.tint,
-                            isSelected: filter == option
+                            isSelected: filter == option.filter
                         ) {
                             withAnimation(.snappy(duration: 0.2)) {
-                                filter = filter == option ? nil : option
+                                filter = filter == option.filter ? nil : option.filter
                             }
                         }
                     }
                 }
+
+                if !availableTags.isEmpty {
+                    TagFilterBar(
+                        tags: availableTags,
+                        count: { mail.count(of: $0, in: mailbox) },
+                        selection: tagSelection
+                    )
+                }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 4)
         }
+    }
+
+    private var attentionTitle: String {
+        attention.count == 1
+            ? "1 email needs your attention"
+            : "\(attention.count) emails need your attention"
+    }
+
+    private var attentionDetail: String {
+        attention.prefix(2).map(\.sender.name).joined(separator: ", ")
+            + (attention.count > 2 ? " and others" : "")
     }
 
     private func count(for option: InboxFilter) -> Int {
@@ -131,7 +182,7 @@ struct InboxHomeView: View {
     private var emptyState: some View {
         if let filter {
             ContentUnavailableView(
-                "Nothing \(filter.label)",
+                "Nothing \(filter.title)",
                 systemImage: filter.symbol,
                 description: Text("No mail in \(mailbox.title) matches this filter.")
             )
@@ -145,62 +196,49 @@ struct InboxHomeView: View {
     }
 }
 
-// MARK: - Filters
+// MARK: - Filter
 
-/// The four counts double as the inbox's filters.
-enum InboxFilter: String, CaseIterable, Identifiable {
-    case unread, important, replies, urgent
-
-    var id: Self { self }
-
-    var label: String {
-        switch self {
-        case .unread: "New"
-        case .important: "Important"
-        case .replies: "Replies"
-        case .urgent: "Urgent"
-        }
-    }
+/// One filter, driven by both the counts and the chips.
+enum InboxFilter: Hashable {
+    case unread
+    case tag(AITag)
 
     var tag: AITag? {
+        if case .tag(let tag) = self { tag } else { nil }
+    }
+
+    var title: String {
         switch self {
-        case .unread: nil
-        case .important: .important
-        case .replies: .needsReply
-        case .urgent: .urgent
+        case .unread: "Unread"
+        case .tag(let tag): tag.title
         }
     }
 
     var symbol: String {
         switch self {
         case .unread: "envelope.badge"
-        case .important: "exclamationmark"
-        case .replies: "arrowshape.turn.up.left.fill"
-        case .urgent: "exclamationmark.3"
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .unread: Color(uiColor: .label)
-        case .important: Color(uiColor: .systemOrange)
-        case .replies: Color(uiColor: .systemBlue)
-        case .urgent: Color(uiColor: .systemRed)
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .unread: "Unread"
-        case .important: "Important"
-        case .replies: "Needs reply"
-        case .urgent: "Urgent"
+        case .tag(let tag): tag.systemImage
         }
     }
 }
 
-/// No separator between columns on purpose -- the whole point was to stop the
-/// summary looking like cells crammed against hairlines.
+/// The four columns in the counts row.
+private struct CountOption: Identifiable {
+    let id: String
+    let label: String
+    let filter: InboxFilter
+    let tint: Color
+
+    static let all: [CountOption] = [
+        .init(id: "new", label: "New", filter: .unread, tint: Color(uiColor: .label)),
+        .init(id: "important", label: "Important", filter: .tag(.important), tint: Color(uiColor: .systemOrange)),
+        .init(id: "replies", label: "Replies", filter: .tag(.needsReply), tint: Color(uiColor: .systemBlue)),
+        .init(id: "urgent", label: "Urgent", filter: .tag(.urgent), tint: Color(uiColor: .systemRed)),
+    ]
+}
+
+/// No separator between columns on purpose -- the point was to stop the summary
+/// looking like cells crammed against hairlines.
 private struct StatColumn: View {
     let value: Int
     let label: String
