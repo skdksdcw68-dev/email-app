@@ -40,6 +40,7 @@ struct InboxHomeView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .refreshable { await mail.refresh() }
         .navigationTitle(isBrowsing ? "Maily" : mailbox.title)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -84,6 +85,12 @@ struct InboxHomeView: View {
     @ViewBuilder
     private var summaryCard: some View {
         Section {
+            if let error = mail.connectionError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+
             if !attention.isEmpty {
                 NavigationLink {
                     AttentionListView()

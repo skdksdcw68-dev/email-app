@@ -63,7 +63,9 @@ struct ConnectInboxView: View {
             Button {
                 Task {
                     await mail.connect()
-                    user.next()
+                    // Only move on if a mailbox actually connected -- otherwise
+                    // the error stays on screen and the user can retry.
+                    if mail.isConnected { user.next() }
                 }
             } label: {
                 // Spinner replaces the label rather than sitting next to an
@@ -81,6 +83,15 @@ struct ConnectInboxView: View {
             .controlSize(.large)
             .disabled(mail.isConnecting)
             .padding(.horizontal, 24)
+
+            if let error = mail.connectionError {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 12)
+                    .padding(.horizontal, 32)
+            }
 
             Text("You can disconnect at any time in Settings.")
                 .font(.caption)

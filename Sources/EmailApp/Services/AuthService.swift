@@ -65,6 +65,53 @@ enum AuthService {
         return session.user
     }
 
+    // MARK: - Gmail access
+
+    /// A granted mailbox, separate from the Maily account. Signing into Maily
+    /// with Google does *not* grant mailbox access -- that is a second, explicit
+    /// consent with its own scopes, which is the whole point of keeping
+    /// `AppAccount` and `GmailAccount` apart.
+    struct GmailSession {
+        let email: String
+        let displayName: String
+        let accessToken: String
+    }
+
+    static func connectGmail() async throws -> GmailSession {
+        guard let presenter = rootViewController else { throw AuthError.noPresenter }
+
+        // One code path whether or not a Google account is already signed in:
+        // requesting the scopes here always produces a consent screen listing
+        // exactly what Maily is asking for.
+        let result = try await GIDSignIn.sharedInstance.signIn(
+            withPresenting: presenter,
+            hint: nil,
+            additionalScopes: GmailService.scopes
+        )
+
+        let granted = Set(result.user.grantedScopes ?? [])
+        guard granted.isSuperset(of: Set(GmailService.scopes)) else {
+            throw AuthError.scopesDeclined
+        }
+        guard let email = result.user.profile?.email else { throw AuthError.missingIDToken }
+
+        return GmailSession(
+            email: email,
+            displayName: result.user.profile?.name ?? email,
+            accessToken: result.user.accessToken.tokenString
+        )
+    }
+
+    /// A fresh access token for an already-connected mailbox. Google's tokens
+    /// are short-lived; the SDK refreshes silently when one is close to expiry.
+    static func currentGmailAccessToken() async throws -> String {
+        guard let user = GIDSignIn.sharedInstance.currentUser else {
+            throw AuthError.notConnected
+        }
+        try await user.refreshTokensIfNeeded()
+        return user.accessToken.tokenString
+    }
+
     // MARK: - Email
 
     static func signUpWithEmail(_ email: String, password: String) async throws -> User? {
@@ -95,11 +142,15 @@ enum AuthService {
     enum AuthError: LocalizedError {
         case noPresenter
         case missingIDToken
+        case scopesDeclined
+        case notConnected
 
         var errorDescription: String? {
             switch self {
             case .noPresenter: "Could not present the sign-in screen."
             case .missingIDToken: "The provider did not return an identity token."
+            case .scopesDeclined: "Maily needs permission to read your mail and create drafts."
+            case .notConnected: "No mailbox is connected."
             }
         }
     }

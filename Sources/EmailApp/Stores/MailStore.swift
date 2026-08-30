@@ -8,6 +8,10 @@ final class MailStore {
     private(set) var account: GmailAccount?
     private(set) var messages: [Message]
     private(set) var isConnecting = false
+    private(set) var isRefreshing = false
+    /// Surfaced in the UI rather than swallowed -- a declined consent screen
+    /// or an expired grant must be visible, not a silently empty inbox.
+    private(set) var connectionError: String?
 
     var isConnected: Bool { account != nil }
 
@@ -18,28 +22,52 @@ final class MailStore {
 
     // MARK: - Connection
 
-    /// Stubbed Gmail sign-in.
+    /// Connects a real mailbox and pulls recent inbox mail.
     ///
-    /// Real OAuth replaces the sleep and the hardcoded account: sign in with
-    /// Google, exchange for a token, fetch the profile, then page the Gmail API
-    /// into `messages`. Nothing outside this method needs to change.
+    /// Runs entirely on the device -- Gmail data never passes through a server
+    /// of ours. That is both less to build and a materially lower CASA risk
+    /// profile, since the assessment trigger is an app able to reach restricted
+    /// data "from or through a third-party server".
     func connect() async {
         guard !isConnecting, !isConnected else { return }
         isConnecting = true
-        try? await Task.sleep(for: .seconds(1.2))
+        connectionError = nil
+        defer { isConnecting = false }
 
-        account = GmailAccount(
-            email: "abelamare1633@gmail.com",
-            displayName: "Abel Amare",
-            connectedAt: .now
-        )
-        messages = Message.samples
-        isConnecting = false
+        do {
+            let session = try await AuthService.connectGmail()
+            account = GmailAccount(
+                email: session.email,
+                displayName: session.displayName,
+                connectedAt: .now
+            )
+            messages = try await GmailService.fetchInbox(accessToken: session.accessToken)
+        } catch {
+            connectionError = error.localizedDescription
+            account = nil
+        }
+    }
+
+    /// Re-pulls the inbox with a refreshed token. Pull-to-refresh, for now;
+    /// incremental History API sync comes with the backend.
+    func refresh() async {
+        guard isConnected, !isRefreshing else { return }
+        isRefreshing = true
+        connectionError = nil
+        defer { isRefreshing = false }
+
+        do {
+            let token = try await AuthService.currentGmailAccessToken()
+            messages = try await GmailService.fetchInbox(accessToken: token)
+        } catch {
+            connectionError = error.localizedDescription
+        }
     }
 
     func disconnect() {
         account = nil
         messages = []
+        connectionError = nil
     }
 
     // MARK: - Reading
