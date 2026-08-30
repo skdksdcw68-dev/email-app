@@ -44,10 +44,12 @@ final class MailStore {
 
     // MARK: - Reading
 
-    /// Messages in a mailbox, narrowed by an optional AI tag and search text.
+    /// Messages in a mailbox, narrowed by an optional AI tag, unread state and
+    /// search text.
     func messages(
         in mailbox: Mailbox,
         tag: AITag? = nil,
+        unreadOnly: Bool = false,
         matching query: String = ""
     ) -> [Message] {
         messages
@@ -56,6 +58,7 @@ final class MailStore {
                 guard let tag else { return true }
                 return message.tags.contains(tag)
             }
+            .filter { !unreadOnly || !$0.isRead }
             .filter { query.isEmpty || $0.matches(query) }
             .sorted { $0.date > $1.date }
     }

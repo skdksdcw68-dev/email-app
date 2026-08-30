@@ -3,32 +3,33 @@ import UIKit
 
 /// The Inbox tab, which is also the home screen.
 ///
-/// There is deliberately no separate "Home" tab: the Inbox already holds the
-/// main content, and Apple warns against a redundant Home beside it.
-///
-/// The briefing above the mail is deliberately tiny -- a status line, the
-/// counts, and a single row for anything that needs a person. Listing the
-/// urgent mail inline just duplicated the inbox underneath it, so that row
-/// links out to a dedicated screen instead.
+/// Everything above the mail lives in one card -- the status line and four
+/// counts, with no dividers and no separate filter bar. The counts are the
+/// filter: tapping Urgent shows the urgent mail. That replaced a cramped chip
+/// strip sitting under a hairline, and it means the numbers do real work
+/// instead of decorating the top of the screen.
 struct InboxHomeView: View {
     @Environment(MailStore.self) private var mail
 
     @State private var mailbox: Mailbox = .inbox
-    @State private var tag: AITag?
+    @State private var filter: InboxFilter?
     @State private var isComposing = false
     @State private var isSearching = false
 
-    private var isBrowsing: Bool { tag == nil && mailbox == .inbox }
-    private var messages: [Message] { mail.messages(in: mailbox, tag: tag) }
-    private var availableTags: [AITag] { mail.availableTags(in: mailbox) }
-    private var attention: [Message] { mail.needsAttention(limit: .max) }
+    private var isBrowsing: Bool { mailbox == .inbox }
+
+    private var messages: [Message] {
+        mail.messages(
+            in: mailbox,
+            tag: filter?.tag,
+            unreadOnly: filter == .unread
+        )
+    }
 
     var body: some View {
         List {
             if isBrowsing {
-                briefing
-                attentionRow
-                yourDay
+                summaryCard
             }
 
             Section {
@@ -39,24 +40,15 @@ struct InboxHomeView: View {
                     .messageSwipeActions(for: message)
                 }
             } header: {
-                Text(isBrowsing ? "Inbox" : mailbox.title)
+                Text(filter?.title ?? (isBrowsing ? "Inbox" : mailbox.title))
             }
         }
         .listStyle(.insetGrouped)
         .navigationTitle(isBrowsing ? "Maily" : mailbox.title)
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if !availableTags.isEmpty {
-                TagFilterBar(
-                    tags: availableTags,
-                    count: { mail.count(of: $0, in: mailbox) },
-                    selection: $tag
-                )
-            }
-        }
         .overlay(alignment: .bottomTrailing) { composeButton }
         .overlay {
-            if messages.isEmpty && !isBrowsing {
+            if messages.isEmpty {
                 emptyState
             }
         }
@@ -81,94 +73,41 @@ struct InboxHomeView: View {
                 }
             }
         }
-        .onChange(of: mailbox) { _, newValue in
-            if let tag, mail.count(of: tag, in: newValue) == 0 { self.tag = nil }
-        }
+        .onChange(of: mailbox) { _, _ in filter = nil }
         .sheet(isPresented: $isComposing) { ComposeView() }
         .sheet(isPresented: $isSearching) { SearchView() }
     }
 
-    // MARK: - Briefing
+    // MARK: - The one card
 
-    private var briefing: some View {
+    private var summaryCard: some View {
         Section {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 14) {
                 Text(mail.inboxStatus)
                     .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                CountsStrip(counts: mail.counts)
-            }
-            .padding(.vertical, 4)
-        }
-    }
-
-    /// One row, not a list. Tapping it opens the full set -- the point is to
-    /// say "something needs you" without reprinting the inbox.
-    @ViewBuilder
-    private var attentionRow: some View {
-        if !attention.isEmpty {
-            Section {
-                NavigationLink {
-                    AttentionListView()
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.title3)
-                            .foregroundStyle(Color(uiColor: .systemRed))
-                            .frame(width: 28)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(attentionTitle)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                            Text(attentionDetail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                HStack(spacing: 4) {
+                    ForEach(InboxFilter.allCases) { option in
+                        StatColumn(
+                            value: count(for: option),
+                            label: option.label,
+                            tint: option.tint,
+                            isSelected: filter == option
+                        ) {
+                            withAnimation(.snappy(duration: 0.2)) {
+                                filter = filter == option ? nil : option
+                            }
                         }
                     }
-                    .padding(.vertical, 3)
                 }
             }
+            .padding(.vertical, 6)
         }
     }
 
-    private var attentionTitle: String {
-        attention.count == 1
-            ? "1 email needs your attention"
-            : "\(attention.count) emails need your attention"
-    }
-
-    private var attentionDetail: String {
-        attention.prefix(2).map(\.sender.name).joined(separator: ", ")
-            + (attention.count > 2 ? " and others" : "")
-    }
-
-    @ViewBuilder
-    private var yourDay: some View {
-        let items = mail.dayItems
-        if !items.isEmpty {
-            Section("Your day") {
-                ForEach(items) { item in
-                    HStack(alignment: .top, spacing: 14) {
-                        Text(item.time)
-                            .font(.footnote.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(.tint)
-                            .frame(width: 62, alignment: .leading)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.title)
-                                .font(.subheadline)
-                                .lineLimit(1)
-                            Text(item.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-        }
+    private func count(for option: InboxFilter) -> Int {
+        mail.messages(in: mailbox, tag: option.tag, unreadOnly: option == .unread).count
     }
 
     private var composeButton: some View {
@@ -190,11 +129,11 @@ struct InboxHomeView: View {
 
     @ViewBuilder
     private var emptyState: some View {
-        if let tag {
+        if let filter {
             ContentUnavailableView(
-                "No \(tag.title) Mail",
-                systemImage: tag.systemImage,
-                description: Text("Nothing in \(mailbox.title) is tagged \(tag.title).")
+                "Nothing \(filter.label)",
+                systemImage: filter.symbol,
+                description: Text("No mail in \(mailbox.title) matches this filter.")
             )
         } else {
             ContentUnavailableView(
@@ -206,39 +145,91 @@ struct InboxHomeView: View {
     }
 }
 
-// MARK: - Pieces
+// MARK: - Filters
 
-private struct CountsStrip: View {
-    let counts: InboxCounts
+/// The four counts double as the inbox's filters.
+enum InboxFilter: String, CaseIterable, Identifiable {
+    case unread, important, replies, urgent
+
+    var id: Self { self }
+
+    var label: String {
+        switch self {
+        case .unread: "New"
+        case .important: "Important"
+        case .replies: "Replies"
+        case .urgent: "Urgent"
+        }
+    }
+
+    var tag: AITag? {
+        switch self {
+        case .unread: nil
+        case .important: .important
+        case .replies: .needsReply
+        case .urgent: .urgent
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .unread: "envelope.badge"
+        case .important: "exclamationmark"
+        case .replies: "arrowshape.turn.up.left.fill"
+        case .urgent: "exclamationmark.3"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .unread: Color(uiColor: .label)
+        case .important: Color(uiColor: .systemOrange)
+        case .replies: Color(uiColor: .systemBlue)
+        case .urgent: Color(uiColor: .systemRed)
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .unread: "Unread"
+        case .important: "Important"
+        case .replies: "Needs reply"
+        case .urgent: "Urgent"
+        }
+    }
+}
+
+/// No separator between columns on purpose -- the whole point was to stop the
+/// summary looking like cells crammed against hairlines.
+private struct StatColumn: View {
+    let value: Int
+    let label: String
+    let tint: Color
+    let isSelected: Bool
+    let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
-            item("\(counts.new)", "new", .secondary)
-            divider
-            item("\(counts.important)", "important", Color(uiColor: .systemOrange))
-            divider
-            item("\(counts.needsReply)", "replies", Color(uiColor: .systemBlue))
-            divider
-            item("\(counts.urgent)", "urgent", Color(uiColor: .systemRed))
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Text("\(value)")
+                    .font(.title3.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(value == 0 && !isSelected ? Color.secondary : tint)
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected ? tint.opacity(0.14) : Color.clear)
+            }
         }
-    }
-
-    private var divider: some View {
-        Rectangle()
-            .fill(Color(uiColor: .separator))
-            .frame(width: 1, height: 22)
-    }
-
-    private func item(_ value: String, _ label: String, _ tint: Color) -> some View {
-        VStack(spacing: 1) {
-            Text(value)
-                .font(.headline.monospacedDigit())
-                .foregroundStyle(tint)
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(value) \(label)")
+        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 }
 

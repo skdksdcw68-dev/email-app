@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import AuthenticationServices
 
 /// Creating the Maily account, or signing back into an existing one.
@@ -23,6 +24,13 @@ struct AccountView: View {
             case .signIn: "Sign in to pick up where you left off."
             }
         }
+
+        var verb: String {
+            switch self {
+            case .create: "Continue with"
+            case .signIn: "Sign in with"
+            }
+        }
     }
 
     let mode: Mode
@@ -30,8 +38,13 @@ struct AccountView: View {
     @Environment(UserStore.self) private var user
     @Environment(\.colorScheme) private var colorScheme
 
-    @State private var isWorkingWithGoogle = false
+    @State private var pending: AppAccount.Provider?
     @State private var authError: String?
+
+    /// Every button is this tall and this round, Apple's included, so the stack
+    /// reads as one set rather than three unrelated controls.
+    private let buttonHeight: CGFloat = 52
+    private let buttonRadius: CGFloat = 14
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,9 +63,15 @@ struct AccountView: View {
 
             Spacer()
 
-            VStack(spacing: 10) {
+            VStack(spacing: 11) {
                 appleButton
-                googleButton
+                providerButton(.google) { GoogleGlyph() }
+                providerButton(.email) {
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 17))
+                        .foregroundStyle(.tint)
+                        .frame(width: 19)
+                }
             }
             .padding(.horizontal, 24)
 
@@ -75,9 +94,10 @@ struct AccountView: View {
         }
     }
 
-    /// Apple's own button. Not a re-creation -- using `SignInWithAppleButton`
-    /// is required by Apple's guidelines, and it handles the sheet, the
-    /// localisation and the light/dark treatment itself.
+    /// Apple's own control, which their guidelines require -- it owns the
+    /// sheet, the localisation and the light/dark treatment. Its default corner
+    /// radius is much tighter than the buttons beneath it, so it is clipped to
+    /// match rather than left looking like a different control.
     private var appleButton: some View {
         SignInWithAppleButton(mode == .create ? .signUp : .signIn) { request in
             request.requestedScopes = [.fullName, .email]
@@ -102,36 +122,49 @@ struct AccountView: View {
             }
         }
         .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
-        .frame(height: 50)
+        .frame(height: buttonHeight)
+        .clipShape(RoundedRectangle(cornerRadius: buttonRadius, style: .continuous))
     }
 
-    /// Still a stub: real Google sign-in needs a Google Cloud project and an
-    /// iOS OAuth client ID, which do not exist yet. The inbox connection on the
-    /// next screen is the step that actually needs Google.
-    private var googleButton: some View {
+    /// Google and email are still stubs. Google needs a Cloud project and an
+    /// iOS OAuth client id; email needs a backend. Both go through
+    /// `UserStore.createAccount`, so wiring either one up is a change in that
+    /// method and nowhere else.
+    private func providerButton<Glyph: View>(
+        _ provider: AppAccount.Provider,
+        @ViewBuilder glyph: () -> Glyph
+    ) -> some View {
         Button {
-            isWorkingWithGoogle = true
+            pending = provider
             Task {
-                await user.createAccount(with: .google)
-                isWorkingWithGoogle = false
+                await user.createAccount(with: provider)
+                pending = nil
             }
         } label: {
             Group {
-                if isWorkingWithGoogle {
+                if pending == provider {
                     ProgressView()
                 } else {
-                    HStack(spacing: 10) {
-                        Image(systemName: "g.circle.fill")
-                        Text(mode == .create ? "Continue with Google" : "Sign in with Google")
-                            .fontWeight(.medium)
+                    HStack(spacing: 11) {
+                        glyph()
+                        Text("\(mode.verb) \(provider.title)")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.primary)
                     }
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 30)
+            .frame(maxWidth: .infinity, minHeight: buttonHeight)
+            .background {
+                RoundedRectangle(cornerRadius: buttonRadius, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: buttonRadius, style: .continuous)
+                            .strokeBorder(Color(uiColor: .separator), lineWidth: 1)
+                    }
+            }
         }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
-        .disabled(isWorkingWithGoogle)
+        .buttonStyle(.plain)
+        .disabled(pending != nil)
     }
 }
 
@@ -140,7 +173,8 @@ struct AccountView: View {
         .environment(UserStore(defaults: .previews, startAt: .createAccount))
 }
 
-#Preview("Sign in") {
+#Preview("Sign in — dark") {
     AccountView(mode: .signIn)
         .environment(UserStore(defaults: .previews, startAt: .signIn))
+        .preferredColorScheme(.dark)
 }
