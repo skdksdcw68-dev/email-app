@@ -1,6 +1,22 @@
 import SwiftUI
 
 struct RootView: View {
+    @Environment(UserStore.self) private var user
+
+    var body: some View {
+        Group {
+            if user.phase == .finished {
+                MainTabView()
+            } else {
+                OnboardingFlowView()
+            }
+        }
+        .animation(.snappy(duration: 0.3), value: user.phase == .finished)
+    }
+}
+
+/// The app proper, once onboarding is done.
+struct MainTabView: View {
     private enum AppTab: Hashable { case mail, settings }
 
     @State private var selection: AppTab = .mail
@@ -18,10 +34,14 @@ struct RootView: View {
     }
 }
 
-#Preview("Connected") {
-    RootView().environment(MailStore.connected())
+#Preview("Onboarding") {
+    RootView()
+        .environment(UserStore(defaults: .previews, startAt: .splash))
+        .environment(MailStore())
 }
 
-#Preview("Not connected") {
-    RootView().environment(MailStore())
+#Preview("Signed in") {
+    RootView()
+        .environment(UserStore(defaults: .previews, startAt: .finished))
+        .environment(MailStore.connected())
 }

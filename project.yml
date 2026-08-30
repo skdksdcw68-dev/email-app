@@ -39,8 +39,11 @@ targets:
         # processing, so the only symptom is that nothing ever appears in
         # TestFlight. This matches the app record registered on App Store
         # Connect, which by definition cannot collide with anyone else.
-        CFBundleDisplayName: Email,testapp
-        CFBundleName: Email,testapp
+        # Checked against the App Store before setting: no app is named exactly
+        # "Maily" (there is a "Maily: AI Email Writer", which is a different
+        # string), so this does not trip ITMS-90129 the way "Mail" did.
+        CFBundleDisplayName: Maily
+        CFBundleName: Maily
         # Xcode injects these automatically ONLY when it generates the
         # Info.plist. GENERATE_INFOPLIST_FILE is NO here, so they must be
         # declared by hand -- and without CFBundleIconName App Store Connect
