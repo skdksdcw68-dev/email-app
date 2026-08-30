@@ -7,8 +7,18 @@ final class InsightsTests: XCTestCase {
     private let alice = Contact(name: "Alice Adams", address: "alice@example.com")
     private let bob = Contact(name: "Bob Brown", address: "bob@example.com")
 
+    /// Mail always arrives with a connected account -- `connect()` sets both
+    /// together -- so fixtures must too, or `inboxStatus` correctly reports
+    /// that there is no inbox.
+    private func connected(_ messages: [Message]) -> MailStore {
+        MailStore(
+            account: GmailAccount(email: "abel@example.com", displayName: "Abel Amare", connectedAt: .now),
+            messages: messages
+        )
+    }
+
     private func makeStore() -> MailStore {
-        MailStore(messages: [
+        connected([
             Message(sender: alice, recipients: [], subject: "Wire approval",
                     body: "needs sign-off", date: .now, isRead: false, mailbox: .inbox,
                     tags: [.urgent, .needsReply]),
@@ -41,7 +51,7 @@ final class InsightsTests: XCTestCase {
     }
 
     func testCalmInboxHasNoUrgentOrReplies() {
-        let calm = MailStore(messages: [
+        let calm = connected([
             Message(sender: alice, recipients: [], subject: "FYI", body: "-",
                     date: .now, isRead: true, mailbox: .inbox, tags: [.noReplyNeeded]),
         ])
@@ -54,7 +64,7 @@ final class InsightsTests: XCTestCase {
     }
 
     func testStatusFallsBackToRepliesWhenNothingIsUrgent() {
-        let store = MailStore(messages: [
+        let store = connected([
             Message(sender: alice, recipients: [], subject: "A", body: "-",
                     date: .now, mailbox: .inbox, tags: [.needsReply]),
             Message(sender: bob, recipients: [], subject: "B", body: "-",
@@ -90,7 +100,7 @@ final class InsightsTests: XCTestCase {
     }
 
     func testRecommendationsAreEmptyForACleanInbox() {
-        let clean = MailStore(messages: [
+        let clean = connected([
             Message(sender: alice, recipients: [], subject: "A", body: "-",
                     date: .now, isRead: true, mailbox: .inbox, tags: [.noReplyNeeded]),
         ])
@@ -112,7 +122,7 @@ final class InsightsTests: XCTestCase {
     }
 
     func testPeopleAwaitingReplySortFirst() {
-        let store = MailStore(messages: [
+        let store = connected([
             Message(sender: bob, recipients: [], subject: "Quiet", body: "-",
                     date: .now, isRead: true, mailbox: .inbox, tags: [.noReplyNeeded]),
             Message(sender: alice, recipients: [], subject: "Waiting", body: "-",
@@ -123,7 +133,7 @@ final class InsightsTests: XCTestCase {
     }
 
     func testPeopleNeverIncludeTheUser() {
-        let store = MailStore(messages: [
+        let store = connected([
             Message(sender: .me, recipients: [alice], subject: "Sent", body: "-",
                     date: .now, isRead: true, mailbox: .sent),
         ])
