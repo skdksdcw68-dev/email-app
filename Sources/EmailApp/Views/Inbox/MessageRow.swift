@@ -7,10 +7,7 @@ struct MessageRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            SenderAvatar(
-                contact: message.sender,
-                tintOpacity: message.isRead ? 0.12 : 0.22
-            )
+            SenderAvatar(contact: message.sender, isMuted: message.isRead)
             .overlay(alignment: .topLeading) {
                 if !message.isRead {
                     Circle()
