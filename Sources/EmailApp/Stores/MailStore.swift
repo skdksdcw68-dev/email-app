@@ -150,6 +150,24 @@ final class MailStore {
         )
     }
 
+    /// Keeps an unsent message in Drafts. Local only for now -- writing a real
+    /// Gmail draft is a POST to users.drafts, which gmail.compose does allow,
+    /// so this is a seam rather than a dead end.
+    func saveDraft(subject: String, to address: String, body: String) {
+        let recipient = Contact(name: address, address: address)
+        messages.append(
+            Message(
+                sender: .me,
+                recipients: [recipient],
+                subject: subject.isEmpty ? "(No Subject)" : subject,
+                body: body,
+                date: .now,
+                isRead: true,
+                mailbox: .drafts
+            )
+        )
+    }
+
     private func update(_ id: Message.ID, _ change: (inout Message) -> Void) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         change(&messages[index])

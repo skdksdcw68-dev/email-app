@@ -1,71 +1,80 @@
 import SwiftUI
+import UIKit
 
-/// A sender's brand mark where one exists, initials otherwise.
+/// A sender's initial on a colour derived from their address.
 ///
-/// Gmail's API returns no sender photo, so a real person's face is not
-/// available to us at all. What *is* available is the domain, and a company
-/// that sends mail has a favicon. GitHub, Apple and Stripe get their actual
-/// logo; a human keeps initials.
+/// There is no photo to show. Gmail's API returns no sender image at all --
+/// Gmail's own app has them because Google already holds your Contacts and
+/// their profile pictures, which is a different API and a different scope.
 ///
-/// Consumer mail domains are excluded deliberately -- every gmail.com sender
-/// would otherwise wear the same Gmail icon, which is worse than nothing.
+/// A favicon lookup was tried and removed: most domains return a generic globe,
+/// so the list filled up with identical grey planets. Gmail's own fallback is a
+/// coloured letter, and doing that consistently looks far better than doing
+/// logos badly for one sender in ten.
+///
+/// The colour is a hash of the address, so a sender is always the same colour
+/// and two different senders rarely collide.
 struct SenderAvatar: View {
     let contact: Contact
     var size: CGFloat = 40
-    var tintOpacity: Double = 0.18
+    var isMuted: Bool = false
 
-    private static let consumerDomains: Set<String> = [
-        "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com",
-        "yahoo.com", "icloud.com", "me.com", "mac.com", "proton.me",
-        "protonmail.com", "aol.com", "gmx.com", "zoho.com", "yandex.com",
+    private static let palette: [Color] = [
+        Color(uiColor: .systemBlue), Color(uiColor: .systemIndigo),
+        Color(uiColor: .systemPurple), Color(uiColor: .systemPink),
+        Color(uiColor: .systemRed), Color(uiColor: .systemOrange),
+        Color(uiColor: .systemGreen), Color(uiColor: .systemTeal),
+        Color(uiColor: .systemCyan), Color(uiColor: .systemBrown),
     ]
 
-    private var brandURL: URL? {
-        guard let domain = contact.address.split(separator: "@").last?.lowercased(),
-              !Self.consumerDomains.contains(String(domain)),
-              domain.contains(".")
-        else { return nil }
+    /// Deterministic and stable across launches. `hashValue` is seeded per
+    /// process in Swift, so a sender's colour would change every cold start.
+    private var color: Color {
+        let key = contact.address.lowercased()
+        var hash: UInt64 = 5381
+        for byte in key.utf8 {
+            hash = (hash &* 33) &+ UInt64(byte)
+        }
+        return Self.palette[Int(hash % UInt64(Self.palette.count))]
+    }
 
-        return URL(string: "https://www.google.com/s2/favicons?sz=128&domain=\(domain)")
+    private var letter: String {
+        // The display name reads better than the address, unless the name IS
+        // the address, in which case skip past any leading punctuation.
+        let source = contact.name.contains("@") ? contact.address : contact.name
+        let first = source.first { $0.isLetter || $0.isNumber }
+        return first.map { String($0).uppercased() } ?? "?"
     }
 
     var body: some View {
-        Group {
-            if let brandURL {
-                AsyncImage(url: brandURL) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        // Loading and failure both fall back to initials rather
-                        // than a blank circle or a generic globe.
-                        initials
-                    }
-                }
-            } else {
-                initials
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-    }
-
-    private var initials: some View {
         Circle()
-            .fill(Color.accentColor.opacity(tintOpacity))
+            .fill(color.opacity(isMuted ? 0.55 : 1))
+            .frame(width: size, height: size)
             .overlay {
-                Text(contact.initials)
-                    .font(.system(size: size * 0.38, weight: .semibold))
-                    .foregroundStyle(.tint)
+                Text(letter)
+                    .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
             }
     }
 }
 
 #Preview {
-    VStack(alignment: .leading, spacing: 14) {
-        SenderAvatar(contact: Contact(name: "GitHub", address: "noreply@github.com"))
-        SenderAvatar(contact: Contact(name: "Apple", address: "no-reply@apple.com"))
-        SenderAvatar(contact: Contact(name: "Sara Bekele", address: "sara@gmail.com"))
-        SenderAvatar(contact: Contact(name: "Dawit Haile", address: "dawit@example.com"))
+    VStack(alignment: .leading, spacing: 12) {
+        ForEach(
+            [
+                Contact(name: "Maya Chen", address: "maya@example.com"),
+                Contact(name: "Avery Collins", address: "avery.collins@example.com"),
+                Contact(name: "Dad", address: "dad@gmail.com"),
+                Contact(name: "Jordan Bell", address: "jordan@bell.io"),
+                Contact(name: "Render Billing", address: "billing@render.com"),
+                Contact(name: "noreply@github.com", address: "noreply@github.com"),
+            ]
+        ) { contact in
+            HStack(spacing: 12) {
+                SenderAvatar(contact: contact)
+                Text(contact.name)
+            }
+        }
     }
     .padding()
 }
