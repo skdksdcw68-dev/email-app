@@ -153,28 +153,34 @@ enum GmailService {
         return Contact(name: name, address: address)
     }
 
-    /// Walks the MIME tree for the first text/plain part, falling back to
-    /// stripped HTML.
+    /// The message body: a text/plain part if the tree has one anywhere,
+    /// otherwise stripped HTML.
+    ///
+    /// The two searches must be separate passes. A single depth-first walk that
+    /// falls back to HTML inline hits the text/html child of a
+    /// multipart/alternative *before* reaching its text/plain sibling -- and
+    /// since plain+HTML siblings are how most real mail is built, that quietly
+    /// degrades nearly every body to stripped markup.
     static func plainText(from payload: [String: Any]) -> String? {
-        if let mime = payload["mimeType"] as? String,
-           mime == "text/plain",
+        if let plain = firstPart(in: payload, mimeType: "text/plain") {
+            return plain
+        }
+        if let html = firstPart(in: payload, mimeType: "text/html") {
+            return strippingHTML(html)
+        }
+        return nil
+    }
+
+    private static func firstPart(in payload: [String: Any], mimeType: String) -> String? {
+        if payload["mimeType"] as? String == mimeType,
            let body = payload["body"] as? [String: Any],
            let data = body["data"] as? String {
             return decode(data)
         }
 
         for part in payload["parts"] as? [[String: Any]] ?? [] {
-            if let text = plainText(from: part) { return text }
+            if let found = firstPart(in: part, mimeType: mimeType) { return found }
         }
-
-        if let mime = payload["mimeType"] as? String,
-           mime == "text/html",
-           let body = payload["body"] as? [String: Any],
-           let data = body["data"] as? String,
-           let html = decode(data) {
-            return strippingHTML(html)
-        }
-
         return nil
     }
 
