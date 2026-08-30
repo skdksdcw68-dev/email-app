@@ -102,23 +102,35 @@ final class MailStoreTests: XCTestCase {
         XCTAssertTrue(store.messages.isEmpty)
     }
 
-    func testConnectPopulatesAccountAndMail() async {
-        let store = MailStore()
-        await store.connect()
-
+    /// `connect()` now performs a real Google consent flow, which cannot run
+    /// in a unit test -- with no signed-in user and no view controller to
+    /// present from, it blocks forever rather than failing. So these cover the
+    /// connected/disconnected state machine directly instead.
+    func testAStoreWithAnAccountIsConnected() {
+        let store = MailStore.connected()
         XCTAssertTrue(store.isConnected)
-        XCTAssertFalse(store.isConnecting)
         XCTAssertFalse(store.messages.isEmpty)
         XCTAssertFalse(store.availableTags(in: .inbox).isEmpty)
     }
 
-    func testDisconnectClearsEverything() async {
-        let store = MailStore()
-        await store.connect()
+    func testDisconnectClearsEverything() {
+        let store = MailStore.connected()
+        XCTAssertTrue(store.isConnected)
+
         store.disconnect()
 
         XCTAssertFalse(store.isConnected)
         XCTAssertNil(store.account)
+        XCTAssertTrue(store.messages.isEmpty)
+        XCTAssertNil(store.connectionError)
+    }
+
+    func testRefreshDoesNothingWhenNoMailboxIsConnected() async {
+        // Guarded by `isConnected`, so it returns immediately and never
+        // reaches the network.
+        let store = MailStore()
+        await store.refresh()
+        XCTAssertFalse(store.isRefreshing)
         XCTAssertTrue(store.messages.isEmpty)
     }
 

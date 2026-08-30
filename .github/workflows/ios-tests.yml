@@ -47,8 +47,15 @@ jobs:
           print(best)
           ")
           echo "Testing on: $DEVICE"
+          # Per-test timeouts. Without them a test that blocks -- one that
+          # reaches a real OAuth flow with no UI to present from, say -- hangs
+          # the whole job until the 30 minute cap, instead of failing in a
+          # minute with the offending test named.
           xcodebuild test \
             -project EmailApp.xcodeproj \
             -scheme EmailApp \
             -destination "platform=iOS Simulator,name=$DEVICE" \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 60 \
+            -maximum-test-execution-time-allowance 180 \
             CODE_SIGNING_ALLOWED=NO
