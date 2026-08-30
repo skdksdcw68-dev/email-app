@@ -74,6 +74,50 @@ final class GmailParsingTests: XCTestCase {
         XCTAssertEqual(GmailService.strippingHTML(html), "Tom & Jerry <3")
     }
 
+    // MARK: - Deferred bodies
+
+    func testInlineBodyIsNotTreatedAsDeferred() {
+        let payload: [String: Any] = [
+            "mimeType": "text/plain",
+            "body": ["data": encode("right here")],
+        ]
+        XCTAssertNil(GmailService.deferredBody(in: payload))
+    }
+
+    /// Gmail hands back a large body part as an attachmentId with no inline
+    /// data. Missing this collapses long mail to its snippet.
+    func testLargePlainBodyIsReportedAsDeferred() {
+        let payload: [String: Any] = [
+            "mimeType": "text/plain",
+            "body": ["attachmentId": "att-123", "size": 900_000],
+        ]
+        let deferred = GmailService.deferredBody(in: payload)
+        XCTAssertEqual(deferred?.attachmentID, "att-123")
+        XCTAssertEqual(deferred?.isHTML, false)
+    }
+
+    func testDeferredHTMLIsFlaggedForStripping() {
+        let payload: [String: Any] = [
+            "mimeType": "multipart/alternative",
+            "parts": [["mimeType": "text/html", "body": ["attachmentId": "att-html"]]],
+        ]
+        let deferred = GmailService.deferredBody(in: payload)
+        XCTAssertEqual(deferred?.attachmentID, "att-html")
+        XCTAssertEqual(deferred?.isHTML, true)
+    }
+
+    func testAnInlinePlainPartWinsOverADeferredHTMLOne() {
+        let payload: [String: Any] = [
+            "mimeType": "multipart/alternative",
+            "parts": [
+                ["mimeType": "text/html", "body": ["attachmentId": "att-html"]],
+                ["mimeType": "text/plain", "body": ["data": encode("inline wins")]],
+            ],
+        ]
+        XCTAssertNil(GmailService.deferredBody(in: payload),
+                     "no extra fetch is needed when plain text is already inline")
+    }
+
     // MARK: - Whole message
 
     func testParsesAFullMessage() {

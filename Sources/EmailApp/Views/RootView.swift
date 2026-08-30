@@ -30,12 +30,16 @@ struct RootView: View {
 struct MainTabView: View {
     private enum AppTab: Hashable { case inbox, ai, people, you }
 
+    @Environment(MailStore.self) private var mail
     @State private var selection: AppTab = .inbox
 
     var body: some View {
         TabView(selection: $selection) {
             InboxTabView()
                 .tabItem { Label("Inbox", systemImage: "tray.full.fill") }
+                // Unread count, the way every mail app marks the tab.
+                // .badge renders nothing at zero, so no empty bubble.
+                .badge(mail.unreadCount(in: .inbox))
                 .tag(AppTab.inbox)
 
             AIView()

@@ -72,8 +72,53 @@ enum GmailService {
     private static func fetchMessage(id: String, accessToken: String) async throws -> Message {
         let url = URL(string: "\(base)/messages/\(id)?format=full")!
         let json = try await get(url, accessToken: accessToken)
-        guard let message = parse(json) else { throw ServiceError.malformed }
+        guard var message = parse(json) else { throw ServiceError.malformed }
+
+        // Gmail returns a large body part as an attachmentId rather than inline
+        // data. Without this the whole message collapses to its ~200 character
+        // snippet -- which looks exactly like the app truncating long mail.
+        if let payload = json["payload"] as? [String: Any],
+           let deferred = deferredBody(in: payload),
+           let raw = try? await fetchAttachment(
+               messageID: id, attachmentID: deferred.attachmentID, accessToken: accessToken
+           ) {
+            message.body = deferred.isHTML ? strippingHTML(raw) : raw
+        }
+
         return message
+    }
+
+    /// A body part that Gmail did not inline. Plain text wins over HTML, and
+    /// this only reports a part when there was no inline data to use.
+    static func deferredBody(in payload: [String: Any]) -> (attachmentID: String, isHTML: Bool)? {
+        if firstPart(in: payload, mimeType: "text/plain") != nil { return nil }
+        if let id = attachmentID(in: payload, mimeType: "text/plain") { return (id, false) }
+
+        if firstPart(in: payload, mimeType: "text/html") != nil { return nil }
+        if let id = attachmentID(in: payload, mimeType: "text/html") { return (id, true) }
+
+        return nil
+    }
+
+    private static func attachmentID(in payload: [String: Any], mimeType: String) -> String? {
+        if payload["mimeType"] as? String == mimeType,
+           let body = payload["body"] as? [String: Any],
+           let id = body["attachmentId"] as? String {
+            return id
+        }
+        for part in payload["parts"] as? [[String: Any]] ?? [] {
+            if let found = attachmentID(in: part, mimeType: mimeType) { return found }
+        }
+        return nil
+    }
+
+    private static func fetchAttachment(
+        messageID: String, attachmentID: String, accessToken: String
+    ) async throws -> String? {
+        let url = URL(string: "\(base)/messages/\(messageID)/attachments/\(attachmentID)")!
+        let json = try await get(url, accessToken: accessToken)
+        guard let data = json["data"] as? String else { return nil }
+        return decode(data)
     }
 
     private static func get(_ url: URL, accessToken: String) async throws -> [String: Any] {
