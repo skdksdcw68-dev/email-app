@@ -3,12 +3,12 @@ import UIKit
 
 /// The Inbox tab, which is also the home screen.
 ///
-/// Two things sit above the mail, sharing one card: the tag chips and the red
-/// "needs your attention" row. The chips come first so the filters are the
-/// first thing under the title.
+/// The tag pills are pinned directly under the title on the plain background --
+/// no card, no hairline, the way Mail's category filters sit. Below them the
+/// red "needs your attention" row, then the mail.
 ///
-/// There is no counts strip. Four numbers that restated what the chips already
-/// showed was two controls competing over one list.
+/// There is no counts strip. Four numbers restating what the pills already show
+/// was two controls competing over one list.
 struct InboxHomeView: View {
     @Environment(MailStore.self) private var mail
 
@@ -42,6 +42,11 @@ struct InboxHomeView: View {
         .listStyle(.insetGrouped)
         .navigationTitle(isBrowsing ? "Maily" : mailbox.title)
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if isBrowsing && !availableTags.isEmpty {
+                TagFilterBar(tags: availableTags, selection: $tag)
+            }
+        }
         .overlay(alignment: .bottomTrailing) { composeButton }
         .overlay {
             if messages.isEmpty { emptyState }
@@ -79,18 +84,6 @@ struct InboxHomeView: View {
     @ViewBuilder
     private var summaryCard: some View {
         Section {
-            if !availableTags.isEmpty {
-                TagFilterBar(
-                    tags: availableTags,
-                    count: { mail.count(of: $0, in: mailbox) },
-                    selection: $tag
-                )
-                .padding(.vertical, 4)
-                // Let the chips run the full width of the card rather than
-                // stopping at the standard row inset.
-                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 0))
-            }
-
             if !attention.isEmpty {
                 NavigationLink {
                     AttentionListView()

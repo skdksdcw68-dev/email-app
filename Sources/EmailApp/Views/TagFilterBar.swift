@@ -1,68 +1,61 @@
 import SwiftUI
 import UIKit
 
-/// The row of AI tag chips. Tapping the selected chip clears the filter.
+/// The row of AI tag pills, pinned under the title.
 ///
-/// Lives inside the summary card rather than in its own pinned bar under a
-/// hairline -- that separation was what made it look cramped and bolted on.
+/// Deliberately not inside a card or a section: it sits on the plain grouped
+/// background the way Mail's category filters do, with no hairline and no
+/// container. Boxing it was what made it read as cramped.
 struct TagFilterBar: View {
     let tags: [AITag]
-    let count: (AITag) -> Int
     @Binding var selection: AITag?
 
     var body: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 7) {
+            HStack(spacing: 9) {
                 ForEach(tags) { tag in
-                    Chip(
-                        tag: tag,
-                        count: count(tag),
-                        isSelected: selection == tag
-                    ) {
-                        withAnimation(.snappy(duration: 0.2)) {
+                    Pill(tag: tag, isSelected: selection == tag) {
+                        withAnimation(.snappy(duration: 0.22)) {
                             selection = selection == tag ? nil : tag
                         }
                     }
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
         .scrollIndicators(.hidden)
+        .background(Color(uiColor: .systemGroupedBackground))
     }
 }
 
-private struct Chip: View {
+private struct Pill: View {
     let tag: AITag
-    let count: Int
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
+            HStack(spacing: 7) {
                 Image(systemName: tag.systemImage)
-                    .font(.caption2.weight(.bold))
-                    // Unselected: the colour lives on the glyph so the label
-                    // stays readable. Selected: the capsule is the colour, so
-                    // the glyph takes the contrasting foreground.
+                    .font(.footnote.weight(.bold))
+                    // Unselected the colour lives on the glyph, so the label
+                    // stays readable; selected, the pill is the colour.
                     .foregroundStyle(isSelected ? tag.onColor : tag.color)
 
                 Text(tag.title)
-                    .font(.footnote.weight(.medium))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(isSelected ? tag.onColor : Color.primary)
                     .fixedSize()
-
-                Text("\(count)")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(isSelected ? tag.onColor.opacity(0.75) : Color.secondary)
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
             .background {
-                Capsule().fill(isSelected ? tag.color : Color(uiColor: .tertiarySystemFill))
+                Capsule().fill(isSelected ? tag.color : Color(uiColor: .secondarySystemFill))
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(tag.title), \(count) messages")
+        .accessibilityLabel(tag.title)
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 }
@@ -75,7 +68,10 @@ private struct PreviewHost: View {
     @State private var selection: AITag? = .urgent
 
     var body: some View {
-        TagFilterBar(tags: AITag.allCases, count: { _ in 3 }, selection: $selection)
-            .padding()
+        VStack(spacing: 0) {
+            TagFilterBar(tags: AITag.allCases, selection: $selection)
+            Spacer()
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
     }
 }
