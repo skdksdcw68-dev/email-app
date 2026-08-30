@@ -8,13 +8,14 @@ import UIKit
 /// container. Boxing it was what made it read as cramped.
 struct TagFilterBar: View {
     let tags: [AITag]
+    let count: (AITag) -> Int
     @Binding var selection: AITag?
 
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 9) {
                 ForEach(tags) { tag in
-                    Pill(tag: tag, isSelected: selection == tag) {
+                    Pill(tag: tag, count: count(tag), isSelected: selection == tag) {
                         withAnimation(.snappy(duration: 0.22)) {
                             selection = selection == tag ? nil : tag
                         }
@@ -31,6 +32,7 @@ struct TagFilterBar: View {
 
 private struct Pill: View {
     let tag: AITag
+    let count: Int
     let isSelected: Bool
     let action: () -> Void
 
@@ -47,6 +49,10 @@ private struct Pill: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(isSelected ? tag.onColor : Color.primary)
                     .fixedSize()
+
+                Text("\(count)")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(isSelected ? tag.onColor.opacity(0.7) : Color.secondary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
@@ -55,7 +61,7 @@ private struct Pill: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(tag.title)
+        .accessibilityLabel("\(tag.title), \(count) messages")
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 }
@@ -69,7 +75,7 @@ private struct PreviewHost: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TagFilterBar(tags: AITag.allCases, selection: $selection)
+            TagFilterBar(tags: AITag.allCases, count: { _ in 3 }, selection: $selection)
             Spacer()
         }
         .background(Color(uiColor: .systemGroupedBackground))

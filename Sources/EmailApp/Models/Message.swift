@@ -11,6 +11,9 @@ struct Message: Identifiable, Hashable, Codable {
     var isFlagged: Bool = false
     var mailbox: Mailbox = .inbox
 
+    /// Shown as a paperclip on the row, the way every mail client marks it.
+    var hasAttachment: Bool = false
+
     /// What the AI decided about this message.
     var tags: Set<AITag> = []
     /// One-line gist of the thread, written by the AI.

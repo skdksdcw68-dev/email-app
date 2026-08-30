@@ -7,29 +7,31 @@ struct MessageRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Circle()
-                .fill(Color.accentColor.opacity(message.isRead ? 0.12 : 0.22))
-                .frame(width: 40, height: 40)
-                .overlay {
-                    Text(message.sender.initials)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.tint)
+            SenderAvatar(
+                contact: message.sender,
+                tintOpacity: message.isRead ? 0.12 : 0.22
+            )
+            .overlay(alignment: .topLeading) {
+                if !message.isRead {
+                    Circle()
+                        .fill(.tint)
+                        .frame(width: 9, height: 9)
+                        .offset(x: -14, y: 15)
                 }
-                .overlay(alignment: .topLeading) {
-                    if !message.isRead {
-                        Circle()
-                            .fill(.tint)
-                            .frame(width: 9, height: 9)
-                            .offset(x: -14, y: 15)
-                    }
-                }
+            }
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack {
+                HStack(spacing: 6) {
                     Text(message.sender.name)
                         .font(.headline)
                         .fontWeight(message.isRead ? .regular : .bold)
-                    Spacer(minLength: 8)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if message.hasAttachment {
+                        Image(systemName: "paperclip")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     Text(message.listDate)
                         .font(.caption)
                         .foregroundStyle(.secondary)

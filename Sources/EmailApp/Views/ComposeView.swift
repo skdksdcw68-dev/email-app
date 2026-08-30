@@ -1,6 +1,10 @@
 import SwiftUI
 
 struct ComposeView: View {
+    /// When set, the sheet opens as a reply: recipient and subject prefilled,
+    /// with the original quoted underneath.
+    var replyingTo: Message? = nil
+
     @Environment(MailStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
@@ -43,8 +47,9 @@ struct ComposeView: View {
                         }
                 }
             }
-            .navigationTitle("New Message")
+            .navigationTitle(replyingTo == nil ? "New Message" : "Reply")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear(perform: prefill)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -58,6 +63,16 @@ struct ComposeView: View {
                 }
             }
         }
+    }
+
+    /// "Re: Re: x" is nobody's idea of a good subject line.
+    private func prefill() {
+        guard let original = replyingTo, recipient.isEmpty else { return }
+        recipient = original.sender.address
+        subject = original.subject.lowercased().hasPrefix("re:")
+            ? original.subject
+            : "Re: \(original.subject)"
+        messageBody = "\n\n---\nOn \(original.fullDate), \(original.sender.name) wrote:\n\(original.body)"
     }
 }
 

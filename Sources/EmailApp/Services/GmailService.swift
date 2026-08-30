@@ -175,9 +175,24 @@ enum GmailService {
             isFlagged: labels.contains("STARRED"),
             mailbox: .inbox
         )
+        message.hasAttachment = hasAttachment(in: payload)
 
         message.tags = MessageClassifier.tags(for: message, headers: headers, labels: labels)
         return message
+    }
+
+    /// A part with a filename is an attachment. Inline images referenced by a
+    /// HTML body have one too, so those are excluded by content-disposition
+    /// where Gmail provides it.
+    static func hasAttachment(in payload: [String: Any]) -> Bool {
+        if let filename = payload["filename"] as? String, !filename.isEmpty {
+            let headers = (payload["headers"] as? [[String: Any]] ?? [])
+            let disposition = headers.first {
+                ($0["name"] as? String)?.lowercased() == "content-disposition"
+            }?["value"] as? String ?? ""
+            if !disposition.lowercased().contains("inline") { return true }
+        }
+        return (payload["parts"] as? [[String: Any]] ?? []).contains { hasAttachment(in: $0) }
     }
 
     /// "Abel Amare <abel@example.com>" -> Contact.

@@ -45,7 +45,11 @@ struct InboxHomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) {
             if isBrowsing && !availableTags.isEmpty {
-                TagFilterBar(tags: availableTags, selection: $tag)
+                TagFilterBar(
+                    tags: availableTags,
+                    count: { mail.count(of: $0, in: mailbox) },
+                    selection: $tag
+                )
             }
         }
         .overlay(alignment: .bottomTrailing) { composeButton }
