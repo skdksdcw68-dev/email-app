@@ -35,6 +35,9 @@ struct AccountView: View {
 
     @Environment(UserStore.self) private var user
 
+    /// Which provider is mid-flight, so only that button shows a spinner.
+    @State private var pending: AppAccount.Provider?
+
     /// A struct rather than a tuple: Swift key paths cannot address tuple
     /// elements, so `ForEach(_, id: \.0)` does not compile.
     private struct ProviderOption: Identifiable {
@@ -69,26 +72,34 @@ struct AccountView: View {
             VStack(spacing: 10) {
                 ForEach(providers) { option in
                     Button {
-                        Task { await user.createAccount(with: option.provider) }
+                        pending = option.provider
+                        Task {
+                            await user.createAccount(with: option.provider)
+                            pending = nil
+                        }
                     } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: option.symbol)
-                            Text("\(mode.verb) \(option.provider.title)")
-                                .fontWeight(.medium)
+                        // The spinner replaces the label in place, on the button
+                        // that was actually tapped. No ellipsis, and no second
+                        // spinner floating underneath the stack.
+                        Group {
+                            if pending == option.provider {
+                                ProgressView()
+                            } else {
+                                HStack(spacing: 10) {
+                                    Image(systemName: option.symbol)
+                                    Text("\(mode.verb) \(option.provider.title)")
+                                        .fontWeight(.medium)
+                                }
+                            }
                         }
                         .frame(maxWidth: .infinity, minHeight: 30)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
-                    .disabled(user.isWorking)
+                    .disabled(pending != nil)
                 }
             }
             .padding(.horizontal, 24)
-
-            if user.isWorking {
-                ProgressView()
-                    .padding(.top, 18)
-            }
 
             Text("By continuing you agree to our Terms and Privacy Policy.")
                 .font(.caption)

@@ -10,7 +10,10 @@ struct OnboardingQuestion: Identifiable, Hashable {
     struct Option: Identifiable, Hashable {
         let id: String
         let label: String
-        var emoji: String? = nil
+        /// An SF Symbol name, not an emoji. Emoji render as someone else's
+        /// artwork at a fixed weight and do not respond to Dynamic Type,
+        /// tint, or dark mode. SF Symbols do all three.
+        var symbol: String? = nil
         /// Picking this clears every other choice, and picking anything else
         /// clears this. "Nothing, I trust my AI" cannot coexist with a list of
         /// things you want to approve.
@@ -84,14 +87,14 @@ extension OnboardingQuestion {
         selection: .single,
         layout: .grid,
         options: [
-            .init(id: "business_owner", label: "Business owner", emoji: "\u{1F4BC}"),
-            .init(id: "founder", label: "Entrepreneur / Founder", emoji: "\u{1F680}"),
-            .init(id: "professional", label: "Professional", emoji: "\u{1F9D1}\u{200D}\u{1F4BB}"),
-            .init(id: "manager", label: "Manager / Team lead", emoji: "\u{1F3E2}"),
-            .init(id: "sales", label: "Sales / Client-facing", emoji: "\u{1F91D}"),
-            .init(id: "freelancer", label: "Freelancer / Consultant", emoji: "\u{1F4BB}"),
-            .init(id: "student", label: "Student", emoji: "\u{1F393}"),
-            .init(id: "personal", label: "Personal email user", emoji: "\u{1F464}"),
+            .init(id: "business_owner", label: "Business owner", symbol: "building.2.fill"),
+            .init(id: "founder", label: "Entrepreneur / Founder", symbol: "lightbulb.fill"),
+            .init(id: "professional", label: "Professional", symbol: "briefcase.fill"),
+            .init(id: "manager", label: "Manager / Team lead", symbol: "person.3.fill"),
+            .init(id: "sales", label: "Sales / Client-facing", symbol: "megaphone.fill"),
+            .init(id: "freelancer", label: "Freelancer / Consultant", symbol: "laptopcomputer"),
+            .init(id: "student", label: "Student", symbol: "graduationcap.fill"),
+            .init(id: "personal", label: "Personal email user", symbol: "person.fill"),
         ]
     )
 

@@ -1,6 +1,11 @@
 import SwiftUI
 
-struct SettingsView: View {
+/// The You tab: how Maily works.
+///
+/// The onboarding answers are not decoration -- automation level, approval
+/// rules and writing style are literally the `autonomy`, `approvals` and `tone`
+/// questions, surfaced here so the user can see what their AI is set to.
+struct YouView: View {
     @Environment(UserStore.self) private var user
     @Environment(MailStore.self) private var mail
 
@@ -12,7 +17,7 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 accountSection
                 inboxSection
 
@@ -23,16 +28,20 @@ struct SettingsView: View {
                 }
 
                 preferencesSection
+                subscriptionSection
 
                 Section("About") {
                     LabeledContent("Version", value: appVersion)
+                    Link(destination: URL(string: "https://github.com/skdksdcw68-dev/email-app")!) {
+                        Label("Help & feedback", systemImage: "questionmark.circle")
+                    }
                 }
 
                 Section {
                     Button("Sign out", role: .destructive) { showingSignOutAlert = true }
                 }
             }
-            .navigationTitle("Settings")
+            .navigationTitle("You")
             .alert("Disconnect inbox?", isPresented: $showingDisconnectAlert) {
                 Button("Cancel", role: .cancel) {}
                 Button("Disconnect", role: .destructive) { mail.disconnect() }
@@ -53,7 +62,6 @@ struct SettingsView: View {
 
     // MARK: - Sections
 
-    /// The Maily account: who the customer is.
     @ViewBuilder
     private var accountSection: some View {
         if let account = user.account {
@@ -82,8 +90,8 @@ struct SettingsView: View {
         }
     }
 
-    /// The Google grant: which mailbox the AI may act on. Separate from the
-    /// account above -- disconnecting one does not touch the other.
+    /// Separate from the account above: this is a grant of access to one
+    /// mailbox, not an identity. Disconnecting it keeps the account intact.
     @ViewBuilder
     private var inboxSection: some View {
         if let inbox = mail.account {
@@ -93,20 +101,20 @@ struct SettingsView: View {
                     showingDisconnectAlert = true
                 }
             } header: {
-                Text("Inbox")
+                Text("Connected accounts")
             } footer: {
                 Text("Maily reads and organizes this mailbox on your behalf.")
             }
         } else {
-            Section("Inbox") {
+            Section("Connected accounts") {
                 Label("No inbox connected", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    /// Echoes back what onboarding collected, so it is visible and obviously
-    /// persisted rather than silently discarded.
+    /// Automation level, approval rules and writing style are the onboarding
+    /// answers, shown under the names the user would look for.
     @ViewBuilder
     private var preferencesSection: some View {
         let answered = user.questions.filter { !user.selections(for: $0).isEmpty }
@@ -114,7 +122,7 @@ struct SettingsView: View {
             Section {
                 ForEach(answered) { question in
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(question.title)
+                        Text(settingName(for: question))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Text(summary(for: question))
@@ -127,6 +135,33 @@ struct SettingsView: View {
             } footer: {
                 Text("Collected during setup. These shape how your AI works.")
             }
+        }
+    }
+
+    private var subscriptionSection: some View {
+        Section {
+            LabeledContent("Plan", value: "Maily Free")
+        } header: {
+            Text("Subscription")
+        } footer: {
+            Text("Pro adds AI drafting, follow-up management, multiple accounts and daily briefings.")
+        }
+    }
+
+    // MARK: - Helpers
+
+    /// The onboarding wording is a question; here it should read as a setting.
+    private func settingName(for question: OnboardingQuestion) -> String {
+        switch question.id {
+        case "autonomy": "Automation level"
+        case "approvals": "Approval rules"
+        case "tone": "Writing style"
+        case "response_time": "Response expectations"
+        case "priorities": "What matters most"
+        case "delegate": "Delegated to Maily"
+        case "role": "Your role"
+        case "usage": "What you use email for"
+        default: question.title
         }
     }
 
@@ -145,7 +180,7 @@ struct SettingsView: View {
 }
 
 #Preview {
-    SettingsView()
+    YouView()
         .environment(UserStore(defaults: .previews, startAt: .finished))
         .environment(MailStore.connected())
 }

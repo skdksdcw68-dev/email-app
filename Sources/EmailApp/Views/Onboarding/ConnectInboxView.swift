@@ -66,12 +66,14 @@ struct ConnectInboxView: View {
                     user.next()
                 }
             } label: {
-                HStack(spacing: 10) {
+                // Spinner replaces the label rather than sitting next to an
+                // ellipsis -- one indicator, in place.
+                Group {
                     if mail.isConnecting {
                         ProgressView().tint(.white)
+                    } else {
+                        Text("Connect Google").fontWeight(.semibold)
                     }
-                    Text(mail.isConnecting ? "Connecting\u{2026}" : "Connect Google")
-                        .fontWeight(.semibold)
                 }
                 .frame(maxWidth: .infinity, minHeight: 30)
             }

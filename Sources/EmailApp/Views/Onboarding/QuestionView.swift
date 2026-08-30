@@ -104,9 +104,12 @@ private struct OptionTile: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
-                if let emoji = option.emoji {
-                    Text(emoji).font(.title2)
+            VStack(alignment: .leading, spacing: 8) {
+                if let symbol = option.symbol {
+                    Image(systemName: symbol)
+                        .font(.title3)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
                 }
                 Text(option.label)
                     .font(.subheadline.weight(.medium))
@@ -114,7 +117,7 @@ private struct OptionTile: View {
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, minHeight: option.emoji == nil ? 56 : 92, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: option.symbol == nil ? 56 : 92, alignment: .topLeading)
             .padding(12)
             .background(background)
         }

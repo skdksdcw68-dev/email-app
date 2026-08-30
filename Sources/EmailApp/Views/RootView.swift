@@ -16,20 +16,39 @@ struct RootView: View {
 }
 
 /// The app proper, once onboarding is done.
+///
+/// Four tabs, and deliberately no "Home": the Inbox already holds the main
+/// content, and Apple's guidance warns against a redundant Home tab beside it.
+/// Search and Compose are actions inside the Inbox, not destinations worth one
+/// of four slots -- and the AI tags are layers inside the Inbox rather than
+/// tabs of their own.
+///
+///   Inbox  = what needs attention
+///   AI     = what Maily can do
+///   People = who matters
+///   You    = how Maily works
 struct MainTabView: View {
-    private enum AppTab: Hashable { case mail, settings }
+    private enum AppTab: Hashable { case inbox, ai, people, you }
 
-    @State private var selection: AppTab = .mail
+    @State private var selection: AppTab = .inbox
 
     var body: some View {
         TabView(selection: $selection) {
-            MailTabView()
-                .tabItem { Label("Mail", systemImage: "tray.fill") }
-                .tag(AppTab.mail)
+            InboxTabView()
+                .tabItem { Label("Inbox", systemImage: "tray.full.fill") }
+                .tag(AppTab.inbox)
 
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-                .tag(AppTab.settings)
+            AIView()
+                .tabItem { Label("AI", systemImage: "sparkles") }
+                .tag(AppTab.ai)
+
+            PeopleView()
+                .tabItem { Label("People", systemImage: "person.2.fill") }
+                .tag(AppTab.people)
+
+            YouView()
+                .tabItem { Label("You", systemImage: "person.crop.circle.fill") }
+                .tag(AppTab.you)
         }
     }
 }
