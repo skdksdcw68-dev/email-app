@@ -212,6 +212,59 @@ quotes around it.`;
   return json({ body: improved.trim(), model: DRAFT_MODEL });
 }
 
+// --------------------------------------------------------------------- ask
+
+// Answers a question about the mailbox. The app has already picked which
+// messages are relevant and sends only those, numbered -- retrieval happens
+// on the device against mail it already holds, so this never sees a whole
+// mailbox and never pays to.
+async function ask(body: Record<string, unknown>) {
+  const question = String(body.question ?? "").slice(0, 500);
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+
+  if (!question) return json({ error: "No question was asked." }, 400);
+
+  const digest = messages
+    .slice(0, 25)
+    .map((message: Record<string, string>, index: number) =>
+      [
+        `[${index + 1}]`,
+        `From: ${message.from ?? ""}`,
+        `Date: ${message.date ?? ""}`,
+        `Subject: ${message.subject ?? ""}`,
+        `${(message.body ?? "").slice(0, 400)}`,
+      ].join("\n")
+    )
+    .join("\n\n");
+
+  const system = `You answer questions about a person's email. You are given a
+numbered list of their messages and nothing else.
+
+Rules:
+- Answer only from the messages given. If they do not contain the answer, say
+  so plainly. Never guess a name, a date, an amount or a commitment.
+- Cite the messages you used as [1], [2] inline, right after the claim they
+  support. Every specific fact needs one.
+- Be brief. A list of three things beats a paragraph about them.
+- No preamble. Do not restate the question.
+- If nothing is relevant, say "Nothing in your recent mail covers that."`;
+
+  const content = digest
+    ? `Question: ${question}\n\nTheir messages:\n\n${digest}`
+    : `Question: ${question}\n\nThey have no matching messages.`;
+
+  const answer = await openai(
+    DRAFT_MODEL,
+    [
+      { role: "system", content: system },
+      { role: "user", content },
+    ],
+    false,
+  );
+
+  return json({ answer: answer.trim(), model: DRAFT_MODEL });
+}
+
 // ------------------------------------------------------------------ router
 
 Deno.serve(async (request) => {
@@ -230,6 +283,8 @@ Deno.serve(async (request) => {
         return await draft(payload);
       case "refine":
         return await refine(payload);
+      case "ask":
+        return await ask(payload);
       default:
         return json({ error: `unknown action: ${payload.action}` }, 400);
     }

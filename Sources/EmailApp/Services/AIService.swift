@@ -115,6 +115,48 @@ enum AIService {
         return try await call(payload)
     }
 
+    struct Answer: Decodable {
+        let answer: String
+    }
+
+    /// Asks a question about the mailbox.
+    ///
+    /// `context` has already been chosen on the device, so only a handful of
+    /// messages -- headers and the opening of each body -- leave the phone.
+    /// The model is told to cite them by number, which is what makes an answer
+    /// checkable rather than merely confident.
+    static func ask(question: String, context: [Message]) async throws -> Answer {
+        let digest = context.map { message in
+            [
+                "from": "\(message.sender.name) <\(message.sender.address)>",
+                "date": message.fullDate,
+                "subject": message.subject,
+                "body": String(message.body.prefix(400)),
+            ]
+        }
+
+        var request = URLRequest(url: SupabaseConfig.url.appending(path: "functions/v1/ai"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(await bearer())", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(
+            withJSONObject: ["action": "ask", "question": question, "messages": digest]
+        )
+        request.timeoutInterval = 45
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AIError.malformed }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw AIError.server(message ?? "AI service returned \(http.statusCode).")
+        }
+        do {
+            return try JSONDecoder().decode(Answer.self, from: data)
+        } catch {
+            throw AIError.malformed
+        }
+    }
+
     // MARK: - Transport
 
     private static func call<T: Decodable>(_ payload: [String: String]) async throws -> T {

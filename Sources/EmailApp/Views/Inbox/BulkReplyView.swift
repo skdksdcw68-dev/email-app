@@ -4,10 +4,10 @@ import UIKit
 /// Drafts a reply to every message that needs one, then shows them for
 /// approval one at a time.
 ///
-/// Nothing is sent by pressing Generate. Each draft has to be looked at and
-/// sent individually -- a single button that mails twenty people on your
-/// behalf is not a feature, it is an accident waiting to happen, and the one
-/// thing you cannot take back.
+/// Nothing is sent by pressing Generate. Every draft is listed and editable
+/// first, and can then be sent one at a time or all at once. The send-all
+/// button confirms and names its recipients, because sending mail is the only
+/// action in this app that cannot be taken back.
 struct BulkReplyView: View {
     let messages: [Message]
 
@@ -20,6 +20,10 @@ struct BulkReplyView: View {
     @State private var drafts: [PendingReply] = []
     @State private var generated = 0
     @State private var isWorking = false
+    @State private var isSending = false
+    @State private var isConfirmingSendAll = false
+    @State private var sentCount = 0
+    @State private var sendTarget = 0
     @State private var errorMessage: String?
 
     struct PendingReply: Identifiable {
@@ -62,7 +66,7 @@ struct BulkReplyView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("\(eligible.count) \(eligible.count == 1 ? "reply" : "replies") to write")
                         .font(.title3.weight(.bold))
-                    Text("Maily writes a draft for each one. You read every draft and send them yourself — nothing goes out from this screen.")
+                    Text("Maily writes a draft for each one. You review them all first — nothing is sent from this screen.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -148,6 +152,68 @@ struct BulkReplyView: View {
 
     // MARK: - Review
 
+    private var unsent: [PendingReply] {
+        drafts.filter { !$0.isSent && !$0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    /// One button for the lot, plus per-draft send for anything you want to
+    /// handle yourself. It confirms first and names the recipients: this is
+    /// the only action in the app that cannot be taken back.
+    private var sendAllBar: some View {
+        VStack(spacing: 6) {
+            if isSending {
+                Text("Sending \(sentCount) of \(sendTarget)…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button {
+                isConfirmingSendAll = true
+            } label: {
+                HStack(spacing: 8) {
+                    if isSending {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "paperplane.fill")
+                    }
+                    Text("Send all \(unsent.count)")
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(Capsule().fill(unsent.isEmpty ? Color.secondary : Color.accentColor))
+            }
+            .buttonStyle(.plain)
+            .disabled(unsent.isEmpty || isSending)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+        .confirmationDialog(
+            "Send \(unsent.count) replies?",
+            isPresented: $isConfirmingSendAll,
+            titleVisibility: .visible
+        ) {
+            Button("Send all \(unsent.count)", role: .destructive) {
+                Task { await sendAll() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(recipientSummary)
+        }
+    }
+
+    /// Names, not a number. "Send 20 replies?" is not informed consent.
+    private var recipientSummary: String {
+        let names = unsent.map(\.message.sender.name)
+        let shown = names.prefix(4).joined(separator: ", ")
+        let rest = names.count - min(4, names.count)
+        let list = rest > 0 ? "\(shown) and \(rest) more" : shown
+        return "Going to \(list). This cannot be undone."
+    }
+
     private var review: some View {
         List {
             ForEach($drafts) { $draft in
@@ -200,6 +266,7 @@ struct BulkReplyView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .safeAreaInset(edge: .bottom) { sendAllBar }
     }
 
     // MARK: - Work
@@ -239,6 +306,24 @@ struct BulkReplyView: View {
         }
 
         drafts = produced
+    }
+
+    /// Sequential, and it stops on nothing -- one failure should not silently
+    /// abandon the rest. Whatever fails keeps its error and stays on screen to
+    /// be retried individually.
+    private func sendAll() async {
+        let targets = unsent.map(.id)
+        guard !targets.isEmpty else { return }
+
+        isSending = true
+        sentCount = 0
+        sendTarget = targets.count
+        defer { isSending = false }
+
+        for id in targets {
+            await send(id)
+            sentCount += 1
+        }
     }
 
     private func send(_ id: Message.ID) async {

@@ -13,7 +13,34 @@ struct AIView: View {
             List {
                 briefing
 
-                Section("Ask Maily") {
+                Section {
+                    // No navigationDestination here: the stack below already
+                    // registers one for Message.ID, and a second registration
+                    // for the same type on the same stack is ignored with a
+                    // runtime warning.
+                    NavigationLink {
+                        AskMailyView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "sparkles")
+                                .font(.body)
+                                .foregroundStyle(.tint)
+                                .frame(width: 26)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Ask Maily anything")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("Answers cite the emails they came from.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+
+                followUpSection
+
+                Section("Quick questions") {
                     ForEach(AIQuestion.all) { question in
                         NavigationLink(value: question) {
                             HStack(spacing: 12) {
@@ -30,15 +57,50 @@ struct AIView: View {
                     }
                 }
 
-                Section {
-                    Label("Free-form questions and AI drafting arrive with the model.", systemImage: "info.circle")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
             }
             .navigationTitle("AI")
             .navigationDestination(for: AIQuestion.self) { AIAnswerView(question: $0) }
             .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
+        }
+    }
+
+    /// The thing a normal inbox cannot tell you: what has gone quiet.
+    ///
+    /// "Waiting on them" is the half people actually lose -- you asked for
+    /// something a fortnight ago and the last message in the thread is your
+    /// own, buried in Sent, so nothing ever resurfaces it.
+    @ViewBuilder
+    private var followUpSection: some View {
+        let followUps = mail.followUps
+        if !followUps.isEmpty {
+            Section("Follow-ups") {
+                ForEach(followUps.prefix(8)) { followUp in
+                    NavigationLink(value: followUp.message.id) {
+                        HStack(spacing: 12) {
+                            Image(systemName: followUp.direction == .waitingOnYou
+                                  ? "arrowshape.turn.up.left.fill"
+                                  : "clock.arrow.circlepath")
+                                .font(.footnote)
+                                .foregroundStyle(followUp.isOverdue ? Color.orange : Color.secondary)
+                                .frame(width: 22)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(followUp.message.sender.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .lineLimit(1)
+                                Text(followUp.direction == .waitingOnYou
+                                     ? "Waiting on you · \(followUp.ageDescription)"
+                                     : "No reply since \(followUp.ageDescription)")
+                                    .font(.caption)
+                                    .foregroundStyle(followUp.isOverdue ? Color.orange : Color.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            } footer: {
+                Text("Conversations where somebody is still waiting.")
+            }
         }
     }
 

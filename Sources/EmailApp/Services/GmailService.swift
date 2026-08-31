@@ -55,13 +55,15 @@ enum GmailService {
         accessToken: String,
         limit: Int = 25,
         pageToken: String? = nil,
-        query: String? = nil
+        query: String? = nil,
+        label: String = "INBOX"
     ) async throws -> Page {
         let (ids, next) = try await messageIDs(
             accessToken: accessToken,
             limit: limit,
             pageToken: pageToken,
-            query: query
+            query: query,
+            label: label
         )
 
         // Fetch details concurrently but keep the fan-out modest; Gmail's
@@ -87,12 +89,13 @@ enum GmailService {
         accessToken: String,
         limit: Int,
         pageToken: String?,
-        query searchQuery: String? = nil
+        query searchQuery: String? = nil,
+        label: String = "INBOX"
     ) async throws -> ([String], String?) {
         var components = URLComponents(string: "\(base)/messages")!
         var query: [URLQueryItem] = [
             .init(name: "maxResults", value: String(limit)),
-            .init(name: "labelIds", value: "INBOX"),
+            .init(name: "labelIds", value: label),
         ]
         if let pageToken { query.append(.init(name: "pageToken", value: pageToken)) }
         if let searchQuery { query.append(.init(name: "q", value: searchQuery)) }
@@ -277,7 +280,7 @@ enum GmailService {
             date: date,
             isRead: !labels.contains("UNREAD"),
             isFlagged: labels.contains("STARRED"),
-            mailbox: .inbox
+            mailbox: mailbox(for: labels)
         )
         message.remoteID = json["id"] as? String
         message.threadID = json["threadId"] as? String
@@ -287,6 +290,24 @@ enum GmailService {
 
         message.tags = MessageClassifier.tags(for: message, headers: headers, labels: labels)
         return message
+    }
+
+    /// Which folder a message belongs to, from Gmail's own labels.
+    ///
+    /// This was hardcoded to `.inbox`, which was fine while only the inbox was
+    /// ever fetched. Importing Sent as well makes it wrong: every sent message
+    /// would have landed in the inbox list.
+    ///
+    /// Order matters. A message can carry several of these at once -- a sent
+    /// message that was later trashed has both -- so the most specific state
+    /// wins, and INBOX is the fallback rather than the first test.
+    static func mailbox(for labels: Set<String>) -> Mailbox {
+        if labels.contains("TRASH") { return .trash }
+        if labels.contains("DRAFT") { return .drafts }
+        if labels.contains("SENT") { return .sent }
+        if labels.contains("INBOX") { return .inbox }
+        // Not in the inbox and not anywhere special: archived.
+        return .archive
     }
 
     /// A part with a filename is an attachment. Inline images referenced by a

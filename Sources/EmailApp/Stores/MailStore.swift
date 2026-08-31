@@ -206,6 +206,23 @@ final class MailStore {
             }
         } while token != nil
 
+        // Sent mail, in one page rather than the full window. It is not for
+        // reading -- it is what makes "waiting on their reply" answerable at
+        // all, since that means a message you sent that nobody came back on.
+        // gmail.readonly already covers SENT, so this costs no new scope.
+        if let accessToken = try? await AuthService.currentGmailAccessToken(),
+           let sent = try? await GmailService.fetchInbox(
+               accessToken: accessToken,
+               limit: Self.importPageSize,
+               query: GmailService.importWindow,
+               label: "SENT"
+           ) {
+            for message in sent.messages {
+                guard let remoteID = message.remoteID else { continue }
+                if seen.insert(remoteID).inserted { collected.append(message) }
+            }
+        }
+
         importProgress = .saving
         await MessageArchive.save(collected)
 
@@ -320,6 +337,59 @@ final class MailStore {
             ClassificationCache.store(classification, for: remoteID)
         }
     }
+
+    /// Conversations waiting on somebody, in either direction.
+    var followUps: [FollowUp] {
+        guard let account else { return [] }
+        return messages.followUps(myAddress: account.email)
+    }
+
+    /// The messages worth showing the model for a given question.
+    ///
+    /// Retrieval happens here, on the device, against the archive we already
+    /// hold -- so a question costs roughly what classifying one email costs,
+    /// rather than what reading the mailbox costs. Only these few go over the
+    /// wire, and only their headers and opening lines.
+    func context(for question: String, limit: Int = 20) -> [Message] {
+        let words = Set(
+            question.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { $0.count > 3 && !Self.stopWords.contains($0) }
+        )
+
+        let scored = messages.map { message -> (Message, Int) in
+            var score = 0
+
+            if !words.isEmpty {
+                let haystack = "\(message.subject) \(message.sender.name) \(message.body.prefix(400))".lowercased()
+                score += words.filter(haystack.contains).count * 10
+            }
+
+            // Recency and priority break ties, and carry the whole thing for a
+            // vague question like "what needs my attention" that matches no
+            // keywords at all.
+            let days = Calendar.current.dateComponents([.day], from: message.date, to: .now).day ?? 99
+            score += max(0, 14 - days)
+            if message.tags.contains(.urgent) { score += 12 }
+            if message.tags.contains(.veryImportant) { score += 8 }
+            if message.tags.contains(.needsReply) { score += 6 }
+            if message.tags.contains(.noReplyNeeded) { score -= 8 }
+
+            return (message, score)
+        }
+
+        return scored
+            .filter { $0.1 > 0 }
+            .sorted { $0.1 > $1.1 }
+            .prefix(limit)
+            .map(\.0)
+    }
+
+    private static let stopWords: Set<String> = [
+        "what", "which", "there", "their", "about", "should", "would", "could",
+        "have", "this", "that", "with", "from", "they", "them", "been", "were",
+        "does", "email", "emails", "mail", "maily", "please", "show",
+    ]
 
     /// How many messages share this one's conversation. 1 means it stands alone.
     func threadCount(for message: Message) -> Int {
