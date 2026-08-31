@@ -182,7 +182,10 @@ struct ComposeView: View {
         TextEditor(text: $messageBody)
             .font(.body)
             .scrollContentBackground(.hidden)
+            .foregroundStyle(justDrafted ? Color(uiColor: .systemIndigo) : Color.primary)
+            .scaleEffect(justDrafted ? 1.012 : 1)
             .shimmering(justDrafted)
+            .animation(.spring(response: 0.5, dampingFraction: 0.62), value: justDrafted)
             .padding(.horizontal, 12)
             .padding(.top, 6)
             .overlay(alignment: .topLeading) {
@@ -216,22 +219,36 @@ struct ComposeView: View {
                 }
             }
 
-            HStack(spacing: dictation.isRecording ? 0 : 14) {
-                Image(systemName: "paperclip")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .frame(width: dictation.isRecording ? 0 : nil)
-                    .opacity(dictation.isRecording ? 0 : 1)
-                    .clipped()
+            HStack(spacing: 12) {
+                Button {
+                    // Attachments need a picker and an upload path; neither
+                    // exists yet, so this stays visibly unavailable rather
+                    // than looking live and doing nothing.
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                        .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
+                }
+                .buttonStyle(.plain)
+                .disabled(true)
+                .frame(width: isExpanded ? 0 : 44)
+                .opacity(isExpanded ? 0 : 1)
+                .clipped()
 
                 holdToReply
             }
-            .animation(.snappy(duration: 0.22), value: dictation.isRecording)
+            .animation(.spring(response: 0.34, dampingFraction: 0.74), value: isExpanded)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
     }
+
+    /// Full width only while it is doing something. At rest it is a compact
+    /// pill, so the paperclip beside it has room to be a real target.
+    private var isExpanded: Bool { dictation.isRecording || isDrafting }
 
     /// Press and hold, speak, release. One view throughout -- swapping it out
     /// mid-press would lose the gesture and the release would never fire.
@@ -246,6 +263,7 @@ struct ComposeView: View {
 
             Text(buttonLabel)
                 .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
 
             if dictation.isRecording {
                 Text("· release to send")
@@ -254,13 +272,11 @@ struct ComposeView: View {
             }
         }
         .foregroundStyle(.white)
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, isExpanded ? 20 : 18)
+        .frame(maxWidth: isExpanded ? .infinity : nil)
         .frame(height: dictation.isRecording ? 54 : 46)
         .background(Capsule().fill(dictation.isRecording ? Color.red : Color.accentColor))
-        .shadow(
-            color: Color.red.opacity(dictation.isRecording ? 0.35 : 0),
-            radius: 12
-        )
+        .shadow(color: Color.red.opacity(dictation.isRecording ? 0.35 : 0), radius: 12)
         .contentShape(Capsule())
         .gesture(
             DragGesture(minimumDistance: 0)
@@ -322,17 +338,19 @@ struct ComposeView: View {
     // MARK: - Prefill
 
     /// "Re: Re: x" is nobody's idea of a good subject line.
+    /// Recipient and subject only.
+    ///
+    /// The original is deliberately NOT quoted into the editor. It made every
+    /// reply open on a wall of someone else's text that had to be scrolled
+    /// past before you could type -- and the thread is one tap away behind the
+    /// sheet anyway.
     private func prefill() {
         guard let original = replyingTo, recipient.isEmpty else { return }
         recipient = original.sender.address
         subject = original.subject.lowercased().hasPrefix("re:")
             ? original.subject
             : "Re: \(original.subject)"
-        if let initialBody {
-            messageBody = initialBody
-        } else {
-            messageBody = "\n\n---\nOn \(original.fullDate), \(original.sender.name) wrote:\n\(original.body)"
-        }
+        if let initialBody { messageBody = initialBody }
     }
 }
 

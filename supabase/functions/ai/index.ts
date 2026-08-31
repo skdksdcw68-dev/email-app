@@ -99,15 +99,24 @@ async function classify(body: Record<string, string>) {
 async function draft(body: Record<string, string>) {
   const tone = body.tone ?? "match how I already write";
 
+  // Emoji only where the chosen tone invites it. A formal reply with a
+  // smiley in it reads worse than no emoji at all.
+  const playful = /casual|warm|friendly|match how/i.test(tone);
+  const emojiRule = playful
+    ? "Use an emoji where it genuinely adds warmth -- usually one, never more than two, and never in the opening words."
+    : "No emoji.";
+
   const system = `You write email replies on behalf of the user.
 
 Tone: ${tone}.
+${emojiRule}
 
 Rules:
 - Reply to the message shown. Do not invent facts, names, dates or commitments.
 - If the instruction is vague, write the shortest reply that honours it.
 - No subject line, no "Dear", no signature block. Body text only.
-- Match the length of the original. A two-line email gets a two-line reply.`;
+- Match the length of the original. A two-line email gets a two-line reply.
+- Sound like a person wrote it quickly and meant it, not like a press release.`;
 
   const content = [
     `The message being replied to:`,

@@ -87,7 +87,18 @@ struct SenderAvatar: View {
 
     private var letterAvatar: some View {
         Circle()
-            .fill(color.opacity(isMuted ? 0.55 : 1))
+            .fill(color)
+            // A light-to-dark sheen instead of a flat disc. Color.mix would be
+            // tidier but is iOS 18, and this target is 17.
+            .overlay {
+                LinearGradient(
+                    colors: [.white.opacity(0.22), .black.opacity(0.18)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(Circle())
+            }
+            .opacity(isMuted ? 0.62 : 1)
             .overlay {
                 Text(letter)
                     .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))

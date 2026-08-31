@@ -93,9 +93,14 @@ struct MessageDetailView: View {
         } label: {
             Image(systemName: "ellipsis")
                 .font(.body.weight(.semibold))
-                .frame(width: 32, height: 32)
+                .foregroundStyle(.tint)
+                .frame(width: 34, height: 34)
                 .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
+                .contentShape(Circle())
         }
+        // Without .plain the toolbar renders its own button background behind
+        // this one, and the circle reads as two stacked shapes.
+        .buttonStyle(.plain)
         .accessibilityLabel("More options")
     }
 

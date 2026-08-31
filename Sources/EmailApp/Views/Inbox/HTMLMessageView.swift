@@ -33,45 +33,70 @@ struct HTMLMessageView: UIViewRepresentable {
         context.coordinator.observe(webView)
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
-        webView.isOpaque = true
-        webView.backgroundColor = .white
-        webView.scrollView.backgroundColor = .white
         return webView
+    }
+
+    /// Whether this message brings its own design.
+    ///
+    /// A branded template sets its own backgrounds and colours inline, and
+    /// those beat any stylesheet we add -- inverting it produces white text on
+    /// the sender's own white panel. A plain message declares none of that and
+    /// can safely follow the system appearance.
+    static func isDesigned(_ html: String) -> Bool {
+        let markers = ["bgcolor=", "background-color", "background:", "<table"]
+        let lowered = html.lowercased()
+        return markers.contains { lowered.contains($0) }
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         guard context.coordinator.loadedHTML != html else { return }
         context.coordinator.loadedHTML = html
-        webView.loadHTMLString(Self.wrap(html), baseURL: nil)
+
+        let designed = Self.isDesigned(html)
+        // A designed email keeps its white canvas; a plain one gets a
+        // transparent background so the app's own surface shows through.
+        webView.isOpaque = designed
+        webView.backgroundColor = designed ? .white : .clear
+        webView.scrollView.backgroundColor = designed ? .white : .clear
+
+        webView.loadHTMLString(Self.wrap(html, designed: designed), baseURL: nil)
     }
 
     /// A viewport, a readable type scale, and images clamped to the width.
     /// `color-scheme: light dark` lets a message that declares no colours
     /// follow the system appearance instead of glowing white at night.
-    private static func wrap(_ html: String) -> String {
+    private static func wrap(_ html: String, designed: Bool) -> String {
+        // Only a plain message gets the dark treatment. See isDesigned.
+        let adaptive = designed ? "" : """
+          @media (prefers-color-scheme: dark) {
+            html, body { background: transparent !important; color: #F2F2F7 !important; }
+            p, div, span, td, li, h1, h2, h3, h4 { color: #F2F2F7 !important; }
+            a { color: #6EA8FE !important; }
+            blockquote { color: #A0A0A8 !important; border-left-color: rgba(255,255,255,0.25) !important; }
+          }
         """
+
+        let base = designed
+            ? "html, body { background: #ffffff; color: #111111; }"
+            : "html, body { background: transparent; color: #111111; }"
+
+        return """
         <!doctype html>
         <html>
         <head>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          /* Deliberately light-only. Email HTML is written assuming a white
-             background, and its own inline colours win over any dark theme --
-             which is exactly how dark text ends up invisible on a dark card.
-             Gmail renders messages on white for the same reason. */
-          :root { color-scheme: light; }
-          html, body { background: #ffffff; color: #111111; }
+          :root { color-scheme: light dark; }
+          \(base)
           body {
             margin: 0;
-            padding: 14px;
-            font: -apple-system-body;
+            padding: \(designed ? 14 : 0)px;
             font-family: -apple-system, system-ui, sans-serif;
             font-size: 17px;
             line-height: 1.45;
             word-break: break-word;
             overflow-wrap: anywhere;
             -webkit-text-size-adjust: 100%;
-            background: transparent;
           }
           img { max-width: 100% !important; height: auto !important; }
           table { max-width: 100% !important; }
@@ -82,6 +107,7 @@ struct HTMLMessageView: UIViewRepresentable {
             border-left: 3px solid rgba(128,128,128,0.35);
             color: rgba(128,128,128,1);
           }
+          \(adaptive)
         </style>
         </head>
         <body>\(html)</body>
