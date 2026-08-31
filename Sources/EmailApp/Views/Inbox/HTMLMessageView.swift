@@ -33,9 +33,9 @@ struct HTMLMessageView: UIViewRepresentable {
         context.coordinator.observe(webView)
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
+        webView.isOpaque = true
+        webView.backgroundColor = .white
+        webView.scrollView.backgroundColor = .white
         return webView
     }
 
@@ -55,10 +55,15 @@ struct HTMLMessageView: UIViewRepresentable {
         <head>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          :root { color-scheme: light dark; }
+          /* Deliberately light-only. Email HTML is written assuming a white
+             background, and its own inline colours win over any dark theme --
+             which is exactly how dark text ends up invisible on a dark card.
+             Gmail renders messages on white for the same reason. */
+          :root { color-scheme: light; }
+          html, body { background: #ffffff; color: #111111; }
           body {
             margin: 0;
-            padding: 0;
+            padding: 14px;
             font: -apple-system-body;
             font-family: -apple-system, system-ui, sans-serif;
             font-size: 17px;

@@ -102,6 +102,27 @@ enum AuthService {
         )
     }
 
+    /// Silently restores the previous Google sign-in, with no consent screen.
+    /// Without this the app forgets the mailbox on every cold launch and the
+    /// user has to reconnect each time they open it.
+    static func restoreGmail() async -> GmailSession? {
+        guard let user = try? await GIDSignIn.sharedInstance.restorePreviousSignIn() else {
+            return nil
+        }
+        // A restored session can come back without the Gmail scopes -- the
+        // grant may have been revoked in the Google account settings.
+        guard Set(user.grantedScopes ?? []).isSuperset(of: Set(GmailService.scopes)),
+              let email = user.profile?.email
+        else { return nil }
+
+        try? await user.refreshTokensIfNeeded()
+        return GmailSession(
+            email: email,
+            displayName: user.profile?.name ?? email,
+            accessToken: user.accessToken.tokenString
+        )
+    }
+
     /// A fresh access token for an already-connected mailbox. Google's tokens
     /// are short-lived; the SDK refreshes silently when one is close to expiry.
     static func currentGmailAccessToken() async throws -> String {

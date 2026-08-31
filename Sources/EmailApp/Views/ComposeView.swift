@@ -16,7 +16,17 @@ struct ComposeView: View {
     var initialBody: String? = nil
 
     @Environment(MailStore.self) private var store
+    @Environment(UserStore.self) private var user
     @Environment(\.dismiss) private var dismiss
+
+    @State private var dictation = DictationService()
+    /// Latched synchronously on touch-down. onChanged fires continuously and
+    /// isRecording only flips once the audio engine is up, so guarding on that
+    /// alone lets several starts stack and crash on a duplicate audio tap.
+    @State private var isHolding = false
+    @State private var isDrafting = false
+    @State private var justDrafted = false
+    @State private var draftError: String?
 
     @State private var recipient = ""
     @State private var cc = ""
@@ -62,8 +72,8 @@ struct ComposeView: View {
                         Label("Send", systemImage: "paperplane.fill")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
+                            .padding(.horizontal, 22)
+                            .padding(.vertical, 8)
                             .background(Capsule().fill(canSend ? Color.accentColor : Color.secondary))
                     }
                     .buttonStyle(.plain)
@@ -172,6 +182,7 @@ struct ComposeView: View {
         TextEditor(text: $messageBody)
             .font(.body)
             .scrollContentBackground(.hidden)
+            .shimmering(justDrafted)
             .padding(.horizontal, 12)
             .padding(.top, 6)
             .overlay(alignment: .topLeading) {
@@ -186,34 +197,126 @@ struct ComposeView: View {
     }
 
     private var bottomBar: some View {
-        HStack(spacing: 14) {
-            Button {
-                // Attachments need a picker and an upload path; neither exists
-                // yet, so this is deliberately inert rather than misleading.
-            } label: {
+        VStack(spacing: 8) {
+            if isDrafting {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text("Updating draft…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text("Applying your changes")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            } else if let problem = draftError ?? dictation.error {
+                HStack {
+                    Text(problem).font(.caption).foregroundStyle(.red)
+                    Spacer(minLength: 0)
+                }
+            }
+
+            HStack(spacing: dictation.isRecording ? 0 : 14) {
                 Image(systemName: "paperclip")
                     .font(.body)
                     .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(true)
+                    .frame(width: dictation.isRecording ? 0 : nil)
+                    .opacity(dictation.isRecording ? 0 : 1)
+                    .clipped()
 
-            Button {
-                store.send(subject: subject, to: recipient, body: messageBody)
-                dismiss()
-            } label: {
-                Text(replyingTo == nil ? "Send message" : "Send reply")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 46)
-                    .background(Capsule().fill(canSend ? Color.accentColor : Color.secondary))
+                holdToReply
             }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
+            .animation(.snappy(duration: 0.22), value: dictation.isRecording)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    /// Press and hold, speak, release. One view throughout -- swapping it out
+    /// mid-press would lose the gesture and the release would never fire.
+    private var holdToReply: some View {
+        HStack(spacing: 8) {
+            if isDrafting {
+                ProgressView().tint(.white)
+            } else {
+                Image(systemName: dictation.isRecording ? "waveform" : "mic.fill")
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            Text(buttonLabel)
+                .font(.subheadline.weight(.semibold))
+
+            if dictation.isRecording {
+                Text("· release to send")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+        }
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity)
+        .frame(height: dictation.isRecording ? 54 : 46)
+        .background(Capsule().fill(dictation.isRecording ? Color.red : Color.accentColor))
+        .shadow(
+            color: Color.red.opacity(dictation.isRecording ? 0.35 : 0),
+            radius: 12
+        )
+        .contentShape(Capsule())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in beginHold() }
+                .onEnded { _ in endHold() }
+        )
+        .disabled(isDrafting)
+        .accessibilityLabel("Hold to dictate a reply")
+    }
+
+    private var buttonLabel: String {
+        if isDrafting { return "Updating Draft…" }
+        return dictation.isRecording ? "Recording" : "Hold to Reply"
+    }
+
+    private func beginHold() {
+        guard !isHolding, !isDrafting else { return }
+        isHolding = true
+        Task { await dictation.start() }
+    }
+
+    private func endHold() {
+        guard isHolding else { return }
+        isHolding = false
+        dictation.stop()
+        Task { await writeFromDictation() }
+    }
+
+    /// The spoken words are an instruction, not the reply text: the model turns
+    /// "tell him thursday works" into an actual email, in the tone chosen
+    /// during onboarding.
+    private func writeFromDictation() async {
+        let spoken = dictation.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let original = replyingTo, !spoken.isEmpty else { return }
+
+        isDrafting = true
+        draftError = nil
+        defer { isDrafting = false }
+
+        do {
+            let draft = try await AIService.draft(
+                replyingTo: original,
+                instruction: spoken,
+                tone: user.tonePreference
+            )
+            messageBody = draft.body
+            dictation.reset()
+
+            justDrafted = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.4))
+                justDrafted = false
+            }
+        } catch {
+            draftError = error.localizedDescription
+        }
     }
 
     // MARK: - Prefill
@@ -234,10 +337,14 @@ struct ComposeView: View {
 }
 
 #Preview("New") {
-    ComposeView().environment(MailStore.connected())
+    ComposeView()
+        .environment(MailStore.connected())
+        .environment(UserStore(defaults: .previews, startAt: .finished))
 }
 
 #Preview("Reply") {
     let store = MailStore.connected()
-    return ComposeView(replyingTo: store.messages(in: .inbox)[0]).environment(store)
+    return ComposeView(replyingTo: store.messages(in: .inbox)[0])
+        .environment(store)
+        .environment(UserStore(defaults: .previews, startAt: .finished))
 }

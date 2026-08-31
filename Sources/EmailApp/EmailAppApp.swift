@@ -19,6 +19,11 @@ struct EmailAppApp: App {
                 .onOpenURL { url in
                     GIDSignIn.sharedInstance.handle(url)
                 }
+                // Re-establish the Google session silently, so a cold launch
+                // does not look like being signed out.
+                .onAppear {
+                    Task { await mail.restore() }
+                }
         }
     }
 }

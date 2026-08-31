@@ -16,9 +16,53 @@ final class MailStore {
 
     var isConnected: Bool { account != nil }
 
+    private static let accountKey = "mail.account"
+
     init(account: GmailAccount? = nil, messages: [Message] = []) {
-        self.account = account
+        // A previously connected mailbox is remembered so a cold launch does
+        // not present the connect screen to someone already signed in.
+        if let account {
+            self.account = account
+        } else if let data = UserDefaults.standard.data(forKey: Self.accountKey) {
+            self.account = try? JSONDecoder().decode(GmailAccount.self, from: data)
+        }
         self.messages = messages
+    }
+
+    private func persistAccount() {
+        guard let account, let data = try? JSONEncoder().encode(account) else {
+            UserDefaults.standard.removeObject(forKey: Self.accountKey)
+            return
+        }
+        UserDefaults.standard.set(data, forKey: Self.accountKey)
+    }
+
+    /// Called at launch. Re-establishes the Google session without a consent
+    /// screen and pulls fresh mail; falls back to the connect screen only if
+    /// the grant is genuinely gone.
+    func restore() async {
+        guard isConnected, messages.isEmpty, !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        guard let session = await AuthService.restoreGmail() else {
+            // The grant was revoked or expired beyond recovery.
+            account = nil
+            persistAccount()
+            return
+        }
+
+        account = GmailAccount(
+            email: session.email,
+            displayName: session.displayName,
+            connectedAt: account?.connectedAt ?? .now
+        )
+        persistAccount()
+
+        if let messages = try? await GmailService.fetchInbox(accessToken: session.accessToken) {
+            self.messages = messages
+            Task { await enhanceWithAI() }
+        }
     }
 
     // MARK: - Connection
@@ -42,6 +86,7 @@ final class MailStore {
                 displayName: session.displayName,
                 connectedAt: .now
             )
+            persistAccount()
             messages = try await GmailService.fetchInbox(accessToken: session.accessToken)
             // Mail appears immediately; the model enriches it after, so the
             // first render is never waiting on a round trip per message.
@@ -137,6 +182,8 @@ final class MailStore {
         account = nil
         messages = []
         connectionError = nil
+        persistAccount()
+        ClassificationCache.clear()
     }
 
     // MARK: - Reading

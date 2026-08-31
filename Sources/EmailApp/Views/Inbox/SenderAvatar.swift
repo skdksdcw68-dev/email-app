@@ -46,10 +46,48 @@ struct SenderAvatar: View {
         return first.map { String($0).uppercased() } ?? "?"
     }
 
+    private static let consumerDomains: Set<String> = [
+        "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com",
+        "yahoo.com", "icloud.com", "me.com", "mac.com", "proton.me",
+        "protonmail.com", "aol.com", "gmx.com", "zoho.com", "yandex.com",
+    ]
+
+    /// A company that sends mail has a favicon; a person does not.
+    ///
+    /// DuckDuckGo's service returns 404 for a domain it does not know, so a
+    /// miss fails and falls back to the letter. Google's equivalent always
+    /// answers 200 with a generic globe, which is why every sender previously
+    /// looked like the same grey planet.
+    private var brandURL: URL? {
+        guard let domain = contact.address.split(separator: "@").last?.lowercased(),
+              domain.contains("."),
+              !Self.consumerDomains.contains(String(domain))
+        else { return nil }
+        return URL(string: "https://icons.duckduckgo.com/ip3/\(domain).ico")
+    }
+
     var body: some View {
+        Group {
+            if let brandURL {
+                AsyncImage(url: brandURL) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        letterAvatar
+                    }
+                }
+            } else {
+                letterAvatar
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .opacity(isMuted ? 0.85 : 1)
+    }
+
+    private var letterAvatar: some View {
         Circle()
             .fill(color.opacity(isMuted ? 0.55 : 1))
-            .frame(width: size, height: size)
             .overlay {
                 Text(letter)
                     .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
