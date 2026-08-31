@@ -20,6 +20,11 @@ struct Message: Identifiable, Hashable, Codable {
     /// single row saying 4.
     var threadID: String? = nil
 
+    /// The RFC 2822 Message-ID, angle brackets included. Gmail threads on its
+    /// own threadId, but In-Reply-To/References is how every other client in
+    /// the chain knows a reply belongs to a conversation.
+    var messageIDHeader: String? = nil
+
     /// The sender's real HTML, kept for display. `body` stays the stripped
     /// text -- that is what classification, search and the row preview use, and
     /// none of them want markup.

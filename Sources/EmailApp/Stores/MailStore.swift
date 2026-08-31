@@ -346,38 +346,103 @@ final class MailStore {
         }
     }
 
-    func send(subject: String, to address: String, body: String) {
-        let recipient = Contact(name: address, address: address)
-        messages.append(
-            Message(
-                sender: .me,
-                recipients: [recipient],
-                subject: subject.isEmpty ? "(No Subject)" : subject,
-                body: body,
-                date: .now,
-                isRead: true,
-                mailbox: .sent,
-                tags: [.noReplyNeeded]
-            )
+    /// Sends through Gmail, and only records it locally once Gmail has taken
+    /// it. Throws so the compose sheet can stay open and show what went wrong
+    /// -- an email that silently fails to send is the worst outcome here.
+    func send(
+        subject: String,
+        to address: String,
+        cc: String? = nil,
+        body: String,
+        html: String? = nil,
+        replyingTo original: Message? = nil
+    ) async throws {
+        guard let account else { throw SendError.notConnected }
+
+        let token = try await AuthService.currentGmailAccessToken()
+        let envelope = MIMEBuilder.Envelope(
+            from: MIMEBuilder.address(name: account.displayName, email: account.email),
+            to: address,
+            cc: cc,
+            subject: subject.isEmpty ? "(No Subject)" : subject,
+            plainText: body,
+            html: html,
+            inReplyTo: original?.messageIDHeader,
+            references: original?.messageIDHeader
         )
+
+        let sent = try await GmailService.send(
+            accessToken: token,
+            envelope: envelope,
+            threadID: original?.threadID
+        )
+
+        var local = Message(
+            sender: Contact(name: account.displayName, address: account.email),
+            recipients: [Contact(name: address, address: address)],
+            subject: subject.isEmpty ? "(No Subject)" : subject,
+            body: body,
+            date: .now,
+            isRead: true,
+            mailbox: .sent,
+            tags: [.noReplyNeeded]
+        )
+        local.remoteID = sent.id
+        local.threadID = sent.threadID
+        messages.append(local)
     }
 
-    /// Keeps an unsent message in Drafts. Local only for now -- writing a real
-    /// Gmail draft is a POST to users.drafts, which gmail.compose does allow,
-    /// so this is a seam rather than a dead end.
-    func saveDraft(subject: String, to address: String, body: String) {
-        let recipient = Contact(name: address, address: address)
-        messages.append(
-            Message(
-                sender: .me,
-                recipients: [recipient],
-                subject: subject.isEmpty ? "(No Subject)" : subject,
-                body: body,
-                date: .now,
-                isRead: true,
-                mailbox: .drafts
-            )
+    /// Writes a real Gmail draft, so it is there in Gmail on every device and
+    /// not just in this app's memory.
+    func saveDraft(
+        subject: String,
+        to address: String,
+        cc: String? = nil,
+        body: String,
+        html: String? = nil,
+        replyingTo original: Message? = nil
+    ) async throws {
+        guard let account else { throw SendError.notConnected }
+
+        let token = try await AuthService.currentGmailAccessToken()
+        let envelope = MIMEBuilder.Envelope(
+            from: MIMEBuilder.address(name: account.displayName, email: account.email),
+            to: address,
+            cc: cc,
+            subject: subject.isEmpty ? "(No Subject)" : subject,
+            plainText: body,
+            html: html,
+            inReplyTo: original?.messageIDHeader,
+            references: original?.messageIDHeader
         )
+
+        let id = try await GmailService.createDraft(
+            accessToken: token,
+            envelope: envelope,
+            threadID: original?.threadID
+        )
+
+        var local = Message(
+            sender: Contact(name: account.displayName, address: account.email),
+            recipients: [Contact(name: address, address: address)],
+            subject: subject.isEmpty ? "(No Subject)" : subject,
+            body: body,
+            date: .now,
+            isRead: true,
+            mailbox: .drafts
+        )
+        local.remoteID = id
+        messages.append(local)
+    }
+
+    enum SendError: LocalizedError {
+        case notConnected
+
+        var errorDescription: String? {
+            switch self {
+            case .notConnected: "Connect a Gmail account before sending."
+            }
+        }
     }
 
     private func update(_ id: Message.ID, _ change: (inout Message) -> Void) {

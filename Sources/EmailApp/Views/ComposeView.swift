@@ -31,13 +31,26 @@ struct ComposeView: View {
     @State private var recipient = ""
     @State private var cc = ""
     @State private var subject = ""
-    @State private var messageBody = ""
+    @State private var richText = NSAttributedString(string: "")
+    @State private var isSending = false
+    @State private var sendError: String?
     @State private var showsCcBcc = false
     @State private var isConfirmingCancel = false
     @State private var isWriting = false
 
+    /// Derived, never stored: two copies of the body would drift the moment
+    /// the AI replaced one of them.
+    private var messageBody: String { richText.string }
+
+    private func setBody(_ text: String) {
+        richText = NSAttributedString(
+            string: text,
+            attributes: RichTextEditor.defaultAttributes()
+        )
+    }
+
     private var canSend: Bool {
-        recipient.contains("@") && !recipient.hasSuffix("@")
+        recipient.contains("@") && !recipient.hasSuffix("@") && !isSending
     }
 
     private var hasContent: Bool {
@@ -65,7 +78,7 @@ struct ComposeView: View {
                     existingText: messageBody.trimmingCharacters(in: .whitespacesAndNewlines),
                     tone: user.tonePreference
                 ) { written in
-                    messageBody = written
+                    setBody(written)
                     markJustDrafted()
                 }
             }
@@ -90,10 +103,9 @@ struct ComposeView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
-                        store.send(subject: subject, to: recipient, body: messageBody)
-                        dismiss()
+                        Task { await performSend() }
                     } label: {
-                        Label("Send", systemImage: "paperplane.fill")
+                        Label(isSending ? "Sending…" : "Send", systemImage: "paperplane.fill")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 22)
@@ -121,8 +133,8 @@ struct ComposeView: View {
             Divider()
 
             draftOption("Save draft", "tray.and.arrow.down") {
-                store.saveDraft(subject: subject, to: recipient, body: messageBody)
-                dismiss()
+                isConfirmingCancel = false
+                Task { await performSaveDraft() }
             }
             Divider()
             draftOption("Discard draft", "trash", isDestructive: true) { dismiss() }
@@ -152,6 +164,52 @@ struct ComposeView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Sending
+
+    /// The sheet stays open when this fails. A compose window that closes on a
+    /// failed send loses the message and tells the user it went.
+    private func performSend() async {
+        guard !isSending else { return }
+        isSending = true
+        sendError = nil
+        defer { isSending = false }
+
+        do {
+            try await store.send(
+                subject: subject,
+                to: recipient,
+                cc: showsCcBcc && !cc.isEmpty ? cc : nil,
+                body: messageBody,
+                html: richText.hasFormatting ? richText.htmlBody() : nil,
+                replyingTo: replyingTo
+            )
+            dismiss()
+        } catch {
+            sendError = error.localizedDescription
+        }
+    }
+
+    private func performSaveDraft() async {
+        guard !isSending else { return }
+        isSending = true
+        sendError = nil
+        defer { isSending = false }
+
+        do {
+            try await store.saveDraft(
+                subject: subject,
+                to: recipient,
+                cc: showsCcBcc && !cc.isEmpty ? cc : nil,
+                body: messageBody,
+                html: richText.hasFormatting ? richText.htmlBody() : nil,
+                replyingTo: replyingTo
+            )
+            dismiss()
+        } catch {
+            sendError = error.localizedDescription
+        }
     }
 
     private func markJustDrafted() {
@@ -255,32 +313,29 @@ struct ComposeView: View {
             .padding(.vertical, 11)
     }
 
+    /// A UITextView underneath, so selecting text offers the system's Format
+    /// menu -- bold, italic, underline -- which SwiftUI's TextEditor cannot do
+    /// because it binds to a plain String.
     private var bodyEditor: some View {
-        TextEditor(text: $messageBody)
-            .font(.body)
-            .scrollContentBackground(.hidden)
-            // Caret and selection handles. Without an explicit tint they take
-            // the inherited one, which on this sheet is near-invisible against
-            // a dark background.
-            .tint(Color.accentColor)
-            .foregroundStyle(justDrafted ? Color(uiColor: .systemIndigo) : Color.primary)
-            .scaleEffect(justDrafted ? 1.012 : 1)
-            // Deliberately not .shimmering here. That modifier masks the view
-            // it wraps, and a mask over an editable field clips the caret and
-            // the selection highlight out of existence. The colour shift and
-            // the spring carry the "this was just written" moment instead.
-            .animation(.spring(response: 0.5, dampingFraction: 0.62), value: justDrafted)
-            .padding(.horizontal, 12)
-            .padding(.top, 6)
-            .overlay(alignment: .topLeading) {
-                if messageBody.isEmpty {
-                    Text("Write your message")
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, 14)
-                        .padding(.leading, 17)
-                        .allowsHitTesting(false)
-                }
+        RichTextEditor(
+            text: $richText,
+            textColor: justDrafted ? .systemIndigo : .label
+        )
+        // Deliberately not .shimmering here. That modifier masks the view it
+        // wraps, and a mask over an editable field clips the caret and the
+        // selection highlight out of existence. The colour shift and the
+        // spring carry the "this was just written" moment instead.
+        .scaleEffect(justDrafted ? 1.012 : 1)
+        .animation(.spring(response: 0.5, dampingFraction: 0.62), value: justDrafted)
+        .overlay(alignment: .topLeading) {
+            if messageBody.isEmpty {
+                Text("Write your message")
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 14)
+                    .padding(.leading, 17)
+                    .allowsHitTesting(false)
             }
+        }
     }
 
     private var bottomBar: some View {
@@ -296,11 +351,14 @@ struct ComposeView: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-            } else if let problem = draftError ?? dictation.error {
-                HStack {
-                    Text(problem).font(.caption).foregroundStyle(.red)
+            } else if let problem = sendError ?? draftError ?? dictation.error {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                    Text(problem).font(.caption)
                     Spacer(minLength: 0)
                 }
+                .foregroundStyle(.red)
             }
 
             // Spacing has to go once the row collapses to a single control.
@@ -466,7 +524,7 @@ struct ComposeView: View {
                 instruction: spoken,
                 tone: user.tonePreference
             )
-            messageBody = draft.body
+            setBody(draft.body)
             dictation.reset()
             markJustDrafted()
         } catch {
@@ -489,7 +547,7 @@ struct ComposeView: View {
         subject = original.subject.lowercased().hasPrefix("re:")
             ? original.subject
             : "Re: \(original.subject)"
-        if let initialBody { messageBody = initialBody }
+        if let initialBody { setBody(initialBody) }
     }
 }
 

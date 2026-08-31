@@ -163,6 +163,75 @@ enum GmailService {
         return json
     }
 
+    // MARK: - Sending
+
+    /// Sends a message for real. `gmail.compose` covers this -- it is "manage
+    /// drafts and send email" -- so no extra scope is needed.
+    ///
+    /// Returns Gmail's id for the sent message so the local copy can carry it.
+    @discardableResult
+    static func send(
+        accessToken: String,
+        envelope: MIMEBuilder.Envelope,
+        threadID: String? = nil
+    ) async throws -> (id: String, threadID: String?) {
+        var payload: [String: Any] = ["raw": MIMEBuilder.raw(envelope)]
+        // Passing threadId is what makes Gmail file the reply into the same
+        // conversation rather than starting a new one.
+        if let threadID { payload["threadId"] = threadID }
+
+        let json = try await post(
+            URL(string: "\(base)/messages/send")!,
+            body: payload,
+            accessToken: accessToken
+        )
+        guard let id = json["id"] as? String else { throw ServiceError.malformed }
+        return (id, json["threadId"] as? String)
+    }
+
+    /// Writes a real Gmail draft, so it appears in Gmail on every device
+    /// rather than only in this app.
+    @discardableResult
+    static func createDraft(
+        accessToken: String,
+        envelope: MIMEBuilder.Envelope,
+        threadID: String? = nil
+    ) async throws -> String {
+        var message: [String: Any] = ["raw": MIMEBuilder.raw(envelope)]
+        if let threadID { message["threadId"] = threadID }
+
+        let json = try await post(
+            URL(string: "\(base)/drafts")!,
+            body: ["message": message],
+            accessToken: accessToken
+        )
+        guard let id = json["id"] as? String else { throw ServiceError.malformed }
+        return id
+    }
+
+    private static func post(
+        _ url: URL,
+        body: [String: Any],
+        accessToken: String
+    ) async throws -> [String: Any] {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ServiceError.malformed }
+        guard (200..<300).contains(http.statusCode) else {
+            let text = String(data: data, encoding: .utf8) ?? ""
+            throw ServiceError.http(http.statusCode, String(text.prefix(300)))
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ServiceError.malformed
+        }
+        return json
+    }
+
     // MARK: - Parsing
 
     static func parse(_ json: [String: Any]) -> Message? {
@@ -203,6 +272,7 @@ enum GmailService {
         )
         message.remoteID = json["id"] as? String
         message.threadID = json["threadId"] as? String
+        message.messageIDHeader = headers["message-id"]
         message.hasAttachment = hasAttachment(in: payload)
         message.htmlBody = firstPart(in: payload, mimeType: "text/html")
 

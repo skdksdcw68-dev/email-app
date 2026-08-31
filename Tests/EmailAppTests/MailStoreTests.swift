@@ -136,19 +136,40 @@ final class MailStoreTests: XCTestCase {
 
     // MARK: - Compose
 
-    func testSendLandsInSentAsRead() {
-        let store = makeStore()
-        store.send(subject: "Hi", to: "a@b.com", body: "there")
+    // Sending used to append a message to the local Sent folder and make no
+    // network call at all -- the mail never left the device. It now goes
+    // through Gmail, so the old "it appears in Sent" tests were asserting the
+    // bug. What is left to check without a network is that it refuses, loudly,
+    // rather than pretending to succeed.
 
-        let sent = store.messages(in: .sent)
-        XCTAssertEqual(sent.count, 1)
-        XCTAssertEqual(sent[0].subject, "Hi")
-        XCTAssertTrue(sent[0].isRead)
+    func testSendWithoutAnAccountThrows() async {
+        let store = makeStore()
+        XCTAssertFalse(store.isConnected)
+
+        do {
+            try await store.send(subject: "Hi", to: "a@b.com", body: "there")
+            XCTFail("Sending with no connected account should throw")
+        } catch {
+            XCTAssertTrue(error is MailStore.SendError)
+        }
     }
 
-    func testSendWithoutSubjectGetsPlaceholder() {
+    func testSendFailureLeavesNothingInSent() async {
+        // The local copy is only recorded once Gmail has accepted the message.
+        // A failed send that still filed a copy in Sent would tell the user it
+        // went when it did not.
         let store = makeStore()
-        store.send(subject: "", to: "a@b.com", body: "body")
-        XCTAssertEqual(store.messages(in: .sent)[0].subject, "(No Subject)")
+        try? await store.send(subject: "Hi", to: "a@b.com", body: "there")
+        XCTAssertTrue(store.messages(in: .sent).isEmpty)
+    }
+
+    func testSaveDraftWithoutAnAccountThrows() async {
+        let store = makeStore()
+        do {
+            try await store.saveDraft(subject: "Hi", to: "a@b.com", body: "there")
+            XCTFail("Saving a draft with no connected account should throw")
+        } catch {
+            XCTAssertTrue(error is MailStore.SendError)
+        }
     }
 }
