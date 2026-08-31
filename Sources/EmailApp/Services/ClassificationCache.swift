@@ -15,6 +15,10 @@ enum ClassificationCache {
         let priority: String
         let needsReply: Bool
         let summary: String
+        /// Added after the first release. Optional so entries written by the
+        /// previous build still decode, instead of one failed key throwing
+        /// away the whole cache on upgrade.
+        let category: String?
         let storedAt: Date
     }
 
@@ -35,6 +39,7 @@ enum ClassificationCache {
             priority: classification.priority,
             needsReply: classification.needsReply,
             summary: classification.summary,
+            category: classification.category,
             storedAt: .now
         )
 
@@ -55,6 +60,11 @@ enum ClassificationCache {
 
 extension AIService.Classification {
     init(_ entry: ClassificationCache.Entry) {
-        self.init(priority: entry.priority, needsReply: entry.needsReply, summary: entry.summary)
+        self.init(
+            priority: entry.priority,
+            needsReply: entry.needsReply,
+            summary: entry.summary,
+            category: entry.category
+        )
     }
 }

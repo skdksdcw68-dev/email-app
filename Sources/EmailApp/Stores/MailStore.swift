@@ -173,6 +173,13 @@ final class MailStore {
                 message.tags.remove(.needsReply)
             }
 
+            // What sort of thing it is, independent of how much it matters.
+            // At most one, so clear any previous kind before setting.
+            if let kind = classification.kindTag {
+                message.tags.subtract(Set(AITag.kinds))
+                message.tags.insert(kind)
+            }
+
             // Never leave a message untagged; it would appear in no filter.
             if message.tags.isEmpty { message.tags.insert(.noReplyNeeded) }
         }

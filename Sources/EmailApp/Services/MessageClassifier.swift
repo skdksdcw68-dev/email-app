@@ -13,29 +13,95 @@ import Foundation
 enum MessageClassifier {
 
     static func tags(for message: Message, headers: [String: String], labels: Set<String>) -> Set<AITag> {
-        if isBulk(headers: headers, labels: labels, sender: message.sender.address) {
-            return [.noReplyNeeded]
+        var tags: Set<AITag> = []
+
+        // What sort of thing it is, which is worth knowing even for bulk mail
+        // that stops at the short-circuit below.
+        if let kind = kind(for: message, headers: headers, labels: labels) {
+            tags.insert(kind)
         }
 
-        var tags: Set<AITag> = []
+        if isBulk(headers: headers, labels: labels, sender: message.sender.address) {
+            tags.insert(.noReplyNeeded)
+            return tags
+        }
+
+        var signals: Set<AITag> = []
         let haystack = "\(message.subject) \(message.body.prefix(600))".lowercased()
 
         if wantsReply(subject: message.subject, body: message.body, haystack: haystack) {
-            tags.insert(.needsReply)
+            signals.insert(.needsReply)
         }
 
         switch score(message: message, labels: labels, haystack: haystack) {
-        case 55...: tags.insert(.urgent)
-        case 35..<55: tags.insert(.veryImportant)
-        case 18..<35: tags.insert(.important)
+        case 55...: signals.insert(.urgent)
+        case 35..<55: signals.insert(.veryImportant)
+        case 18..<35: signals.insert(.important)
         default: break
         }
 
         // Nothing stood out and nobody is waiting: say so rather than leaving
-        // it blank, so the inbox is fully triaged.
-        if tags.isEmpty { tags.insert(.noReplyNeeded) }
-        return tags
+        // it blank, so the inbox is fully triaged. A kind tag does not count
+        // here -- "Newsletter" says what a thing is, not whether it is dealt
+        // with, and a message showing only a kind would sit in no status
+        // filter at all.
+        if signals.isEmpty { signals.insert(.noReplyNeeded) }
+        return tags.union(signals)
     }
+
+    // MARK: - Kind
+
+    /// Security first, because a sign-in alert that also carries marketing
+    /// footer text is a security mail; promotion before newsletter, because
+    /// almost every promotion is also technically a bulk send.
+    static func kind(for message: Message, headers: [String: String], labels: Set<String>) -> AITag? {
+        let haystack = "\(message.subject) \(message.body.prefix(600))".lowercased()
+        let sender = message.sender.address.lowercased()
+
+        if securityWords.contains(where: haystack.contains) || sender.contains("accounts.google.com") {
+            return .security
+        }
+        if financeWords.contains(where: haystack.contains) { return .finance }
+        if meetingWords.contains(where: haystack.contains) { return .meeting }
+
+        if labels.contains("CATEGORY_PROMOTIONS") { return .promotion }
+        if promotionWords.contains(where: haystack.contains) { return .promotion }
+
+        if headers["list-unsubscribe"] != nil { return .newsletter }
+        if newsletterWords.contains(where: haystack.contains) { return .newsletter }
+
+        return nil
+    }
+
+    private static let securityWords = [
+        "security alert", "new sign-in", "new sign in", "signed in", "sign-in attempt",
+        "suspicious activity", "verification code", "verify your", "reset your password",
+        "password was changed", "two-factor", "2-step", "new device",
+        "unusual activity", "was blocked",
+    ]
+
+    private static let financeWords = [
+        "invoice", "receipt", "payment", "billing", "billed", "charged",
+        "refund", "transaction", "payout", "balance due", "subscription renews",
+        "renewal", "your order", "purchase", "paid",
+    ]
+
+    private static let meetingWords = [
+        "meeting", "calendar", "invitation:", "invited you", "reschedul",
+        "appointment", "zoom.us", "meet.google.com", "teams.microsoft.com",
+        "are you free", "book a time", "schedule a call",
+    ]
+
+    private static let promotionWords = [
+        "% off", "sale", "discount", "deal", "offer ends", "shop now",
+        "limited time", "save big", "coupon", "promo code", "black friday",
+        "free trial", "upgrade now",
+    ]
+
+    private static let newsletterWords = [
+        "newsletter", "digest", "roundup", "this week", "weekly", "daily",
+        "issue #", "unsubscribe",
+    ]
 
     // MARK: - Bulk
 

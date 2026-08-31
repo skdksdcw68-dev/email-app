@@ -11,10 +11,11 @@ struct Shimmer: ViewModifier {
 
     @State private var phase: CGFloat = -1
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
-            .overlay {
-                if active {
+        if active {
+            content
+                .overlay {
                     GeometryReader { proxy in
                         LinearGradient(
                             colors: [.clear, .white.opacity(0.55), .clear],
@@ -27,14 +28,23 @@ struct Shimmer: ViewModifier {
                     }
                     .allowsHitTesting(false)
                 }
-            }
-            .mask(content)
-            .onAppear {
-                guard active else { return }
-                withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
-                    phase = 1
+                // Confines the sweep to the glyphs. Note this masks the whole
+                // view, so it must never wrap an editable control: a text
+                // caret and a selection highlight are not part of the mask
+                // and get clipped away entirely.
+                .mask(content)
+                .onAppear {
+                    withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
+                        phase = 1
+                    }
                 }
-            }
+        } else {
+            // Genuinely nothing. The mask used to be applied unconditionally,
+            // which left every inactive shimmer still clipping its content --
+            // on the compose editor that meant no visible cursor and no
+            // visible selection, permanently.
+            content
+        }
     }
 }
 

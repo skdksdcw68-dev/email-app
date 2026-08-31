@@ -182,9 +182,16 @@ struct ComposeView: View {
         TextEditor(text: $messageBody)
             .font(.body)
             .scrollContentBackground(.hidden)
+            // Caret and selection handles. Without an explicit tint they take
+            // the inherited one, which on this sheet is near-invisible against
+            // a dark background.
+            .tint(Color.accentColor)
             .foregroundStyle(justDrafted ? Color(uiColor: .systemIndigo) : Color.primary)
             .scaleEffect(justDrafted ? 1.012 : 1)
-            .shimmering(justDrafted)
+            // Deliberately not .shimmering here. That modifier masks the view
+            // it wraps, and a mask over an editable field clips the caret and
+            // the selection highlight out of existence. The colour shift and
+            // the spring carry the "this was just written" moment instead.
             .animation(.spring(response: 0.5, dampingFraction: 0.62), value: justDrafted)
             .padding(.horizontal, 12)
             .padding(.top, 6)
@@ -219,11 +226,17 @@ struct ComposeView: View {
                 }
             }
 
-            HStack(spacing: 12) {
+            // Spacing has to go once the row collapses to a single control.
+            // The paperclip shrinks to zero width but the HStack still lays
+            // out spacing on both sides of it and of the Spacer, leaving 24pt
+            // of dead air to the left of a button that is supposed to be
+            // centred -- which is exactly how far off-centre it looked.
+            HStack(spacing: isExpanded ? 0 : 12) {
                 attachButton
-                // Attachment hard left, microphone hard right. Without this
-                // the row hugs its contents and the whole cluster floats in
-                // the middle of the screen.
+                aiRefineButton
+                // Attachment and refine hard left, microphone hard right.
+                // Without this the row hugs its contents and the whole cluster
+                // floats in the middle of the screen.
                 Spacer(minLength: 0)
                 holdToReply
             }
@@ -255,6 +268,30 @@ struct ComposeView: View {
         .frame(width: isExpanded ? 0 : 44)
         .opacity(isExpanded ? 0 : 1)
         .clipped()
+    }
+
+    /// Rewrites what is already in the box, as opposed to dictation, which
+    /// writes from speech. Takes the user's own words and tightens them.
+    private var aiRefineButton: some View {
+        Button {
+            Task { await refineDraft() }
+        } label: {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(canRefine ? Color.accentColor : Color.secondary)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!canRefine)
+        .frame(width: isExpanded ? 0 : 44)
+        .opacity(isExpanded ? 0 : 1)
+        .clipped()
+        .accessibilityLabel("Refine with AI")
+    }
+
+    private var canRefine: Bool {
+        !isDrafting && !messageBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Full width only while it is doing something. At rest it is a compact
@@ -357,6 +394,34 @@ struct ComposeView: View {
             )
             messageBody = draft.body
             dictation.reset()
+
+            justDrafted = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.4))
+                justDrafted = false
+            }
+        } catch {
+            draftError = error.localizedDescription
+        }
+    }
+
+    /// Same landing animation as a dictated draft: the text changes under the
+    /// user, and it should be visible that it did.
+    private func refineDraft() async {
+        let current = messageBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !current.isEmpty, !isDrafting else { return }
+
+        isDrafting = true
+        draftError = nil
+        defer { isDrafting = false }
+
+        do {
+            let refined = try await AIService.refine(
+                text: current,
+                replyingTo: replyingTo,
+                tone: user.tonePreference
+            )
+            messageBody = refined.body
 
             justDrafted = true
             Task {

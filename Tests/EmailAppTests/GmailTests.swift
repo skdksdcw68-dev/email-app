@@ -213,14 +213,17 @@ final class MessageClassifierTests: XCTestCase {
         XCTAssertFalse(MessageClassifier.isBulk(headers: [:], labels: ["INBOX"], sender: "sara@example.com"))
     }
 
-    func testBulkMailIsTaggedNoReplyNeededAndNothingElse() {
+    func testBulkMailIsNoReplyNeededAndSaysWhatItIs() {
         // Even with urgent-sounding words, a newsletter is still a newsletter.
+        // It now also carries the Newsletter kind: the urgency words must lose,
+        // but "what is this" is a separate question from "does it matter".
         let tags = MessageClassifier.tags(
             for: message(subject: "URGENT: final notice, act today!"),
             headers: ["list-unsubscribe": "<https://x.com/u>"],
             labels: []
         )
-        XCTAssertEqual(tags, [.noReplyNeeded])
+        XCTAssertEqual(tags, [.newsletter, .noReplyNeeded])
+        XCTAssertFalse(tags.contains(.urgent))
     }
 
     // MARK: - Reply detection

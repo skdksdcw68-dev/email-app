@@ -15,17 +15,22 @@ enum AIService {
         let priority: String
         let needsReply: Bool
         let summary: String
+        /// What sort of message this is. Optional so a response from an older
+        /// deployment of the function still decodes.
+        let category: String?
 
-        init(priority: String, needsReply: Bool, summary: String) {
+        init(priority: String, needsReply: Bool, summary: String, category: String? = nil) {
             self.priority = priority
             self.needsReply = needsReply
             self.summary = summary
+            self.category = category
         }
 
         enum CodingKeys: String, CodingKey {
             case priority
             case needsReply = "needs_reply"
             case summary
+            case category
         }
 
         /// The model speaks in its own vocabulary; map it onto ours.
@@ -36,6 +41,10 @@ enum AIService {
             case "important": .important
             default: nil
             }
+        }
+
+        var kindTag: AITag? {
+            category.flatMap(AITag.kind(named:))
         }
     }
 
@@ -81,6 +90,23 @@ enum AIService {
                 "tone": tone,
             ]
         )
+    }
+
+    /// Tightens what the user has already written, rather than writing from
+    /// scratch. The original message goes along when there is one so the model
+    /// can tell a reply from a cold email and keep the thread's register.
+    static func refine(text: String, replyingTo message: Message?, tone: String) async throws -> Draft {
+        var payload = [
+            "action": "refine",
+            "text": text,
+            "tone": tone,
+        ]
+        if let message {
+            payload["from"] = "\(message.sender.name) <\(message.sender.address)>"
+            payload["subject"] = message.subject
+            payload["body"] = message.body
+        }
+        return try await call(payload)
     }
 
     // MARK: - Transport

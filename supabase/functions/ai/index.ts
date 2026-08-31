@@ -62,17 +62,30 @@ Return JSON only, no prose:
 {
   "priority": "urgent" | "very_important" | "important" | "normal",
   "needs_reply": boolean,
+  "category": "meeting" | "finance" | "security" | "newsletter" | "promotion" | "other",
   "summary": "one sentence, under 20 words, what this asks of the reader"
 }
 
-urgent          a real deadline or consequence attached, today or tomorrow
-very_important  matters a lot but nothing is on fire
-important       worth reading today
-normal          everything else
+priority
+  urgent          a real deadline or consequence attached, today or tomorrow
+  very_important  matters a lot but nothing is on fire
+  important       worth reading today
+  normal          everything else
 
 Judge what the message ASKS OF THE READER, not how loudly it is written.
 Marketing shouting "URGENT" is normal. A quiet note from a client asking for
-a decision by Friday is not.`;
+a decision by Friday is not.
+
+category is what the message IS, which is a separate question from how much
+it matters. A payment reminder due tomorrow is urgent AND finance.
+  meeting     an invitation, a scheduling request, a reschedule or cancellation
+  finance     an invoice, receipt, payment, refund, renewal or statement
+  security    a sign-in alert, verification code, password or account warning
+  newsletter  a digest or subscription sent to a list, not written to anyone
+  promotion   marketing: an offer, sale, discount or upsell
+  other       anything else, including ordinary person-to-person mail
+
+Pick "other" rather than forcing a fit.`;
 
 async function classify(body: Record<string, string>) {
   const content = [
@@ -142,6 +155,63 @@ Rules:
   return json({ body: reply.trim(), model: DRAFT_MODEL });
 }
 
+// ------------------------------------------------------------------ refine
+
+// Rewrites what the user already typed. The hard part is restraint: the
+// instinct of a model asked to "improve" an email is to inflate it into
+// corporate filler, which is worse than what it was handed.
+async function refine(body: Record<string, string>) {
+  const tone = body.tone ?? "match how I already write";
+  const formal = /formal|professional/i.test(tone);
+
+  const system = `You improve a draft email that the user has written.
+
+Tone: ${tone}.
+${formal ? "No emoji." : "An emoji is fine where it adds warmth. At most one."}
+
+What to do:
+- Fix grammar, spelling and punctuation.
+- Break a wall of text into short paragraphs. Use a list when the draft is
+  genuinely listing things.
+- Put the ask in the first two lines. A reader should know what is wanted
+  without scrolling.
+- Cut filler: "I hope this email finds you well", "just wanted to reach out",
+  "at your earliest convenience".
+
+What NOT to do:
+- Do not add facts, names, dates, numbers or promises that are not already
+  in the draft.
+- Do not make it longer. Shorter is almost always the improvement.
+- Do not change the meaning, the decision, or how warm or firm it is.
+- No subject line, no signature block. Body text only.
+
+Return the improved email and nothing else. No preamble, no explanation, no
+quotes around it.`;
+
+  const context = body.body
+    ? [
+        "For context, the message being replied to:",
+        `From: ${body.from ?? ""}`,
+        `Subject: ${body.subject ?? ""}`,
+        body.body.slice(0, BODY_LIMIT),
+        "",
+      ].join("\n")
+    : "";
+
+  const content = `${context}The user's draft to improve:\n${body.text ?? ""}`;
+
+  const improved = await openai(
+    DRAFT_MODEL,
+    [
+      { role: "system", content: system },
+      { role: "user", content },
+    ],
+    false,
+  );
+
+  return json({ body: improved.trim(), model: DRAFT_MODEL });
+}
+
 // ------------------------------------------------------------------ router
 
 Deno.serve(async (request) => {
@@ -158,6 +228,8 @@ Deno.serve(async (request) => {
         return await classify(payload);
       case "draft":
         return await draft(payload);
+      case "refine":
+        return await refine(payload);
       default:
         return json({ error: `unknown action: ${payload.action}` }, 400);
     }
