@@ -25,6 +25,12 @@ struct HTMLMessageView: UIViewRepresentable {
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
+
+        // Height comes from observing contentSize, not from evaluateJavaScript.
+        // JavaScript is disabled above, which blocks host-side evaluation too --
+        // the measurement would never come back and every message would render
+        // in a 40pt sliver.
+        context.coordinator.observe(webView)
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
         webView.isOpaque = false
@@ -81,17 +87,21 @@ struct HTMLMessageView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         private let parent: HTMLMessageView
         var loadedHTML: String?
+        private var observation: NSKeyValueObservation?
 
         init(_ parent: HTMLMessageView) { self.parent = parent }
 
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            webView.evaluateJavaScript("document.body.scrollHeight") { result, _ in
-                guard let value = result as? CGFloat else { return }
+        deinit { observation?.invalidate() }
+
+        func observe(_ webView: WKWebView) {
+            observation = webView.scrollView.observe(\.contentSize, options: [.new]) { [weak self] scrollView, _ in
+                guard let self else { return }
+                let measured = scrollView.contentSize.height
                 Task { @MainActor in
                     // Only grow. Intermediate layout passes report smaller
-                    // heights and would make the message jump as it settles.
-                    if value > self.parent.height {
-                        self.parent.height = value
+                    // heights and the message would jump as it settles.
+                    if measured > self.parent.height {
+                        self.parent.height = measured
                     }
                 }
             }
