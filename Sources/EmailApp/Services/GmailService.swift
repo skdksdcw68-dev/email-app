@@ -45,16 +45,23 @@ enum GmailService {
         let nextPageToken: String?
     }
 
+    /// Gmail's own search syntax, used to bound the initial import. Three
+    /// months is enough to be genuinely useful offline without pulling a
+    /// decade of mail down a phone connection.
+    static let importWindow = "newer_than:3m"
+
     /// Recent inbox mail, newest first.
     static func fetchInbox(
         accessToken: String,
         limit: Int = 25,
-        pageToken: String? = nil
+        pageToken: String? = nil,
+        query: String? = nil
     ) async throws -> Page {
         let (ids, next) = try await messageIDs(
             accessToken: accessToken,
             limit: limit,
-            pageToken: pageToken
+            pageToken: pageToken,
+            query: query
         )
 
         // Fetch details concurrently but keep the fan-out modest; Gmail's
@@ -79,7 +86,8 @@ enum GmailService {
     private static func messageIDs(
         accessToken: String,
         limit: Int,
-        pageToken: String?
+        pageToken: String?,
+        query searchQuery: String? = nil
     ) async throws -> ([String], String?) {
         var components = URLComponents(string: "\(base)/messages")!
         var query: [URLQueryItem] = [
@@ -87,6 +95,7 @@ enum GmailService {
             .init(name: "labelIds", value: "INBOX"),
         ]
         if let pageToken { query.append(.init(name: "pageToken", value: pageToken)) }
+        if let searchQuery { query.append(.init(name: "q", value: searchQuery)) }
         components.queryItems = query
 
         let json = try await get(components.url!, accessToken: accessToken)

@@ -22,7 +22,12 @@ struct EmailAppApp: App {
                 // Re-establish the Google session silently, so a cold launch
                 // does not look like being signed out.
                 .onAppear {
-                    Task { await mail.restore() }
+                    Task {
+                        // Disk first, so mail is on screen before the network
+                        // is even reached, then top it up.
+                        await mail.loadArchive()
+                        await mail.restore()
+                    }
                 }
         }
     }

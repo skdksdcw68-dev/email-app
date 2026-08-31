@@ -77,7 +77,15 @@ struct InboxHomeView: View {
         }
         .overlay(alignment: .bottomTrailing) { composeButton }
         .overlay {
-            if messages.isEmpty && !mail.isLoadingFirstPage { emptyState }
+            // A resumed import (the app was killed partway through) lands here
+            // rather than on the connect screen. Only takes the whole screen
+            // when there is nothing to show; with mail already on screen it
+            // fills in quietly behind instead.
+            if mail.importProgress.isRunning && messages.isEmpty {
+                ImportingMailView(progress: mail.importProgress)
+            } else if messages.isEmpty && !mail.isLoadingFirstPage {
+                emptyState
+            }
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {

@@ -99,6 +99,16 @@ struct ConnectInboxView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
         }
+        // Takes over the whole screen once consent is granted. The import is
+        // the longest wait in the app and deserves more than a spinner on a
+        // button.
+        .overlay {
+            if mail.importProgress.isRunning {
+                ImportingMailView(progress: mail.importProgress)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: mail.importProgress.isRunning)
     }
 }
 

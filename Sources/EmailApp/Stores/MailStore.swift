@@ -29,6 +29,17 @@ final class MailStore {
     /// How many pages to pull at a time. Each id costs a second request for
     /// the full message, so a bigger page is a lot more requests in flight.
     static let pageSize = 25
+    /// Larger during the one-off import: the user is watching a progress bar
+    /// and waiting, so throughput matters more than responsiveness.
+    static let importPageSize = 50
+
+    /// Where the one-time import has got to. Drives the import screen.
+    private(set) var importProgress: ImportProgress = .idle
+    /// Set once the three-month import has completed, so it never runs twice.
+    var hasImported: Bool {
+        get { UserDefaults.standard.bool(forKey: "mail.hasImported") }
+        set { UserDefaults.standard.set(newValue, forKey: "mail.hasImported") }
+    }
 
     private static let accountKey = "mail.account"
 
@@ -55,7 +66,7 @@ final class MailStore {
     /// screen and pulls fresh mail; falls back to the connect screen only if
     /// the grant is genuinely gone.
     func restore() async {
-        guard isConnected, messages.isEmpty, !isRefreshing else { return }
+        guard isConnected, !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
 
@@ -73,11 +84,21 @@ final class MailStore {
         )
         persistAccount()
 
+        // An import that was interrupted -- the app killed partway through --
+        // leaves a partial mailbox that would otherwise never be completed,
+        // because the import only ever ran from connect().
+        guard hasImported else {
+            await importRecentMail()
+            return
+        }
+
         if let page = try? await GmailService.fetchInbox(
             accessToken: session.accessToken, limit: Self.pageSize
         ) {
-            self.messages = page.messages
+            merge(page.messages)
             self.nextPageToken = page.nextPageToken
+            let snapshot = messages
+            Task { await MessageArchive.save(snapshot) }
             Task { await enhanceWithAI() }
         }
     }
@@ -94,6 +115,7 @@ final class MailStore {
         guard !isConnecting, !isConnected else { return }
         isConnecting = true
         connectionError = nil
+        importProgress = .connecting
         defer { isConnecting = false }
 
         do {
@@ -104,14 +126,7 @@ final class MailStore {
                 connectedAt: .now
             )
             persistAccount()
-            let page = try await GmailService.fetchInbox(
-                accessToken: session.accessToken, limit: Self.pageSize
-            )
-            messages = page.messages
-            nextPageToken = page.nextPageToken
-            // Mail appears immediately; the model enriches it after, so the
-            // first render is never waiting on a round trip per message.
-            Task { await enhanceWithAI() }
+            await importRecentMail()
         } catch {
             connectionError = error.localizedDescription
             account = nil
@@ -129,12 +144,113 @@ final class MailStore {
         do {
             let token = try await AuthService.currentGmailAccessToken()
             let page = try await GmailService.fetchInbox(accessToken: token, limit: Self.pageSize)
-            messages = page.messages
+            merge(page.messages)
             nextPageToken = page.nextPageToken
+            let snapshot = messages
+            Task { await MessageArchive.save(snapshot) }
             Task { await enhanceWithAI() }
         } catch {
             connectionError = error.localizedDescription
         }
+    }
+
+    /// Pulls three months of mail, page by page, reporting real progress.
+    ///
+    /// Runs once, when a mailbox is first connected. After this the archive on
+    /// disk is the starting point and refresh only tops it up.
+    func importRecentMail() async {
+        guard isConnected else { return }
+        importProgress = .counting
+
+        var collected: [Message] = []
+        var seen = Set<String>()
+        var token: String?
+        // Gmail does not report a total up front, so the denominator only
+        // becomes real once a page comes back short -- until then the count
+        // is honest about being a running tally rather than a fraction.
+        var knownTotal = 0
+
+        repeat {
+            do {
+                let accessToken = try await AuthService.currentGmailAccessToken()
+                let page = try await GmailService.fetchInbox(
+                    accessToken: accessToken,
+                    limit: Self.importPageSize,
+                    pageToken: token,
+                    query: GmailService.importWindow
+                )
+
+                for message in page.messages {
+                    guard let remoteID = message.remoteID else {
+                        collected.append(message)
+                        continue
+                    }
+                    if seen.insert(remoteID).inserted { collected.append(message) }
+                }
+
+                token = page.nextPageToken
+                // On the last page the total is known exactly. Before that,
+                // assume at least one more page so the bar never sits at 100%
+                // with work still to do.
+                knownTotal = token == nil ? collected.count : collected.count + Self.importPageSize
+                importProgress = .importing(done: collected.count, total: knownTotal)
+
+                // Show them as they arrive rather than after everything: the
+                // list fills in behind the progress view.
+                messages = collected
+            } catch {
+                connectionError = error.localizedDescription
+                break
+            }
+        } while token != nil
+
+        importProgress = .saving
+        await MessageArchive.save(collected)
+
+        nextPageToken = nil
+        importProgress = .finished
+        hasImported = true
+        Task { await enhanceWithAI() }
+    }
+
+    /// Folds a freshly fetched page into what is already held, rather than
+    /// replacing it.
+    ///
+    /// Replacing was fine when the app only ever showed one page. With an
+    /// archive of three months behind it, a refresh returning the newest 25
+    /// would throw the rest away -- and take every AI tag with it.
+    private func merge(_ fetched: [Message]) {
+        var byRemoteID: [String: Int] = [:]
+        for (index, message) in messages.enumerated() {
+            if let remoteID = message.remoteID { byRemoteID[remoteID] = index }
+        }
+
+        for message in fetched {
+            guard let remoteID = message.remoteID else {
+                messages.append(message)
+                continue
+            }
+            if let index = byRemoteID[remoteID] {
+                // Keep what the model worked out; take everything else fresh,
+                // so read state and flags follow Gmail.
+                var updated = message
+                updated.tags = messages[index].tags
+                updated.aiSummary = messages[index].aiSummary
+                messages[index] = updated
+            } else {
+                messages.append(message)
+                byRemoteID[remoteID] = messages.count - 1
+            }
+        }
+    }
+
+    /// Restores the archive so a cold launch has mail on screen before any
+    /// network call finishes.
+    func loadArchive() async {
+        guard messages.isEmpty else { return }
+        let stored = await MessageArchive.load()
+        guard !stored.isEmpty, messages.isEmpty else { return }
+        messages = stored
     }
 
     /// Pulls the next page as the user reaches the end of the list.
@@ -276,6 +392,9 @@ final class MailStore {
     func disconnect() {
         account = nil
         messages = []
+        MessageArchive.clear()
+        hasImported = false
+        importProgress = .idle
         connectionError = nil
         persistAccount()
         ClassificationCache.clear()
