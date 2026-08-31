@@ -1,23 +1,22 @@
 import SwiftUI
 import UIKit
 
-/// A sender's initial on a colour derived from their address.
+/// A sender's logo where one genuinely exists, and their initial where it
+/// does not.
 ///
-/// There is no photo to show. Gmail's API returns no sender image at all --
-/// Gmail's own app has them because Google already holds your Contacts and
-/// their profile pictures, which is a different API and a different scope.
+/// Gmail's own app shows photographs here because Google already holds your
+/// Contacts and their profile pictures -- a different API and a different
+/// scope than reading mail. With mail scopes alone there is no photo to show,
+/// so a company gets its logo and a person gets a coloured letter.
 ///
-/// A favicon lookup was tried and removed: most domains return a generic globe,
-/// so the list filled up with identical grey planets. Gmail's own fallback is a
-/// coloured letter, and doing that consistently looks far better than doing
-/// logos badly for one sender in ten.
-///
-/// The colour is a hash of the address, so a sender is always the same colour
-/// and two different senders rarely collide.
+/// The letter colour is a hash of the address, so a sender is always the same
+/// colour and two senders rarely collide.
 struct SenderAvatar: View {
     let contact: Contact
     var size: CGFloat = 40
     var isMuted: Bool = false
+
+    @State private var icon: UIImage?
 
     private static let palette: [Color] = [
         Color(uiColor: .systemBlue), Color(uiColor: .systemIndigo),
@@ -46,36 +45,10 @@ struct SenderAvatar: View {
         return first.map { String($0).uppercased() } ?? "?"
     }
 
-    private static let consumerDomains: Set<String> = [
-        "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com",
-        "yahoo.com", "icloud.com", "me.com", "mac.com", "proton.me",
-        "protonmail.com", "aol.com", "gmx.com", "zoho.com", "yandex.com",
-    ]
-
-    /// A company that sends mail has a favicon; a person does not.
-    ///
-    /// DuckDuckGo's service returns 404 for a domain it does not know, so a
-    /// miss fails and falls back to the letter. Google's equivalent always
-    /// answers 200 with a generic globe, which is why every sender previously
-    /// looked like the same grey planet.
-    private var brandURL: URL? {
-        guard let domain = contact.address.split(separator: "@").last?.lowercased(),
-              domain.contains("."),
-              !Self.consumerDomains.contains(String(domain))
-        else { return nil }
-        return URL(string: "https://icons.duckduckgo.com/ip3/\(domain).ico")
-    }
-
     var body: some View {
         Group {
-            if let brandURL {
-                AsyncImage(url: brandURL) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        letterAvatar
-                    }
-                }
+            if let icon {
+                brandIcon(icon)
             } else {
                 letterAvatar
             }
@@ -83,6 +56,33 @@ struct SenderAvatar: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .opacity(isMuted ? 0.85 : 1)
+        .animation(.easeOut(duration: 0.18), value: icon != nil)
+        // The letter shows first and the logo replaces it if one turns up.
+        // Waiting on the network before drawing anything would leave a row of
+        // holes on every cold scroll.
+        //
+        // onAppear rather than .task: .task's closure is @Sendable and does
+        // not inherit the view's MainActor, where a Task started from here
+        // does, so the assignment below stays on the main actor.
+        .onAppear {
+            guard icon == nil, let domain = BrandIcon.domain(for: contact.address) else { return }
+            Task { icon = await BrandIcon.shared.icon(for: domain) }
+        }
+    }
+
+    /// On a white plate, inset like an app icon. Logos come in every shape and
+    /// half of them are transparent or near-black -- drawn edge to edge on the
+    /// row background, those either vanish in dark mode or sit in the list as
+    /// a ragged square among circles.
+    private func brandIcon(_ image: UIImage) -> some View {
+        Circle()
+            .fill(.white)
+            .overlay {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(size * 0.19)
+            }
     }
 
     private var letterAvatar: some View {
@@ -112,11 +112,11 @@ struct SenderAvatar: View {
         ForEach(
             [
                 Contact(name: "Maya Chen", address: "maya@example.com"),
-                Contact(name: "Avery Collins", address: "avery.collins@example.com"),
-                Contact(name: "Dad", address: "dad@gmail.com"),
-                Contact(name: "Jordan Bell", address: "jordan@bell.io"),
-                Contact(name: "Render Billing", address: "billing@render.com"),
-                Contact(name: "noreply@github.com", address: "noreply@github.com"),
+                Contact(name: "Abel Amare", address: "abel@gmail.com"),
+                Contact(name: "Remisnap", address: "hello@remisnap.com"),
+                Contact(name: "GitHub", address: "noreply@github.com"),
+                Contact(name: "Stripe", address: "billing@stripe.com"),
+                Contact(name: "X", address: "info@x.com"),
             ]
         ) { contact in
             HStack(spacing: 12) {
