@@ -78,7 +78,14 @@ struct BulkReplyFlow: View {
             Group {
                 switch step {
                 case .consent:    ConsentStep(onCancel: { dismiss() }, onContinue: advanceFromConsent)
-                case .count:      countStep
+                case .count:
+                    ReplyCountStep(
+                        available: eligible.count,
+                        selection: $selection,
+                        selectedCount: targets.count,
+                        onPickManually: { step = .manualPick },
+                        onContinue: { step = .style }
+                    )
                 case .manualPick: manualPickStep
                 case .style:      styleStep
                 case .generating: GeneratingStep(done: generated, total: targets.count)
@@ -87,6 +94,11 @@ struct BulkReplyFlow: View {
                 case .done:       doneStep
                 }
             }
+            .transition(.asymmetric(
+                insertion: .move(edge: .trailing).combined(with: .opacity),
+                removal: .move(edge: .leading).combined(with: .opacity)
+            ))
+            .animation(.spring(response: 0.42, dampingFraction: 0.86), value: step)
             .toolbar {
                 // No way out mid-flight. Leaving during generation wastes what
                 // has already been paid for; leaving during a send would stop
@@ -114,76 +126,6 @@ struct BulkReplyFlow: View {
     }
 
     // MARK: - How many
-
-    private var countStep: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            StepHeader(
-                title: "How many replies?",
-                subtitle: "\(eligible.count) \(eligible.count == 1 ? "email needs" : "emails need") a reply. Maily writes drafts for the ones you pick — nothing is sent yet."
-            )
-
-            ScrollView {
-                VStack(spacing: 10) {
-                    ForEach(presetCounts, id: \.self) { number in
-                        optionCard(
-                            title: "\(number) replies",
-                            detail: nil,
-                            symbol: "square.stack.3d.up",
-                            isSelected: selection == .count(number)
-                        ) { selection = .count(number) }
-                    }
-
-                    optionCard(
-                        title: "Reply to all",
-                        detail: "\(eligible.count) emails",
-                        symbol: "tray.full",
-                        isSelected: selection == .all
-                    ) { selection = .all }
-
-                    CustomCountCard(
-                        maximum: eligible.count,
-                        isSelected: isCustomSelected,
-                        current: customValue
-                    ) { selection = .count($0) }
-
-                    optionCard(
-                        title: "Choose them myself",
-                        detail: manualPicks.isEmpty ? nil : "\(manualPicks.count) selected",
-                        symbol: "hand.tap",
-                        isSelected: selection == .manual
-                    ) {
-                        selection = .manual
-                        step = .manualPick
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 12)
-            }
-            .scrollIndicators(.hidden)
-
-            PrimaryButton(
-                title: targets.isEmpty ? "Pick some emails" : "Continue with \(targets.count)",
-                isEnabled: !targets.isEmpty
-            ) { step = .style }
-        }
-        .navigationTitle("Reply with AI")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    /// Only offer counts the mailbox can actually satisfy.
-    private var presetCounts: [Int] {
-        [5, 10, 15, 50].filter { $0 < eligible.count }
-    }
-
-    private var isCustomSelected: Bool {
-        if case .count(let n) = selection { return !presetCounts.contains(n) }
-        return false
-    }
-
-    private var customValue: Int {
-        if case .count(let n) = selection, !presetCounts.contains(n) { return n }
-        return 0
-    }
 
     // MARK: - Choosing individually
 
@@ -232,6 +174,12 @@ struct BulkReplyFlow: View {
         }
         .navigationTitle("Choose emails")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Clear") { manualPicks.removeAll() }
+                    .disabled(manualPicks.isEmpty)
+            }
+        }
     }
 
     // MARK: - Style
@@ -276,7 +224,7 @@ struct BulkReplyFlow: View {
                 .padding(.bottom, 12)
             }
             .scrollIndicators(.hidden)
-            .dismissesKeyboardOnTap()
+            .dismissesKeyboardOnBackgroundTap()
 
             PrimaryButton(title: "Generate \(targets.count) replies", isEnabled: !targets.isEmpty) {
                 dismissKeyboard()
@@ -308,7 +256,7 @@ struct BulkReplyFlow: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .dismissesKeyboardOnTap()
+            .dismissesKeyboardOnBackgroundTap()
 
             if !unsent.isEmpty {
                 PrimaryButton(title: "Send all \(unsent.count)", isEnabled: true) {
@@ -420,53 +368,5 @@ struct BulkReplyFlow: View {
         } catch {
             drafts[index].failure = error.localizedDescription
         }
-    }
-
-    // MARK: - Shared bits
-
-    private func optionCard(
-        title: String,
-        detail: String?,
-        symbol: String,
-        isSelected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: symbol)
-                    .font(.body)
-                    .foregroundStyle(isSelected ? Color.white : Color.accentColor)
-                    .frame(width: 26)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isSelected ? Color.white : Color.primary)
-                    if let detail {
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(isSelected ? Color.white.opacity(0.8) : Color.secondary)
-                    }
-                }
-
-                Spacer(minLength: 0)
-
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.footnote.weight(.bold))
-                        .foregroundStyle(.white)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 15)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(isSelected
-                          ? AnyShapeStyle(Color.accentColor)
-                          : AnyShapeStyle(Color(uiColor: .secondarySystemBackground)))
-            }
-        }
-        .buttonStyle(.plain)
     }
 }

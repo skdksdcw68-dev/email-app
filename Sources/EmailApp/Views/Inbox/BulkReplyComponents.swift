@@ -400,11 +400,19 @@ func dismissKeyboard() {
 }
 
 extension View {
-    /// Tapping anywhere that is not a field puts the keyboard away.
+    /// A background that puts the keyboard away when tapped.
     ///
-    /// `simultaneousGesture` rather than `onTapGesture`: the latter swallows
-    /// the tap, so buttons underneath stop working.
-    func dismissesKeyboardOnTap() -> some View {
-        simultaneousGesture(TapGesture().onEnded { dismissKeyboard() })
+    /// Deliberately NOT a simultaneousGesture on the whole screen. That was
+    /// tried and it broke two things at once: it fired when tapping into a
+    /// field, so the keyboard closed as fast as it opened, and its tap
+    /// recogniser fought the hold-to-record DragGesture until recording
+    /// stopped working entirely. A gesture only on the background behind the
+    /// content cannot conflict with any control on top of it.
+    func dismissesKeyboardOnBackgroundTap() -> some View {
+        background {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { dismissKeyboard() }
+        }
     }
 }

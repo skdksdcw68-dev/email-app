@@ -1,123 +1,86 @@
 import SwiftUI
 import UIKit
 
-/// The AI tab, as a conversation.
+/// The chat, pushed from the AI tab.
 ///
-/// This is the tab root rather than a pushed page, which is why the tab bar
-/// stays underneath it. Before the first question it shows the briefing and
-/// what is outstanding; after that it is a thread.
-///
-/// Entirely SwiftUI. No web view, no bridge -- the bubbles, the input bar and
-/// the thinking state are all native, so it behaves like the rest of the app
-/// and keeps working offline for everything that does not need the model.
+/// Entirely SwiftUI: the bubbles, the thinking dots, the composer that grows
+/// into a card when focused and the attachment menu that slides up over it are
+/// all native views. No web content anywhere.
 struct AIChatView: View {
     @Environment(MailStore.self) private var mail
 
     @State private var turns: [ChatMessage] = []
     @State private var draft = ""
     @State private var isWorking = false
+    @State private var showsActions = false
     @FocusState private var isInputFocused: Bool
 
     var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 18) {
-                        if turns.isEmpty {
-                            AIChatWelcome(
-                                briefing: mail.inboxStatus,
-                                followUps: mail.followUps,
-                                onPick: { ask($0) }
-                            )
-                            .padding(.top, 4)
-                        }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    if turns.isEmpty {
+                        AIChatWelcome(
+                            briefing: mail.inboxStatus,
+                            followUps: mail.followUps,
+                            onPick: { ask($0) }
+                        )
+                        .padding(.top, 4)
+                        .transition(.opacity)
+                    }
 
-                        ForEach(turns) { turn in
-                            ChatTurnView(turn: turn)
-                                .id(turn.id)
-                        }
+                    ForEach(turns) { turn in
+                        ChatTurnView(turn: turn)
+                            .id(turn.id)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .opacity
+                            ))
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: turns.count) { _, _ in
-                    // Follow the conversation down as it grows.
-                    if let last = turns.last {
-                        withAnimation(.easeOut(duration: 0.25)) {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                    }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+                .animation(.spring(response: 0.38, dampingFraction: 0.82), value: turns.count)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: turns.count) { _, _ in
+                guard let last = turns.last else { return }
+                withAnimation(.easeOut(duration: 0.3)) {
+                    proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
-            .navigationTitle("Maily AI")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button(role: .destructive) {
-                            withAnimation { turns = [] }
-                        } label: {
-                            Label("Clear conversation", systemImage: "trash")
-                        }
-                        .disabled(turns.isEmpty)
+        }
+        .navigationTitle("Maily")
+        .navigationBarTitleDisplayMode(.inline)
+        // Pushed page, so the tab bar goes.
+        .toolbar(.hidden, for: .tabBar)
+        .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button(role: .destructive) {
+                        withAnimation { turns = [] }
                     } label: {
-                        Label("Options", systemImage: "ellipsis")
+                        Label("Clear conversation", systemImage: "trash")
                     }
-                }
-            }
-            .safeAreaInset(edge: .bottom) { inputBar }
-        }
-    }
-
-    // MARK: - Input
-
-    private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            HStack(alignment: .bottom, spacing: 8) {
-                // Grows with the text, up to a point, then scrolls -- the same
-                // shape every chat input on the platform has.
-                TextField("Ask about your email", text: $draft, axis: .vertical)
-                    .font(.subheadline)
-                    .lineLimit(1...6)
-                    .focused($isInputFocused)
-                    .padding(.leading, 16)
-                    .padding(.vertical, 11)
-
-                Button {
-                    send()
+                    .disabled(turns.isEmpty)
                 } label: {
-                    Image(systemName: "arrow.up")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(canSend ? Color.white : Color.secondary)
-                        .frame(width: 30, height: 30)
-                        .background {
-                            Circle().fill(canSend ? Color.accentColor : Color(uiColor: .tertiarySystemFill))
-                        }
+                    Image(systemName: "ellipsis")
+                        .font(.body.weight(.semibold))
                 }
-                .buttonStyle(.plain)
-                .disabled(!canSend)
-                .padding(.trailing, 7)
-                .padding(.bottom, 7)
-            }
-            .background {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemBackground))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .strokeBorder(Color(uiColor: .separator).opacity(0.5), lineWidth: 0.5)
-                    }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.bar)
-    }
-
-    private var canSend: Bool {
-        !isWorking && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            ChatComposer(
+                text: $draft,
+                isFocused: $isInputFocused,
+                showsActions: $showsActions,
+                isWorking: isWorking,
+                onSend: send,
+                onAction: handleAction
+            )
+        }
     }
 
     // MARK: - Asking
@@ -129,8 +92,17 @@ struct AIChatView: View {
         ask(question)
     }
 
+    private func handleAction(_ action: ChatComposer.Action) {
+        switch action {
+        case .whatNeedsReply: ask("What do I need to reply to?")
+        case .whoIsWaiting:   ask("Who am I keeping waiting?")
+        case .findSomething:  isInputFocused = true
+        }
+    }
+
     private func ask(_ question: String) {
         isInputFocused = false
+        showsActions = false
         turns.append(.user(question))
         turns.append(.thinking)
         let pendingID = turns.last?.id
@@ -140,7 +112,6 @@ struct AIChatView: View {
             defer { isWorking = false }
 
             let context = mail.context(for: question)
-
             do {
                 let result = try await AIService.ask(question: question, context: context)
                 replace(pendingID, with: result.answer, sources: context, failed: false)
@@ -152,15 +123,19 @@ struct AIChatView: View {
 
     private func replace(_ id: ChatMessage.ID?, with text: String, sources: [Message], failed: Bool) {
         guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
-        turns[index].text = text
-        turns[index].sources = failed ? [] : sources
-        turns[index].isPending = false
-        turns[index].failed = failed
+        withAnimation(.easeOut(duration: 0.25)) {
+            turns[index].text = text
+            turns[index].sources = failed ? [] : sources
+            turns[index].isPending = false
+            turns[index].failed = failed
+        }
     }
 }
 
 #Preview {
-    AIChatView()
-        .environment(MailStore.connected())
-        .environment(UserStore(defaults: .previews, startAt: .finished))
+    NavigationStack {
+        AIChatView()
+    }
+    .environment(MailStore.connected())
+    .environment(UserStore(defaults: .previews, startAt: .finished))
 }

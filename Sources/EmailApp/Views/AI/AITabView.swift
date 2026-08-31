@@ -1,0 +1,118 @@
+import SwiftUI
+import UIKit
+
+/// The AI tab. A briefing, a way into the chat, and what is outstanding.
+///
+/// The chat is pushed from here rather than being the tab itself: this screen
+/// is the standing view of the mailbox, and a conversation about it is
+/// something you go into and come back from.
+struct AITabView: View {
+    @Environment(MailStore.self) private var mail
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Today", systemImage: "sparkles")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tint)
+                        Text(mail.inboxStatus)
+                            .font(.subheadline.weight(.medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Daily briefing")
+                }
+
+                Section {
+                    NavigationLink {
+                        AIChatView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "bubble.left.and.text.bubble.right.fill")
+                                .font(.body)
+                                .foregroundStyle(.tint)
+                                .frame(width: 26)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Talk to Maily")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("Ask anything about your email.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+
+                followUpSection
+
+                Section("Quick questions") {
+                    ForEach(AIQuestion.all) { question in
+                        NavigationLink(value: question) {
+                            HStack(spacing: 12) {
+                                Image(systemName: question.symbol)
+                                    .font(.body)
+                                    .symbolRenderingMode(.hierarchical)
+                                    .foregroundStyle(.tint)
+                                    .frame(width: 26)
+                                Text(question.prompt)
+                                    .font(.subheadline)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("AI")
+            .navigationDestination(for: AIQuestion.self) { AIAnswerView(question: $0) }
+            .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
+        }
+    }
+
+    /// The thing a normal inbox cannot tell you: what has gone quiet.
+    @ViewBuilder
+    private var followUpSection: some View {
+        let followUps = mail.followUps
+        if !followUps.isEmpty {
+            Section {
+                ForEach(followUps.prefix(8)) { followUp in
+                    NavigationLink(value: followUp.message.id) {
+                        HStack(spacing: 12) {
+                            Image(systemName: followUp.direction == .waitingOnYou
+                                  ? "arrowshape.turn.up.left.fill"
+                                  : "clock.arrow.circlepath")
+                                .font(.footnote)
+                                .foregroundStyle(followUp.isOverdue ? Color.orange : Color.secondary)
+                                .frame(width: 22)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(followUp.message.sender.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .lineLimit(1)
+                                Text(followUp.direction == .waitingOnYou
+                                     ? "Waiting on you · \(followUp.ageDescription)"
+                                     : "No reply since \(followUp.ageDescription)")
+                                    .font(.caption)
+                                    .foregroundStyle(followUp.isOverdue ? Color.orange : Color.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            } header: {
+                Text("Follow-ups")
+            } footer: {
+                Text("Conversations where somebody is still waiting.")
+            }
+        }
+    }
+}
+
+#Preview {
+    AITabView()
+        .environment(MailStore.connected())
+        .environment(UserStore(defaults: .previews, startAt: .finished))
+}

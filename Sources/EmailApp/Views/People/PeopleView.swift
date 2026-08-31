@@ -66,7 +66,6 @@ struct PeopleView: View {
                 }
             }
             .navigationTitle("People")
-            .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, prompt: "Search people")
             .safeAreaInset(edge: .top, spacing: 0) {
                 if availableCategories.count > 1 { categoryBar }

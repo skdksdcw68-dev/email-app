@@ -73,7 +73,7 @@ struct ComposeView: View {
                 bodyEditor
                 bottomBar
             }
-            .dismissesKeyboardOnTap()
+            .dismissesKeyboardOnBackgroundTap()
             .navigationTitle(replyingTo == nil ? "New Message" : "Reply")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear(perform: prefill)
@@ -143,8 +143,10 @@ struct ComposeView: View {
             Divider()
 
             draftOption("Save draft", "tray.and.arrow.down") {
-                isConfirmingCancel = false
+                // Task first. Dismissing the popover first tears down the view
+                // the work was started from, and the save never ran.
                 Task { await performSaveDraft() }
+                isConfirmingCancel = false
             }
             Divider()
             draftOption("Discard draft", "trash", isDestructive: true) { dismiss() }

@@ -94,7 +94,7 @@ struct AIWriterSheet: View {
                 }
                 .padding(16)
             }
-            .dismissesKeyboardOnTap()
+            .dismissesKeyboardOnBackgroundTap()
             .navigationTitle("Write with AI")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
