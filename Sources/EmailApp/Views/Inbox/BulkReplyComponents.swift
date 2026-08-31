@@ -9,7 +9,6 @@ import UIKit
 /// yes -- and worth being able to turn off, because a warning that appears
 /// every single time is one nobody reads.
 struct ConsentStep: View {
-    let onCancel: () -> Void
     let onContinue: (Bool) -> Void
 
     @State private var hasAgreed = false
@@ -104,19 +103,60 @@ struct CheckboxToggleStyle: ToggleStyle {
     }
 }
 
+// MARK: - Flow chrome
+
+/// The X that closes the flow: a small circled mark, the way modern sheets
+/// dismiss, instead of a "Cancel" word.
+struct FlowCloseButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(BouncyButtonStyle())
+        .accessibilityLabel("Close")
+    }
+}
+
+/// Back, for any step that has somewhere to go back to. Styled like the
+/// system's own back control so it reads as navigation, not cancellation.
+struct FlowBackButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: "chevron.left")
+                    .font(.body.weight(.semibold))
+                Text("Back")
+            }
+            .foregroundStyle(.tint)
+        }
+        .buttonStyle(BouncyButtonStyle())
+        .accessibilityLabel("Back")
+    }
+}
+
+// MARK: - Working screens
+
 /// Writing in progress.
 ///
 /// A full screen rather than a spinner in a sheet: this can take minutes, and
-/// the count climbing is the only honest reassurance there is. The ring is
-/// determinate, but a second ring sweeps continuously behind it so the screen
-/// is never still between one reply finishing and the next -- a bar that does
-/// not move for eight seconds reads as a hang.
+/// the count climbing is the only honest reassurance there is. Three things
+/// keep it alive: a comet that never stops circling, digits that roll rather
+/// than swap, and the name of whoever is being written to sliding through.
 struct GeneratingStep: View {
     let done: Int
     let total: Int
+    var recipient: String? = nil
 
     @State private var sweep = false
-    @State private var pop = false
 
     private var fraction: Double {
         total > 0 ? Double(done) / Double(total) : 0
@@ -133,41 +173,68 @@ struct GeneratingStep: View {
                 // Always turning, so the screen has a pulse even while one
                 // reply is being written.
                 Circle()
-                    .trim(from: 0, to: 0.12)
-                    .stroke(Color.accentColor.opacity(0.35),
-                            style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                    .trim(from: 0, to: 0.28)
+                    .stroke(
+                        AngularGradient(
+                            colors: [Color.accentColor.opacity(0), Color.accentColor.opacity(0.45)],
+                            center: .center,
+                            startAngle: .degrees(0),
+                            endAngle: .degrees(100)
+                        ),
+                        style: StrokeStyle(lineWidth: 10, lineCap: .round)
+                    )
                     .rotationEffect(.degrees(sweep ? 360 : 0))
-                    .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: sweep)
+                    .animation(.linear(duration: 1.3).repeatForever(autoreverses: false), value: sweep)
 
                 Circle()
                     .trim(from: 0, to: max(0.02, fraction))
                     .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 10, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .animation(.spring(response: 0.5, dampingFraction: 0.7), value: fraction)
+                    .animation(.spring(response: 0.55, dampingFraction: 0.75), value: fraction)
 
-                VStack(spacing: 1) {
-                    Text("(done)")
-                        .font(.system(size: 38, weight: .bold, design: .rounded).monospacedDigit())
-                        .contentTransition(.numericText())
-                        // A small kick each time one lands, so the number is
-                        // visibly counting rather than quietly changing.
-                        .scaleEffect(pop ? 1.14 : 1)
-                    Text("of (total)")
+                VStack(spacing: 2) {
+                    Text("\(done)")
+                        .font(.system(size: 40, weight: .bold, design: .rounded).monospacedDigit())
+                        .contentTransition(.numericText(value: Double(done)))
+                        .animation(.snappy(duration: 0.3), value: done)
+                    Text("of \(total)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 152, height: 152)
+            .frame(width: 160, height: 160)
 
             VStack(spacing: 8) {
-                Text(done == 0 ? "Starting" : (fraction >= 0.85 ? "Almost there" : "Writing your replies"))
-                    .font(.title3.weight(.bold))
-                    .contentTransition(.opacity)
+                HStack(spacing: 7) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(.tint)
+                        .symbolEffect(.variableColor.iterative, options: .repeating)
+                    Text(done == 0 ? "Starting" : (fraction >= 0.85 ? "Almost there" : "Writing your replies"))
+                }
+                .font(.title3.weight(.bold))
 
-                Text("Maily is reading each email and writing a reply. Nothing is sent.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                // Who the current draft is for. `.id` makes each name its own
+                // view, so one slides out as the next slides in.
+                ZStack {
+                    if let recipient {
+                        Text("Writing to \(recipient)…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .id(recipient)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .move(edge: .top).combined(with: .opacity)
+                            ))
+                    } else {
+                        Text("Maily is reading each email. Nothing is sent.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(height: 20)
+                .clipped()
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: recipient)
             }
             .padding(.top, 30)
             .padding(.horizontal, 40)
@@ -182,22 +249,19 @@ struct GeneratingStep: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("")
         .navigationBarBackButtonHidden()
+        .sensoryFeedback(.impact(weight: .light), trigger: done)
         .onAppear { sweep = true }
-        .onChange(of: done) { _, _ in
-            withAnimation(.spring(response: 0.22, dampingFraction: 0.5)) { pop = true }
-            Task {
-                try? await Task.sleep(for: .milliseconds(160))
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { pop = false }
-            }
-        }
     }
 }
 
-/// Sending. Same shape as generating, but the warning is stronger, because
+/// Sending. Same shape as generating, but green, with the plane drifting on a
+/// slow bob so the screen breathes -- and the warning is stronger, because
 /// leaving here stops a send halfway through a list of real people.
 struct SendingStep: View {
     let done: Int
     let total: Int
+
+    @State private var bob = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -206,22 +270,28 @@ struct SendingStep: View {
             ZStack {
                 Circle()
                     .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 10)
+
                 Circle()
                     .trim(from: 0, to: total > 0 ? max(0.02, Double(done) / Double(total)) : 0.02)
                     .stroke(Color(uiColor: .systemGreen),
                             style: StrokeStyle(lineWidth: 10, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .animation(.easeOut(duration: 0.3), value: done)
+                    .animation(.spring(response: 0.5, dampingFraction: 0.8), value: done)
 
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 34))
                     .foregroundStyle(Color(uiColor: .systemGreen))
+                    .rotationEffect(.degrees(bob ? -6 : 6))
+                    .offset(x: bob ? 4 : -4, y: bob ? -5 : 3)
+                    .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: bob)
             }
-            .frame(width: 148, height: 148)
+            .frame(width: 156, height: 156)
 
             VStack(spacing: 8) {
                 Text("Sending \(done) of \(total)")
                     .font(.title3.weight(.bold).monospacedDigit())
+                    .contentTransition(.numericText(value: Double(done)))
+                    .animation(.snappy(duration: 0.3), value: done)
                 Text("Stay on this screen. Closing Maily now will stop the rest from going.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -235,77 +305,71 @@ struct SendingStep: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("")
         .navigationBarBackButtonHidden()
+        .sensoryFeedback(.impact(weight: .light), trigger: done)
+        .onAppear { bob = true }
     }
 }
 
-/// A number the user types, clamped to what actually exists.
-struct CustomCountCard: View {
-    let maximum: Int
-    let isSelected: Bool
-    let current: Int
-    let onChange: (Int) -> Void
+/// The landing after a send: the checkmark springs in with a success haptic
+/// instead of already sitting there, so arriving reads as an event.
+struct DoneStep: View {
+    let sent: Int
+    let hadFailures: Bool
+    let onDone: () -> Void
 
-    @State private var text = ""
-    @FocusState private var isFocused: Bool
+    @State private var appeared = false
 
     var body: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 14) {
-                Image(systemName: "number")
-                    .font(.body)
-                    .foregroundStyle(isSelected ? Color.white : Color.accentColor)
-                    .frame(width: 26)
-                Text("A specific number")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(isSelected ? Color.white : Color.primary)
-                Spacer(minLength: 0)
-                if isSelected {
-                    Text("\(current)")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.white)
+        VStack(spacing: 20) {
+            Spacer()
+
+            ZStack {
+                Circle()
+                    .fill(Color(uiColor: .systemGreen).opacity(0.12))
+                    .frame(width: 140, height: 140)
+                    .scaleEffect(appeared ? 1 : 0.4)
+
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 76))
+                    .foregroundStyle(Color(uiColor: .systemGreen))
+                    .scaleEffect(appeared ? 1 : 0.3)
+                    .symbolEffect(.bounce, value: appeared)
+            }
+            .opacity(appeared ? 1 : 0)
+
+            VStack(spacing: 6) {
+                Text(sent == 1 ? "1 reply sent" : "\(sent) replies sent")
+                    .font(.title2.weight(.bold))
+                if hadFailures {
+                    Text("Some could not be sent. Go back to see which.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
             }
+            .opacity(appeared ? 1 : 0)
+            .offset(y: appeared ? 0 : 12)
 
-            if isFocused || isSelected {
-                TextField("0", text: $text)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.center)
-                    .font(.title2.weight(.bold).monospacedDigit())
-                    .focused($isFocused)
-                    .padding(.vertical, 10)
-                    .background {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color(uiColor: .tertiarySystemFill))
-                    }
-                    .onChange(of: text) { _, value in
-                        // Digits only, and never more than exist. Asking for
-                        // fifty out of twelve means twelve.
-                        let digits = value.filter(\.isNumber)
-                        if digits != value { text = digits }
-                        let requested = Int(digits) ?? 0
-                        if requested > maximum { text = "\(maximum)" }
-                        onChange(min(max(requested, 0), maximum))
-                    }
-                Text("Up to \(maximum)")
-                    .font(.caption2)
-                    .foregroundStyle(isSelected ? Color.white.opacity(0.8) : Color.secondary)
+            Spacer()
+
+            PrimaryButton(title: "Back to inbox", isEnabled: true, action: onDone)
+        }
+        .padding(.horizontal, 4)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .sensoryFeedback(.success, trigger: appeared)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.62).delay(0.15)) {
+                appeared = true
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 15)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isSelected
-                      ? AnyShapeStyle(Color.accentColor)
-                      : AnyShapeStyle(Color(uiColor: .secondarySystemBackground)))
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { isFocused = true }
     }
 }
 
-/// One draft in the review list.
+// MARK: - Review pieces
+
+/// One draft in the review list. Its send button carries the whole story:
+/// idle, spinning while it goes, then a green "Sent" it morphs into.
 struct DraftCard: View {
     @Binding var draft: BulkReplyFlow.PendingReply
     let onSend: () -> Void
@@ -327,6 +391,7 @@ struct DraftCard: View {
             TextField("Reply", text: $draft.body, axis: .vertical)
                 .font(.subheadline)
                 .lineLimit(3...10)
+                .disabled(draft.isSent || draft.isSending)
 
             if let failure = draft.failure {
                 Label(failure, systemImage: "exclamationmark.triangle.fill")
@@ -334,28 +399,46 @@ struct DraftCard: View {
                     .foregroundStyle(.red)
             }
 
-            if draft.isSent {
-                Label("Sent", systemImage: "checkmark.circle.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.green)
-            } else if draft.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                // Nothing was written for this one, usually because the
-                // network dropped mid-run. Offering "Send" here was the bug:
-                // it promised to send an empty reply.
-                Label("Could not be written. Try again later.", systemImage: "wifi.exclamationmark")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Button(action: onSend) {
-                    Label("Send this one", systemImage: "paperplane.fill")
+            Group {
+                if draft.isSent {
+                    Label("Sent", systemImage: "checkmark.circle.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color(uiColor: .systemGreen))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .background(Capsule().fill(Color(uiColor: .systemGreen).opacity(0.12)))
+                        .transition(.scale(scale: 0.8).combined(with: .opacity))
+                } else if draft.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    // Nothing was written for this one, usually because the
+                    // network dropped mid-run. Offering "Send" here was the
+                    // bug: it promised to send an empty reply.
+                    Label("Could not be written. Try again later.", systemImage: "wifi.exclamationmark")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button(action: onSend) {
+                        HStack(spacing: 8) {
+                            if draft.isSending {
+                                ProgressView()
+                                    .tint(.white)
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "paperplane.fill")
+                            }
+                            Text(draft.isSending ? "Sending…" : "Send this one")
+                        }
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 40)
-                        .background(Capsule().fill(Color.accentColor))
+                        .background(Capsule().fill(Color.accentColor.opacity(draft.isSending ? 0.75 : 1)))
+                    }
+                    .buttonStyle(BouncyButtonStyle())
+                    .disabled(draft.isSending)
                 }
-                .buttonStyle(.plain)
             }
+            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: draft.isSent)
+            .animation(.easeInOut(duration: 0.18), value: draft.isSending)
         }
         .padding(.vertical, 4)
     }
@@ -379,7 +462,7 @@ struct StyleChip: View {
                 Capsule().fill(isSelected ? Color.accentColor : Color(uiColor: .tertiarySystemFill))
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BouncyButtonStyle())
     }
 }
 

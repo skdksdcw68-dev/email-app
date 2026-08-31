@@ -52,7 +52,7 @@ struct PersonDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         // A pushed page is a full-screen context. Leaving the tab bar under
         // it stacks two navigation systems over one screen.
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
         .onAppear {
             isImportant = PersonPreferences.isImportant(address)
             isMuted = PersonPreferences.isMuted(address)

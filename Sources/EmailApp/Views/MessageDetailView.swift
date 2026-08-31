@@ -33,7 +33,7 @@ struct MessageDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         // The reading view is a full-screen context. Leaving the tab bar under
         // an action bar stacks two chrome layers and eats the message.
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
         .safeAreaInset(edge: .bottom) {
             if message != nil { replyBar }
         }

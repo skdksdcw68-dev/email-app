@@ -172,4 +172,34 @@ final class MailStoreTests: XCTestCase {
             XCTAssertTrue(error is MailStore.SendError)
         }
     }
+
+    // MARK: - Chip counts
+
+    func testChipCountOnlyCountsUnread() {
+        // The pill number is a to-do count: reading the message clears it.
+        let store = makeStore()
+        XCTAssertEqual(store.unreadCount(of: .urgent, in: .inbox), 1)
+
+        store.markRead(store.messages(in: .inbox)[0].id)
+        XCTAssertEqual(store.unreadCount(of: .urgent, in: .inbox), 0)
+    }
+
+    // MARK: - Local answers
+
+    func testReplyQuestionIsAnsweredLocally() {
+        // Level 1 of the decision ladder: the mailbox settles this itself,
+        // instantly and free, so it must never reach the model.
+        let answer = makeStore().localAnswer(for: "What do I need to reply to?")
+        XCTAssertNotNil(answer)
+        XCTAssertFalse(answer?.text.isEmpty ?? true)
+    }
+
+    func testOpenQuestionsGoToTheModel() {
+        // Anything with real nuance falls through to level 2.
+        XCTAssertNil(makeStore().localAnswer(for: "Summarise the contract negotiation"))
+    }
+
+    func testAnEmptyMailboxAnswersNothingLocally() {
+        XCTAssertNil(MailStore().localAnswer(for: "What do I need to reply to?"))
+    }
 }

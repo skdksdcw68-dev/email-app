@@ -5,8 +5,9 @@ import UIKit
 ///
 /// A sheet was wrong for this. Generating eighty replies takes real time and
 /// costs real money, and the results are worth more than a modal that a stray
-/// downward swipe throws away. Each stage is a full screen, and the work
-/// survives until the user leaves deliberately.
+/// downward swipe throws away. Each stage is a full screen, the stages slide
+/// into each other like pages, and the work survives until the user leaves
+/// deliberately.
 struct BulkReplyFlow: View {
     let messages: [Message]
 
@@ -17,6 +18,8 @@ struct BulkReplyFlow: View {
     /// Straight past the warning for anyone who has already read it and asked
     /// not to see it again.
     @State private var step: Step = BulkReplyFlow.hasConsented ? .count : .consent
+    /// Which way the last step change went, so the slide matches.
+    @State private var advancing = true
     @State private var selection: Selection = .count(10)
     @State private var manualPicks: Set<Message.ID> = []
     @State private var style: WriterStyle = .short
@@ -24,6 +27,8 @@ struct BulkReplyFlow: View {
 
     @State private var drafts: [PendingReply] = []
     @State private var generated = 0
+    /// Who is being written to right now, shown on the generating screen.
+    @State private var writingTo: String?
     @State private var sentCount = 0
     @State private var errorMessage: String?
 
@@ -43,6 +48,7 @@ struct BulkReplyFlow: View {
         let id: Message.ID
         let message: Message
         var body: String
+        var isSending = false
         var isSent = false
         var failure: String?
     }
@@ -75,57 +81,95 @@ struct BulkReplyFlow: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                switch step {
-                case .consent:    ConsentStep(onCancel: { dismiss() }, onContinue: advanceFromConsent)
-                case .count:
-                    ReplyCountStep(
-                        available: eligible.count,
-                        selection: $selection,
-                        selectedCount: targets.count,
-                        onPickManually: { step = .manualPick },
-                        onContinue: { step = .style }
-                    )
-                case .manualPick: manualPickStep
-                case .style:      styleStep
-                case .generating: GeneratingStep(done: generated, total: targets.count)
-                case .review:     reviewStep
-                case .sending:    SendingStep(done: sentCount, total: drafts.filter { !$0.isSent }.count + sentCount)
-                case .done:       doneStep
-                }
+            ZStack {
+                stepView
+                    .id(step)
+                    // A real page-to-page move: the new step slides in from
+                    // the side it belongs to while the old one settles away.
+                    // Removal is deliberately direction-agnostic (fade and
+                    // settle), so a step can never exit the wrong way.
+                    .transition(.asymmetric(
+                        insertion: .move(edge: advancing ? .trailing : .leading).combined(with: .opacity),
+                        removal: .opacity.combined(with: .scale(scale: 0.98))
+                    ))
             }
-            .transition(.asymmetric(
-                insertion: .move(edge: .trailing).combined(with: .opacity),
-                removal: .move(edge: .leading).combined(with: .opacity)
-            ))
             .animation(.spring(response: 0.42, dampingFraction: 0.86), value: step)
-            .toolbar {
-                // No way out mid-flight. Leaving during generation wastes what
-                // has already been paid for; leaving during a send would stop
-                // it halfway with no record of where it got to.
-                if step != .generating && step != .sending {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(step == .done ? "Done" : "Cancel") { dismiss() }
-                    }
-                }
-            }
+            .toolbar { leadingChrome }
         }
         .interactiveDismissDisabled(step == .generating || step == .sending)
+    }
+
+    @ViewBuilder
+    private var stepView: some View {
+        switch step {
+        case .consent:
+            ConsentStep(onContinue: advanceFromConsent)
+        case .count:
+            ReplyCountStep(
+                available: eligible.count,
+                selection: $selection,
+                selectedCount: targets.count,
+                onPickManually: { go(.manualPick) },
+                onContinue: { go(.style) }
+            )
+        case .manualPick:
+            manualPickStep
+        case .style:
+            styleStep
+        case .generating:
+            GeneratingStep(done: generated, total: targets.count, recipient: writingTo)
+        case .review:
+            reviewStep
+        case .sending:
+            SendingStep(done: sentCount, total: drafts.filter { !$0.isSent }.count + sentCount)
+        case .done:
+            DoneStep(
+                sent: sentCount,
+                hadFailures: drafts.contains { $0.failure != nil },
+                onDone: { dismiss() }
+            )
+        }
+    }
+
+    /// The top-left control follows where you are: an X while nothing has
+    /// been chosen yet, Back once there is a previous step to return to, and
+    /// nothing at all mid-flight -- leaving during generation wastes what has
+    /// been paid for, and leaving during a send would stop it halfway with no
+    /// record of where it got to.
+    @ToolbarContentBuilder
+    private var leadingChrome: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            switch step {
+            case .consent, .count:
+                FlowCloseButton { dismiss() }
+            case .manualPick, .style:
+                FlowBackButton { go(.count, forward: false) }
+            case .review:
+                FlowBackButton { go(.style, forward: false) }
+            case .done:
+                FlowBackButton { dismiss() }
+            case .generating, .sending:
+                EmptyView()
+            }
+        }
+    }
+
+    private func go(_ next: Step, forward: Bool = true) {
+        advancing = forward
+        step = next
     }
 
     // MARK: - Consent
 
     private func advanceFromConsent(rememberChoice: Bool) {
         if rememberChoice { UserDefaults.standard.set(true, forKey: Self.consentKey) }
-        step = .count
+        go(.count)
     }
 
     /// Skips straight past the warning for anyone who ticked "don't ask again".
     static var hasConsented: Bool {
         UserDefaults.standard.bool(forKey: consentKey)
     }
-
-    // MARK: - How many
 
     // MARK: - Choosing individually
 
@@ -170,11 +214,10 @@ struct BulkReplyFlow: View {
             PrimaryButton(
                 title: manualPicks.isEmpty ? "Select at least one" : "Done — \(manualPicks.count) selected",
                 isEnabled: !manualPicks.isEmpty
-            ) { step = .count }
+            ) { go(.count, forward: false) }
         }
         .navigationTitle("Choose emails")
         .navigationBarTitleDisplayMode(.inline)
-
     }
 
     // MARK: - Style
@@ -223,7 +266,7 @@ struct BulkReplyFlow: View {
 
             PrimaryButton(title: "Generate \(targets.count) replies", isEnabled: !targets.isEmpty) {
                 dismissKeyboard()
-                step = .generating
+                go(.generating)
                 Task { await generateAll() }
             }
         }
@@ -255,7 +298,7 @@ struct BulkReplyFlow: View {
 
             if !unsent.isEmpty {
                 PrimaryButton(title: "Send all \(unsent.count)", isEnabled: true) {
-                    step = .sending
+                    go(.sending)
                     Task { await sendAll() }
                 }
             }
@@ -266,37 +309,6 @@ struct BulkReplyFlow: View {
 
     private var unsent: [PendingReply] {
         drafts.filter { !$0.isSent && !$0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    }
-
-    // MARK: - Done
-
-    private var doneStep: some View {
-        VStack(spacing: 20) {
-            Spacer()
-
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 72))
-                .foregroundStyle(Color(uiColor: .systemGreen))
-                .transition(.scale.combined(with: .opacity))
-
-            VStack(spacing: 6) {
-                Text(sentCount == 1 ? "1 reply sent" : "\(sentCount) replies sent")
-                    .font(.title2.weight(.bold))
-                if drafts.contains(where: { $0.failure != nil }) {
-                    Text("Some could not be sent. Go back to see which.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-            }
-
-            Spacer()
-
-            PrimaryButton(title: "Back to inbox", isEnabled: true) { dismiss() }
-        }
-        .padding(.horizontal, 4)
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
     }
 
     // MARK: - Work
@@ -315,6 +327,7 @@ struct BulkReplyFlow: View {
         // Sequential on purpose. Eighty concurrent model calls is a rate limit
         // and a surprise bill, and the counter on screen would be a lie.
         for message in targets {
+            writingTo = message.sender.name
             do {
                 let draft = try await AIService.draft(
                     replyingTo: message,
@@ -331,8 +344,9 @@ struct BulkReplyFlow: View {
             generated += 1
         }
 
+        writingTo = nil
         drafts = produced
-        step = .review
+        go(.review)
     }
 
     @MainActor
@@ -344,7 +358,7 @@ struct BulkReplyFlow: View {
             await send(id)
         }
 
-        step = .done
+        go(.done)
     }
 
     @MainActor
@@ -352,6 +366,9 @@ struct BulkReplyFlow: View {
         guard let index = drafts.firstIndex(where: { $0.id == id }) else { return }
         let draft = drafts[index]
         guard !draft.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !draft.isSending, !draft.isSent else { return }
+
+        drafts[index].isSending = true
 
         do {
             try await store.send(
@@ -362,12 +379,18 @@ struct BulkReplyFlow: View {
                 body: draft.body,
                 replyingTo: draft.message
             )
-            drafts[index].isSent = true
-            drafts[index].failure = nil
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                drafts[index].isSending = false
+                drafts[index].isSent = true
+                drafts[index].failure = nil
+            }
             store.markRead(draft.message.id)
             sentCount += 1
         } catch {
-            drafts[index].failure = error.localizedDescription
+            withAnimation(.easeInOut(duration: 0.2)) {
+                drafts[index].isSending = false
+                drafts[index].failure = error.localizedDescription
+            }
         }
     }
 }

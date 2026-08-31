@@ -1,15 +1,18 @@
 import SwiftUI
 import UIKit
 
-/// The chat input, ported from Drobe's `chat-input-bar.tsx`.
+/// The chat input: one floating glass panel, the shape ChatGPT's bar has.
 ///
-/// The structural point I kept missing: this is a panel, not a capsule with
-/// controls tucked inside it. Text on top, a toolbar row underneath, always,
-/// in both states. That is what makes the resting height look deliberate and
-/// what lets it grow without the buttons being pushed anywhere.
+/// There is deliberately nothing behind it. The panel is the whole control --
+/// the conversation scrolls underneath and shows through the material, rather
+/// than being cut off by a full-width wall. And nothing here is drawn by
+/// hand: it is a real TextField in a bottom safe-area inset, which is what
+/// makes it ride the keyboard natively -- an interactive keyboard drag pulls
+/// the panel down with it, frame by frame, for free.
 ///
-/// Metrics are Drobe's: 20pt corner, 16pt padding, 12pt between rows, 15/20
-/// text from one line up to 120pt then scrolling, and a 32pt round send.
+/// Text on top, a toolbar row underneath, in both states. That is what makes
+/// the resting height look deliberate and what lets it grow without the
+/// buttons being pushed anywhere.
 struct ChatComposer: View {
     @Binding var text: String
     @FocusState.Binding var isFocused: Bool
@@ -47,16 +50,15 @@ struct ChatComposer: View {
     private var canSend: Bool { hasRequest && !isWorking }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 10) {
             if showsActions { actionMenu }
-
             panel
-                .padding(.horizontal, 14)
-                .padding(.top, showsActions ? 4 : 8)
-                .padding(.bottom, 8)
         }
-        .background(.regularMaterial)
-        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showsActions)
+        .padding(.horizontal, 12)
+        .padding(.top, 4)
+        .padding(.bottom, 8)
+        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: showsActions)
+        .sensoryFeedback(.impact(weight: .light), trigger: showsActions)
         .sensoryFeedback(.impact(weight: .medium), trigger: isWorking)
     }
 
@@ -65,7 +67,7 @@ struct ChatComposer: View {
     private var panel: some View {
         VStack(alignment: .leading, spacing: 12) {
             TextField(isWorking ? "Maily is typing…" : "Ask Maily", text: $text, axis: .vertical)
-                .font(.system(size: 15))
+                .font(.system(size: 16))
                 .lineSpacing(4)
                 // One line at rest, growing to six, then scrolling inside
                 // itself. No fixed height: a pinned height makes every state
@@ -76,25 +78,23 @@ struct ChatComposer: View {
             HStack(alignment: .center, spacing: 0) {
                 plusButton
                 Spacer(minLength: 0)
-                if isFocused { dismissButton }
                 sendButton
             }
         }
-        .padding(16)
+        .padding(14)
         .background {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemBackground))
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.regularMaterial)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
                         .strokeBorder(
-                            hasRequest ? Color.accentColor.opacity(0.3) : Color(uiColor: .separator).opacity(0.35),
-                            lineWidth: 0.5
+                            hasRequest ? Color.accentColor.opacity(0.35) : Color(uiColor: .separator).opacity(0.4),
+                            lineWidth: 0.66
                         )
                 }
         }
-        .shadow(color: hasRequest ? Color.accentColor.opacity(0.14) : .clear, radius: 8, y: 2)
+        .shadow(color: .black.opacity(0.1), radius: 14, y: 5)
         .animation(.easeInOut(duration: 0.2), value: hasRequest)
-        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: isFocused)
     }
 
     /// The same button closes what it opened, so there is never a second,
@@ -111,22 +111,6 @@ struct ChatComposer: View {
         }
         .buttonStyle(BouncyButtonStyle())
         .accessibilityLabel(showsActions ? "Close menu" : "More")
-    }
-
-    private var dismissButton: some View {
-        Button {
-            isFocused = false
-            showsActions = false
-        } label: {
-            Image(systemName: "keyboard.chevron.compact.down")
-                .font(.system(size: 16))
-                .foregroundStyle(.secondary)
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(BouncyButtonStyle())
-        .transition(.scale.combined(with: .opacity))
-        .accessibilityLabel("Hide keyboard")
     }
 
     private var sendButton: some View {
@@ -178,6 +162,11 @@ struct ChatComposer: View {
                 }
             }
         }
+        .background {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.regularMaterial)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 10, y: 3)
         .transition(.asymmetric(
             insertion: .move(edge: .bottom).combined(with: .opacity),
             removal: .opacity

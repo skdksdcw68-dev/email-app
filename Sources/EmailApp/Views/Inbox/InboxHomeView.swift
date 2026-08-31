@@ -7,8 +7,9 @@ import UIKit
 /// no card, no hairline, the way Mail's category filters sit. Below them the
 /// red "needs your attention" row, then the mail.
 ///
-/// There is no counts strip. Four numbers restating what the pills already show
-/// was two controls competing over one list.
+/// Search lives in the navigation bar itself: tapping the magnifier expands a
+/// field from the top of the screen, the way the stock apps do it, instead of
+/// presenting a separate sheet from the bottom.
 struct InboxHomeView: View {
     @Environment(MailStore.self) private var mail
 
@@ -16,77 +17,107 @@ struct InboxHomeView: View {
     @State private var tag: AITag?
     @State private var isComposing = false
     @State private var isSearching = false
+    @State private var query = ""
 
     private var isBrowsing: Bool { mailbox == .inbox }
     private var messages: [Message] { mail.messages(in: mailbox, tag: tag) }
     private var attention: [Message] { mail.needsAttention(limit: .max) }
     private var availableTags: [AITag] { mail.availableTags(in: mailbox) }
 
+    /// Searching covers every folder, not just the current one -- someone
+    /// looking for a message rarely knows or cares where it landed.
+    private var searchResults: [Message] {
+        guard !query.isEmpty else { return [] }
+        return Mailbox.allCases
+            .filter { !$0.isSmart }
+            .flatMap { mail.messages(in: $0, matching: query) }
+            .sorted { $0.date > $1.date }
+    }
+
+    private var isSearchActive: Bool { !query.isEmpty }
+
     var body: some View {
         List {
-            if isBrowsing {
-                summaryCard
-            }
-
-            if mail.isLoadingFirstPage {
-                // Scrollable placeholder rows, so connecting a mailbox shows
-                // the shape of a list instead of a blank screen.
-                ForEach(0..<8, id: \.self) { _ in
-                    MessageRowSkeleton()
-                        .listRowSeparator(.hidden)
+            if isSearchActive {
+                ForEach(searchResults) { message in
+                    ZStack {
+                        NavigationLink(value: message.id) { EmptyView() }.opacity(0)
+                        MessageRow(message: message)
+                    }
+                    .messageSwipeActions(for: message)
                 }
-            }
-
-            ForEach(messages) { message in
-                // A ZStack with a zero-opacity link behind the row, rather
-                // than a NavigationLink label: the label form draws a
-                // disclosure chevron on every row, which the reference list
-                // does not have and which cannot be turned off.
-                ZStack {
-                    NavigationLink(value: message.id) { EmptyView() }.opacity(0)
-                    MessageRow(message: message, threadCount: mail.threadCount(for: message))
+            } else {
+                if isBrowsing {
+                    summaryCard
                 }
-                .listRowSeparator(.visible)
-                .listRowSeparatorTint(Color(uiColor: .separator).opacity(0.45))
-                .alignmentGuide(.listRowSeparatorLeading) { _ in 68 }
-                .messageSwipeActions(for: message)
-                .onAppear {
-                    // The end of the list is the trigger for the next page.
-                    if message.id == messages.last?.id {
-                        Task { await mail.loadMore() }
+
+                if mail.isLoadingFirstPage {
+                    // Scrollable placeholder rows, so connecting a mailbox
+                    // shows the shape of a list instead of a blank screen.
+                    ForEach(0..<8, id: \.self) { _ in
+                        MessageRowSkeleton()
+                            .listRowSeparator(.hidden)
                     }
                 }
-            }
 
-            if mail.hasMoreMail && !messages.isEmpty {
-                MessageRowSkeleton()
-                    .listRowSeparator(.hidden)
-                    .onAppear { Task { await mail.loadMore() } }
+                ForEach(messages) { message in
+                    // A ZStack with a zero-opacity link behind the row, rather
+                    // than a NavigationLink label: the label form draws a
+                    // disclosure chevron on every row, which the reference
+                    // list does not have and which cannot be turned off.
+                    ZStack {
+                        NavigationLink(value: message.id) { EmptyView() }.opacity(0)
+                        MessageRow(message: message, threadCount: mail.threadCount(for: message))
+                    }
+                    .listRowSeparator(.visible)
+                    .listRowSeparatorTint(Color(uiColor: .separator).opacity(0.45))
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 68 }
+                    .messageSwipeActions(for: message)
+                    .onAppear {
+                        // The end of the list is the trigger for the next page.
+                        if message.id == messages.last?.id {
+                            Task { await mail.loadMore() }
+                        }
+                    }
+                }
+
+                if mail.hasMoreMail && !messages.isEmpty {
+                    MessageRowSkeleton()
+                        .listRowSeparator(.hidden)
+                        .onAppear { Task { await mail.loadMore() } }
+                }
             }
         }
         .listStyle(.plain)
+        .searchable(text: $query, isPresented: $isSearching, prompt: "Search all mail")
         .refreshable { await mail.refresh() }
         .navigationTitle(isBrowsing ? "Maily" : mailbox.title)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) {
-            if isBrowsing && !availableTags.isEmpty {
+            if isBrowsing && !availableTags.isEmpty && !isSearching {
                 TagFilterBar(
                     tags: availableTags,
-                    count: { mail.count(of: $0, in: mailbox) },
+                    count: { mail.unreadCount(of: $0, in: mailbox) },
                     selection: $tag
                 )
             }
         }
-        .overlay(alignment: .bottomTrailing) { composeButton }
+        .overlay(alignment: .bottomTrailing) {
+            if !isSearching { composeButton }
+        }
         .overlay {
-            // A resumed import (the app was killed partway through) lands here
-            // rather than on the connect screen. Only takes the whole screen
-            // when there is nothing to show; with mail already on screen it
-            // fills in quietly behind instead.
-            if mail.importProgress.isRunning && messages.isEmpty {
-                ImportingMailView(progress: mail.importProgress)
-            } else if messages.isEmpty && !mail.isLoadingFirstPage {
-                emptyState
+            if isSearchActive && searchResults.isEmpty {
+                ContentUnavailableView.search(text: query)
+            } else if !isSearchActive {
+                // A resumed import (the app was killed partway through) lands
+                // here rather than on the connect screen. Only takes the whole
+                // screen when there is nothing to show; with mail already on
+                // screen it fills in quietly behind instead.
+                if mail.importProgress.isRunning && messages.isEmpty {
+                    ImportingMailView(progress: mail.importProgress)
+                } else if messages.isEmpty && !mail.isLoadingFirstPage {
+                    emptyState
+                }
             }
         }
         .toolbar {
@@ -114,7 +145,6 @@ struct InboxHomeView: View {
             if let tag, mail.count(of: tag, in: newValue) == 0 { self.tag = nil }
         }
         .sheet(isPresented: $isComposing) { ComposeView() }
-        .sheet(isPresented: $isSearching) { SearchView() }
     }
 
     // MARK: - The one card

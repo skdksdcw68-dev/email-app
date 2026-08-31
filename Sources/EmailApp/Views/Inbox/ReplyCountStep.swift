@@ -1,13 +1,10 @@
 import SwiftUI
 import UIKit
 
-/// How many replies to write, laid out like an onboarding question: a grid of
-/// tiles, two to a row, one tap to choose.
-///
-/// The previous version was a column of full-width cards with a text field
-/// living inside one of them, which meant the keyboard appeared and the whole
-/// list relaid out under it on every keystroke. Typing a number belongs in its
-/// own small sheet, centred, and nothing behind it moves.
+/// How many replies to write, laid out exactly like an onboarding question:
+/// a grid of compact tiles, two to a row, one tap to choose. Same heights,
+/// same corner radius, same tinted-fill-plus-border selected state -- a flow
+/// that asks questions should look like the other flow that asks questions.
 struct ReplyCountStep: View {
     let available: Int
     @Binding var selection: BulkReplyFlow.Selection
@@ -30,7 +27,7 @@ struct ReplyCountStep: View {
         return false
     }
 
-    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+    private let columns = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -40,36 +37,36 @@ struct ReplyCountStep: View {
             )
 
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 12) {
+                LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(Self.allPresets, id: \.self) { number in
                         tile(
-                            title: "\(number)",
-                            detail: "replies",
+                            number: "\(number)",
+                            label: "replies",
                             isSelected: selection == .count(number),
                             isEnabled: isAvailable(number)
                         ) { selection = .count(number) }
                     }
 
                     tile(
-                        title: "All",
-                        detail: "\(available) emails",
                         symbol: "tray.full.fill",
+                        label: "All",
+                        detail: "\(available) emails",
                         isSelected: selection == .all
                     ) { selection = .all }
 
                     tile(
-                        title: isCustom ? "\(selectedCount)" : "Custom",
-                        detail: "my own number",
                         symbol: "number",
+                        label: isCustom ? "\(selectedCount) replies" : "Custom",
+                        detail: "my own number",
                         isSelected: isCustom
                     ) { showsNumberPad = true }
 
                     tile(
-                        title: "Choose",
+                        symbol: "hand.tap.fill",
+                        label: "Choose",
                         detail: selection == .manual && selectedCount > 0
                             ? "\(selectedCount) picked"
                             : "one by one",
-                        symbol: "hand.tap.fill",
                         isSelected: selection == .manual
                     ) {
                         selection = .manual
@@ -99,43 +96,66 @@ struct ReplyCountStep: View {
         }
     }
 
+    /// One compact tile, in the onboarding question's visual language: a
+    /// leading number or icon, a footnote label, tinted fill and border when
+    /// selected.
     private func tile(
-        title: String,
-        detail: String,
+        number: String? = nil,
         symbol: String? = nil,
+        label: String,
+        detail: String? = nil,
         isSelected: Bool,
         isEnabled: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                if let symbol {
-                    Image(systemName: symbol)
-                        .font(.title3)
-                        .foregroundStyle(isSelected ? Color.white : Color.accentColor)
-                        .padding(.bottom, 2)
+        Button {
+            withAnimation(.snappy(duration: 0.18)) { action() }
+        } label: {
+            HStack(spacing: 10) {
+                Group {
+                    if let number {
+                        Text(number)
+                            .font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit())
+                    } else if let symbol {
+                        Image(systemName: symbol)
+                            .font(.system(size: 16, weight: .semibold))
+                            .symbolRenderingMode(.hierarchical)
+                    }
                 }
-                Text(title)
-                    .font(symbol == nil
-                          ? .system(size: 28, weight: .bold, design: .rounded)
-                          : .headline)
-                    .foregroundStyle(isSelected ? Color.white : Color.primary)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(isSelected ? Color.white.opacity(0.85) : Color.secondary)
+                .foregroundStyle(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+                .frame(width: 32, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(label)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if let detail {
+                        Text(detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 104)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
             .background {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isSelected
-                          ? AnyShapeStyle(Color.accentColor)
-                          : AnyShapeStyle(Color(uiColor: .secondarySystemBackground)))
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(isSelected ? Color.accentColor.opacity(0.14) : Color(uiColor: .secondarySystemBackground))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1.5)
+                    }
             }
         }
         .buttonStyle(BouncyButtonStyle())
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.35)
+        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 }
 

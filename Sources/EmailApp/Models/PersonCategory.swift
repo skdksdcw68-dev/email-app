@@ -3,16 +3,25 @@ import UIKit
 
 /// What kind of relationship this is.
 ///
-/// Deliberately four, not nine. "Client" versus "lead" versus "customer" is
-/// business context that is usually not in the emails at all, so a model asked
-/// to pick between them guesses -- confidently, and often wrong. These four
-/// come from signals that are actually present, are right most of the time,
-/// and cost nothing to work out. Anything finer is the user's to say.
+/// Two tiers, deliberately. The first four -- colleague, personal, external,
+/// service -- are the only ones Maily ever *infers*, because they come from
+/// signals that are actually present (the domain, the local part, bulk
+/// headers) and are right most of the time. The rest exist for the user to
+/// assign by hand on a person's page: "client" versus "friend" versus
+/// "school" is context that is usually not in the emails at all, so a model
+/// asked to pick between them guesses -- confidently, and often wrong.
 enum PersonCategory: String, CaseIterable, Identifiable, Codable {
+    // Inferred.
     case colleague
     case personal
     case external
     case service
+
+    // The user's to say.
+    case client
+    case family
+    case friend
+    case school
 
     var id: Self { self }
 
@@ -22,6 +31,10 @@ enum PersonCategory: String, CaseIterable, Identifiable, Codable {
         case .personal:  "Personal"
         case .external:  "External"
         case .service:   "Service"
+        case .client:    "Client"
+        case .family:    "Family"
+        case .friend:    "Friend"
+        case .school:    "School"
         }
     }
 
@@ -31,6 +44,10 @@ enum PersonCategory: String, CaseIterable, Identifiable, Codable {
         case .personal:  "heart.fill"
         case .external:  "briefcase.fill"
         case .service:   "gearshape.fill"
+        case .client:    "handshake"
+        case .family:    "house.fill"
+        case .friend:    "face.smiling.fill"
+        case .school:    "graduationcap.fill"
         }
     }
 
@@ -40,6 +57,10 @@ enum PersonCategory: String, CaseIterable, Identifiable, Codable {
         case .personal:  Color(uiColor: .systemPink)
         case .external:  Color(uiColor: .systemIndigo)
         case .service:   Color(uiColor: .systemGray)
+        case .client:    Color(uiColor: .systemGreen)
+        case .family:    Color(uiColor: .systemOrange)
+        case .friend:    Color(uiColor: .systemCyan)
+        case .school:    Color(uiColor: .systemPurple)
         }
     }
 
@@ -59,7 +80,9 @@ enum PersonCategory: String, CaseIterable, Identifiable, Codable {
         "hello@", "team@", "updates", "alerts", "postmaster", "bounce",
     ]
 
-    /// Worked out locally, from the address and the mail itself.
+    /// Worked out locally, from the address and the mail itself. Only ever
+    /// lands on one of the four inferred cases; the hand-assigned ones come
+    /// exclusively from the picker on a person's page.
     ///
     /// `myDomain` is the user's own domain -- someone on it is a colleague,
     /// which is the single most reliable signal available and the reason this

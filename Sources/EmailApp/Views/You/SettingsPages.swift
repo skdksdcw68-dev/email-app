@@ -29,7 +29,7 @@ struct AppSettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
     }
 
     private func settingsRow(_ title: String, _ symbol: String, _ detail: String) -> some View {
@@ -114,7 +114,7 @@ struct AIAutomationSettingsView: View {
         }
         .navigationTitle("AI & Automation")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
     }
 }
 
@@ -164,7 +164,7 @@ struct PrivacySettingsView: View {
         }
         .navigationTitle("Privacy & Security")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
         .alert("Disconnect inbox?", isPresented: $showingDisconnect) {
             Button("Cancel", role: .cancel) {}
             Button("Disconnect", role: .destructive) { mail.disconnect() }
@@ -224,7 +224,7 @@ struct StorageSettingsView: View {
         }
         .navigationTitle("App")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
         .task { archiveSize = await MessageArchive.formattedSize() }
     }
 }
@@ -255,6 +255,6 @@ struct SupportView: View {
         }
         .navigationTitle("Support")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
     }
 }

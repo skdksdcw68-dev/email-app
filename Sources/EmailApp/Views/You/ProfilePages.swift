@@ -139,7 +139,7 @@ struct GmailAccountsView: View {
         }
         .navigationTitle("Gmail accounts")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
         .alert("Disconnect inbox?", isPresented: $showingDisconnect) {
             Button("Cancel", role: .cancel) {}
             Button("Disconnect", role: .destructive) { mail.disconnect() }
@@ -180,7 +180,7 @@ struct AppearanceView: View {
         }
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
     }
 }
 
@@ -227,7 +227,7 @@ struct WritingStyleView: View {
         .keyboardDismissable()
         .navigationTitle("Writing style")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
     }
 }
 
@@ -250,7 +250,7 @@ struct LanguageView: View {
         }
         .navigationTitle("Language")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
     }
 }
 
@@ -293,7 +293,7 @@ struct NotificationsView: View {
         }
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
     }
 }
 
@@ -327,6 +327,6 @@ struct PlanView: View {
         }
         .navigationTitle("Plan")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
     }
 }

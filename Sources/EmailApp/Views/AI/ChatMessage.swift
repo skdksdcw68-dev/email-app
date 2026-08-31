@@ -15,11 +15,17 @@ struct ChatMessage: Identifiable, Equatable {
     let id = UUID()
     let role: Role
     var text: String
+    /// The structured parts of an answer -- stat tiles, message cards, a
+    /// chart. Local answers are mostly these; model answers are mostly prose.
+    var blocks: [AnswerBlock] = []
     /// The emails the answer leaned on, in the order the model cited them.
     var sources: [Message] = []
     /// Shown as the thinking state until the answer lands.
     var isPending = false
     var failed = false
+    /// Answered on the device without touching the model -- instant and free.
+    /// Marked in the UI so the user can tell the two kinds apart.
+    var isLocal = false
 
     static func user(_ text: String) -> ChatMessage {
         ChatMessage(role: .user, text: text)
@@ -27,5 +33,9 @@ struct ChatMessage: Identifiable, Equatable {
 
     static var thinking: ChatMessage {
         ChatMessage(role: .assistant, text: "", isPending: true)
+    }
+
+    static func local(_ answer: LocalAnswer) -> ChatMessage {
+        ChatMessage(role: .assistant, text: answer.text, blocks: answer.blocks, isLocal: true)
     }
 }

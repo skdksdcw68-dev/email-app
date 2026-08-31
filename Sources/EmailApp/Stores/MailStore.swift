@@ -515,6 +515,14 @@ final class MailStore {
         messages(in: mailbox, tag: tag).count
     }
 
+    /// How many *unread* messages carry a tag. This is what the filter pills
+    /// display: the number is a to-do count, so reading or answering
+    /// everything urgent takes "Very Urgent 49" down to nothing instead of
+    /// leaving a stale 49 pinned over a handled inbox.
+    func unreadCount(of tag: AITag, in mailbox: Mailbox) -> Int {
+        messages(in: mailbox, tag: tag, unreadOnly: true).count
+    }
+
     /// Only the tags that actually appear in this mailbox, so the filter bar
     /// never offers a chip that would empty the list.
     func availableTags(in mailbox: Mailbox) -> [AITag] {

@@ -6,7 +6,9 @@ import SwiftUI
 /// Three lines: who, what, and the opening of it. Nothing else -- no chevron,
 /// no card, and deliberately no tag badge. A label on every single row is not
 /// information, it is wallpaper; the tags live on the filter pills above,
-/// where they can actually be acted on.
+/// where they can actually be acted on. Unread state is carried by weight
+/// alone -- bold sender, bold subject. The blue dot restated what the bold
+/// text already said, and a mark on most rows of a busy inbox is noise.
 struct MessageRow: View {
     let message: Message
     /// How many messages are in this conversation. 1 hides the count.
@@ -68,17 +70,6 @@ struct MessageRow: View {
             }
         }
         .padding(.vertical, 6)
-        // Vertically centred on the row rather than pinned to the top: as a
-        // top-aligned mark it sat level with the sender's name and read as
-        // punctuation attached to it.
-        .overlay(alignment: .leading) {
-            if !message.isRead {
-                Circle()
-                    .fill(.tint)
-                    .frame(width: 8, height: 8)
-                    .offset(x: -12)
-            }
-        }
     }
 }
 

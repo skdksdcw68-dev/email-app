@@ -3,9 +3,14 @@ import UIKit
 
 /// The chat, pushed from the AI tab.
 ///
-/// Entirely SwiftUI: the bubbles, the thinking dots, the composer that grows
-/// into a card when focused and the attachment menu that slides up over it are
-/// all native views. No web content anywhere.
+/// Entirely SwiftUI: the bubbles, the thinking dots and the floating
+/// composer are all native views. No web content anywhere.
+///
+/// Questions are routed before anything is spent: what the mailbox can
+/// settle on its own is answered instantly on the device as structure
+/// (tiles, cards, a chart); everything else goes to the model with a
+/// device-side retrieval digest and streams back as prose with sources.
+/// See `MailStore.localAnswer(for:)` for the full ladder.
 struct AIChatView: View {
     @Environment(MailStore.self) private var mail
 
@@ -22,8 +27,7 @@ struct AIChatView: View {
                     if turns.isEmpty {
                         AIChatWelcome(
                             briefing: mail.inboxStatus,
-                            followUps: mail.followUps,
-                            onPick: { ask($0) }
+                            followUps: mail.followUps
                         )
                         .padding(.top, 4)
                         .transition(.opacity)
@@ -44,6 +48,14 @@ struct AIChatView: View {
                 .animation(.spring(response: 0.38, dampingFraction: 0.82), value: turns.count)
             }
             .scrollDismissesKeyboard(.interactively)
+            // A tap anywhere on the conversation puts the keyboard away.
+            // Simultaneous, so the links inside answers still fire -- and
+            // safe here because this screen has no press-and-hold control
+            // for the gesture to fight.
+            .simultaneousGesture(TapGesture().onEnded {
+                isInputFocused = false
+                showsActions = false
+            })
             .onChange(of: turns.count) { _, _ in
                 guard let last = turns.last else { return }
                 withAnimation(.easeOut(duration: 0.3)) {
@@ -55,7 +67,7 @@ struct AIChatView: View {
         .navigationTitle("Maily")
         .navigationBarTitleDisplayMode(.inline)
         // Pushed page, so the tab bar goes.
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
         .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -105,6 +117,15 @@ struct AIChatView: View {
         isInputFocused = false
         showsActions = false
         turns.append(.user(question))
+
+        // Level 1: the mailbox can answer this itself. Instant, free, and
+        // structured instead of prose.
+        if let local = mail.localAnswer(for: question) {
+            turns.append(.local(local))
+            return
+        }
+
+        // Level 2: the model, with device-side retrieval.
         turns.append(.thinking)
         let pendingID = turns.last?.id
 

@@ -64,6 +64,6 @@ struct AIPreferencesView: View {
         }
         .navigationTitle("AI")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
     }
 }

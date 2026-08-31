@@ -13,6 +13,7 @@ struct PeopleView: View {
     @State private var category: PersonCategory?
     @State private var showsServices = false
     @State private var isSearching = false
+    @State private var query = ""
 
     private var people: [Person] {
         mail.people
@@ -30,43 +31,69 @@ struct PeopleView: View {
         return PersonCategory.allCases.filter(present.contains)
     }
 
+    /// By name, address or company, across everyone -- services included,
+    /// because a search is somebody looking for something specific.
+    private var searchResults: [Person] {
+        guard !query.isEmpty else { return [] }
+        return mail.people.filter {
+            $0.contact.name.localizedCaseInsensitiveContains(query)
+                || $0.contact.address.localizedCaseInsensitiveContains(query)
+                || ($0.organization ?? "").localizedCaseInsensitiveContains(query)
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                if !important.isEmpty {
+                if !query.isEmpty {
                     Section {
-                        ForEach(important) { row($0) }
-                    } header: {
-                        Text("Important")
-                    } footer: {
-                        Text("Mail from these people carries more weight when Maily judges priority.")
+                        ForEach(searchResults) { row($0) }
                     }
-                }
-
-                if !waiting.isEmpty {
-                    Section {
-                        ForEach(waiting) { row($0) }
-                    } header: {
-                        Text("Waiting on you")
-                    } footer: {
-                        Text("These people sent something that still needs a reply.")
+                } else {
+                    // The chips ride inside the list rather than in a bar
+                    // pinned above it: a safe-area inset up there kept the
+                    // large "People" title permanently collapsed, which made
+                    // this tab the odd one out beside AI and You.
+                    if availableCategories.count > 1 {
+                        Section {
+                            categoryBar
+                                .listRowInsets(EdgeInsets())
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                        }
                     }
-                }
 
-                if !everyoneElse.isEmpty {
-                    Section("Everyone else") {
-                        ForEach(everyoneElse) { row($0) }
+                    if !important.isEmpty {
+                        Section {
+                            ForEach(important) { row($0) }
+                        } header: {
+                            Text("Important")
+                        } footer: {
+                            Text("Mail from these people carries more weight when Maily judges priority.")
+                        }
+                    }
+
+                    if !waiting.isEmpty {
+                        Section {
+                            ForEach(waiting) { row($0) }
+                        } header: {
+                            Text("Waiting on you")
+                        } footer: {
+                            Text("These people sent something that still needs a reply.")
+                        }
+                    }
+
+                    if !everyoneElse.isEmpty {
+                        Section("Everyone else") {
+                            ForEach(everyoneElse) { row($0) }
+                        }
                     }
                 }
             }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if availableCategories.count > 1 { categoryBar }
-            }
+            .searchable(text: $query, isPresented: $isSearching, prompt: "Search people")
             .keyboardDismissable()
             .navigationTitle("People")
             .toolbar {
-                // Search and the menu together in the corner, so the list
-                // starts at the top of the screen instead of under a bar.
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
                         isSearching = true
@@ -81,13 +108,14 @@ struct PeopleView: View {
                     }
                 }
             }
-            .sheet(isPresented: $isSearching) {
-                PeopleSearchView()
-            }
             .navigationDestination(for: Person.ID.self) { PersonDetailView(address: $0) }
             .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
             .overlay {
-                if people.isEmpty { emptyState }
+                if !query.isEmpty && searchResults.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                } else if query.isEmpty && people.isEmpty {
+                    emptyState
+                }
             }
         }
     }
@@ -108,7 +136,6 @@ struct PeopleView: View {
             .padding(.vertical, 8)
         }
         .scrollIndicators(.hidden)
-        .background(Color(uiColor: .systemGroupedBackground))
     }
 
     private func categoryChip(_ option: PersonCategory?, title: String, symbol: String) -> some View {
@@ -202,59 +229,4 @@ struct PersonRow: View {
     PeopleView()
         .environment(MailStore.connected())
         .environment(UserStore(defaults: .previews, startAt: .finished))
-}
-
-/// Searching people, in a sheet rather than a bar pinned above the list.
-///
-/// A permanent search field cost a whole row of the screen to something used
-/// occasionally, and pushed the filter chips and the first person down with
-/// it. In the corner it costs a button.
-struct PeopleSearchView: View {
-    @Environment(MailStore.self) private var mail
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var text = ""
-    @FocusState private var isFocused: Bool
-
-    private var results: [Person] {
-        guard !text.isEmpty else { return [] }
-        return mail.people.filter {
-            $0.contact.name.localizedCaseInsensitiveContains(text)
-                || $0.contact.address.localizedCaseInsensitiveContains(text)
-                || ($0.organization ?? "").localizedCaseInsensitiveContains(text)
-        }
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(results) { person in
-                    NavigationLink(value: person.id) { PersonRow(person: person) }
-                }
-            }
-            .listStyle(.plain)
-            .keyboardDismissable()
-            .searchable(text: $text, isPresented: .constant(true), prompt: "Search people")
-            .navigationTitle("Search")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: Person.ID.self) { PersonDetailView(address: $0) }
-            .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            .overlay {
-                if text.isEmpty {
-                    ContentUnavailableView(
-                        "Search people",
-                        systemImage: "magnifyingglass",
-                        description: Text("By name, email address or company.")
-                    )
-                } else if results.isEmpty {
-                    ContentUnavailableView.search(text: text)
-                }
-            }
-        }
-    }
 }

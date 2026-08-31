@@ -65,7 +65,7 @@ struct AttentionListView: View {
         .navigationBarTitleDisplayMode(.inline)
         // A full-screen context, like reading a message. Leaving the tab bar
         // under the action bar stacks two chrome layers over one list.
-        .toolbar(.hidden, for: .tabBar)
+        .hidesTabBar()
         .safeAreaInset(edge: .bottom) {
             if !messages.isEmpty { bulkActions }
         }

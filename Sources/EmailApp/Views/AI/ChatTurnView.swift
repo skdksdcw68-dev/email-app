@@ -1,9 +1,11 @@
 import SwiftUI
 import UIKit
 
-/// One bubble. The user's is a tinted capsule pushed right; the assistant's is
-/// plain text on the page, which is how every assistant on the platform reads
-/// -- boxing a long answer makes it look like a quotation rather than a reply.
+/// One bubble. The user's is a tinted capsule pushed right; the assistant's
+/// is typography on the page -- prose through `AssistantProse`, plus whatever
+/// structured blocks the answer carries -- which is how every assistant on
+/// the platform reads. Boxing a long answer makes it look like a quotation
+/// rather than a reply.
 struct ChatTurnView: View {
     let turn: ChatMessage
 
@@ -33,20 +35,32 @@ struct ChatTurnView: View {
                         .font(.footnote)
                         .foregroundStyle(.red)
                 } else {
-                    Text(turn.text)
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        // Selection alone is fiddly on a long answer; this
-                        // takes the whole thing in one gesture.
-                        .contextMenu {
-                            Button {
-                                UIPasteboard.general.string = turn.text
-                            } label: {
-                                Label("Copy answer", systemImage: "doc.on.doc")
+                    if !turn.text.isEmpty {
+                        AssistantProse(text: turn.text)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            // Selection alone is fiddly on a long answer; this
+                            // takes the whole thing in one gesture.
+                            .contextMenu {
+                                Button {
+                                    UIPasteboard.general.string = turn.text
+                                } label: {
+                                    Label("Copy answer", systemImage: "doc.on.doc")
+                                }
                             }
-                        }
+                    }
+
+                    ForEach(turn.blocks) { block in
+                        AnswerBlockView(block: block)
+                    }
+
+                    if turn.isLocal {
+                        // The honest label for a free answer: this one never
+                        // left the phone and cost nothing.
+                        Label("Answered on device", systemImage: "bolt.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
 
                     if !turn.sources.isEmpty {
                         SourceList(sources: turn.sources)
@@ -86,7 +100,7 @@ struct ThinkingIndicator: View {
     }
 }
 
-/// The emails an answer came from, numbered to match its [1], [2] citations.
+/// The emails an answer came from.
 struct SourceList: View {
     let sources: [Message]
 
@@ -148,18 +162,11 @@ struct SourceList: View {
 }
 
 /// What the AI tab shows before anybody has asked anything: where the mailbox
-/// stands, what is outstanding, and a few things worth asking.
+/// stands and what is outstanding. No canned starter questions -- the empty
+/// screen states facts and leaves the asking to the person.
 struct AIChatWelcome: View {
     let briefing: String
     let followUps: [FollowUp]
-    let onPick: (String) -> Void
-
-    private static let starters = [
-        "What needs my attention today?",
-        "Who am I keeping waiting?",
-        "Any deadlines this week?",
-        "Summarise my important emails",
-    ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -209,34 +216,6 @@ struct AIChatWelcome: View {
                         }
                         .buttonStyle(.plain)
                     }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Try asking")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                ForEach(Self.starters, id: \.self) { starter in
-                    Button { onPick(starter) } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "sparkle")
-                                .font(.caption)
-                                .foregroundStyle(.tint)
-                            Text(starter)
-                                .font(.subheadline)
-                                .foregroundStyle(.primary)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color(uiColor: .secondarySystemBackground))
-                        }
-                    }
-                    .buttonStyle(.plain)
                 }
             }
         }

@@ -6,6 +6,11 @@ import UIKit
 /// Deliberately not inside a card or a section: it sits on the plain grouped
 /// background the way Mail's category filters do, with no hairline and no
 /// container. Boxing it was what made it read as cramped.
+///
+/// `count` is the number of *unread* messages behind each pill. The pill is a
+/// filter and stays either way, but the number is a to-do count -- once
+/// everything urgent has been read or answered, "Very Urgent 49" becomes just
+/// "Very Urgent", which is the reward for having dealt with it.
 struct TagFilterBar: View {
     let tags: [AITag]
     let count: (AITag) -> Int
@@ -48,9 +53,14 @@ private struct Pill: View {
                     .foregroundStyle(isSelected ? tag.onColor : Color.primary)
                     .fixedSize()
 
-                Text("\(count)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(isSelected ? tag.onColor.opacity(0.75) : Color.secondary)
+                // Nothing unread means no number at all. A zero would say
+                // "still outstanding" about work that has been done.
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isSelected ? tag.onColor.opacity(0.75) : Color.secondary)
+                        .contentTransition(.numericText())
+                }
             }
             .padding(.horizontal, 13)
             .padding(.vertical, 8)
@@ -73,7 +83,7 @@ private struct Pill: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(tag.title), \(count) messages")
+        .accessibilityLabel(count > 0 ? "\(tag.title), \(count) unread" : tag.title)
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 }
