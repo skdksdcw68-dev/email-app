@@ -131,7 +131,12 @@ Rules:
 - If the instruction is vague, write the shortest reply that honours it.
 - No subject line, no "Dear", no signature block. Body text only.
 - Match the length of the original. A two-line email gets a two-line reply.
-- Sound like a person wrote it quickly and meant it, not like a press release.`;
+- Sound like a person wrote it quickly and meant it, not like a press release.
+- Never use dashes as punctuation. No em dashes, no en dashes, no " - ".
+  Write two sentences, or use a comma. This is the clearest tell that a
+  machine wrote something and it must not appear.
+- No "I hope this finds you well", no "reaching out", no "circle back", no
+  "at your earliest convenience". Nobody talks like that.`;
 
   const content = [
     `The message being replied to:`,
@@ -184,6 +189,11 @@ What NOT to do:
 - Do not make it longer. Shorter is almost always the improvement.
 - Do not change the meaning, the decision, or how warm or firm it is.
 - No subject line, no signature block. Body text only.
+- Never use dashes as punctuation. No em dashes, no en dashes, no " - ".
+  Write two sentences, or use a comma. This is the clearest tell that a
+  machine wrote something and it must not appear.
+- No "I hope this finds you well", no "reaching out", no "circle back", no
+  "at your earliest convenience". Nobody talks like that.
 
 Return the improved email and nothing else. No preamble, no explanation, no
 quotes around it.`;
@@ -247,7 +257,8 @@ Rules:
   support. Every specific fact needs one.
 - Be brief. A list of three things beats a paragraph about them.
 - No preamble. Do not restate the question.
-- If nothing is relevant, say "Nothing in your recent mail covers that."`;
+- If nothing is relevant, say "Nothing in your recent mail covers that."
+- Never use dashes as punctuation. No em dashes, no en dashes, no " - ".`;
 
   const content = digest
     ? `Question: ${question}\n\nTheir messages:\n\n${digest}`

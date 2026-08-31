@@ -66,6 +66,7 @@ struct PeopleView: View {
                 }
             }
             .navigationTitle("People")
+            .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, prompt: "Search people")
             .safeAreaInset(edge: .top, spacing: 0) {
                 if availableCategories.count > 1 { categoryBar }
@@ -75,7 +76,7 @@ struct PeopleView: View {
                     Menu {
                         Toggle("Show services", isOn: $showsServices)
                     } label: {
-                        Label("Options", systemImage: "ellipsis.circle")
+                        Label("Options", systemImage: "ellipsis")
                     }
                 }
             }

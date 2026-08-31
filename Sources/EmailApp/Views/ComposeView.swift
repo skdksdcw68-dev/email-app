@@ -37,6 +37,10 @@ struct ComposeView: View {
     @State private var showsCcBcc = false
     @State private var isConfirmingCancel = false
     @State private var isWriting = false
+    /// What was actually said, kept so the AI version can be undone. Dictation
+    /// is always shaped by the model, because a raw transcript is not an
+    /// email -- but "what I said" has to remain reachable in one tap.
+    @State private var spokenWords = ""
 
     /// Derived, never stored: two copies of the body would drift the moment
     /// the AI replaced one of them.
@@ -124,12 +128,17 @@ struct ComposeView: View {
 
     private var draftOptions: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Keep this draft?")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 10)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Keep this draft?")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text("It is not sent yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
 
             Divider()
 
@@ -142,7 +151,10 @@ struct ComposeView: View {
             Divider()
             draftOption("Continue editing", "pencil") { isConfirmingCancel = false }
         }
-        .frame(width: 236)
+        // Intrinsic height with a sensible width. A hard frame on both axes
+        // was clipping the last row, which is what made it look unfinished.
+        .frame(minWidth: 260, idealWidth: 280)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func draftOption(
@@ -160,8 +172,8 @@ struct ComposeView: View {
                 Spacer(minLength: 0)
             }
             .foregroundStyle(isDestructive ? Color.red : Color.primary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -354,6 +366,24 @@ struct ComposeView: View {
                     Spacer(minLength: 0)
                 }
                 .foregroundStyle(.red)
+            } else if !spokenWords.isEmpty {
+                // The way out of an AI rewrite. Dictation is always shaped by
+                // the model, because a raw transcript reads like speech rather
+                // than an email -- but if it got it wrong, the words the user
+                // actually said are one tap away.
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform")
+                        .font(.caption2)
+                    Text("Maily wrote this from what you said")
+                        .font(.caption)
+                    Spacer(minLength: 6)
+                    Button("Use my words") {
+                        setBody(spokenWords)
+                        spokenWords = ""
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(.secondary)
             }
 
             // Spacing has to go once the row collapses to a single control.
@@ -519,6 +549,7 @@ struct ComposeView: View {
                 instruction: spoken,
                 tone: user.tonePreference
             )
+            spokenWords = spoken
             setBody(draft.body)
             dictation.reset()
             markJustDrafted()

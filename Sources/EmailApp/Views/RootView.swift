@@ -42,7 +42,7 @@ struct MainTabView: View {
                 .badge(mail.unreadCount(in: .inbox))
                 .tag(AppTab.inbox)
 
-            AIView()
+            AIChatView()
                 .tabItem { Label("AI", systemImage: "sparkles") }
                 .tag(AppTab.ai)
 

@@ -120,7 +120,9 @@ enum GmailService {
            let raw = try? await fetchAttachment(
                messageID: id, attachmentID: deferred.attachmentID, accessToken: accessToken
            ) {
-            message.body = deferred.isHTML ? strippingHTML(raw) : raw
+            message.body = (deferred.isHTML || raw.looksLikeMarkup)
+                ? strippingHTML(raw)
+                : raw.removingStrayMarkup()
         }
 
         return message
@@ -352,7 +354,10 @@ enum GmailService {
     /// degrades nearly every body to stripped markup.
     static func plainText(from payload: [String: Any]) -> String? {
         if let plain = firstPart(in: payload, mimeType: "text/plain") {
-            return plain
+            // Some senders declare a part as text/plain and fill it with a
+            // stylesheet. Trusting the label there is how an email opens as a
+            // wall of -webkit-text-size-adjust.
+            return plain.looksLikeMarkup ? strippingHTML(plain) : plain.removingStrayMarkup()
         }
         if let html = firstPart(in: payload, mimeType: "text/html") {
             return strippingHTML(html)
@@ -415,6 +420,7 @@ enum GmailService {
             .replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
             .replacingOccurrences(of: "(\\s*\\n\\s*){3,}", with: "\n\n", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+            .removingStrayMarkup()
     }
 
     /// Cleans a body down to something worth showing as a one-line preview.
