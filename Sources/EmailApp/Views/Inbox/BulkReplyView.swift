@@ -312,7 +312,7 @@ struct BulkReplyView: View {
     /// abandon the rest. Whatever fails keeps its error and stays on screen to
     /// be retried individually.
     private func sendAll() async {
-        let targets = unsent.map(.id)
+        let targets = unsent.map(\.id)
         guard !targets.isEmpty else { return }
 
         isSending = true

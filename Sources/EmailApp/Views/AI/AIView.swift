@@ -73,7 +73,9 @@ struct AIView: View {
     private var followUpSection: some View {
         let followUps = mail.followUps
         if !followUps.isEmpty {
-            Section("Follow-ups") {
+            // Header as a closure, not a string: there is no Section
+            // initialiser taking a title AND a footer.
+            Section {
                 ForEach(followUps.prefix(8)) { followUp in
                     NavigationLink(value: followUp.message.id) {
                         HStack(spacing: 12) {
@@ -98,6 +100,8 @@ struct AIView: View {
                         .padding(.vertical, 2)
                     }
                 }
+            } header: {
+                Text("Follow-ups")
             } footer: {
                 Text("Conversations where somebody is still waiting.")
             }
