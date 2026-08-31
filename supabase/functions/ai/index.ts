@@ -224,15 +224,64 @@ quotes around it.`;
 
 // --------------------------------------------------------------------- ask
 
+const ASK_SYSTEM = `You answer questions about a person's email. You are given a
+numbered list of their messages and nothing else.
+
+Rules:
+- Answer only from the messages given. If they do not contain the answer, say
+  so plainly. Never guess a name, a date, an amount or a commitment.
+- Cite the messages you used as [1], [2] inline, right after the claim they
+  support. Every specific fact needs one.
+- Be brief. A list of three things beats a paragraph about them.
+- No preamble. Do not restate the question.
+- If nothing is relevant, say "Nothing in your recent mail covers that."
+- Never use dashes as punctuation. No em dashes, no en dashes, no " - ".`;
+
+
 // Answers a question about the mailbox. The app has already picked which
 // messages are relevant and sends only those, numbered -- retrieval happens
 // on the device against mail it already holds, so this never sees a whole
 // mailbox and never pays to.
-async function ask(body: Record<string, unknown>) {
+// The same question, answered as a stream.
+//
+// Words appear as the model produces them instead of after it has finished,
+// which on a ten second answer is the difference between the app looking fast
+// and the app looking stuck. The provider's SSE body is passed straight
+// through; the app parses the deltas.
+async function askStream(body: Record<string, unknown>) {
   const question = String(body.question ?? "").slice(0, 500);
-  const messages = Array.isArray(body.messages) ? body.messages : [];
-
   if (!question) return json({ error: "No question was asked." }, 400);
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: DRAFT_MODEL,
+      messages: askMessages(question, body),
+      stream: true,
+    }),
+  });
+
+  if (!response.ok || !response.body) {
+    const detail = await response.text();
+    return json({ error: detail.slice(0, 300) || "The AI service failed." }, 502);
+  }
+
+  return new Response(response.body, {
+    headers: {
+      ...CORS,
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+    },
+  });
+}
+
+/// Shared by the streaming and non-streaming paths so the two can never drift.
+function askMessages(question: string, body: Record<string, unknown>) {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
 
   const digest = messages
     .slice(0, 25)
@@ -247,32 +296,21 @@ async function ask(body: Record<string, unknown>) {
     )
     .join("\n\n");
 
-  const system = `You answer questions about a person's email. You are given a
-numbered list of their messages and nothing else.
-
-Rules:
-- Answer only from the messages given. If they do not contain the answer, say
-  so plainly. Never guess a name, a date, an amount or a commitment.
-- Cite the messages you used as [1], [2] inline, right after the claim they
-  support. Every specific fact needs one.
-- Be brief. A list of three things beats a paragraph about them.
-- No preamble. Do not restate the question.
-- If nothing is relevant, say "Nothing in your recent mail covers that."
-- Never use dashes as punctuation. No em dashes, no en dashes, no " - ".`;
-
   const content = digest
     ? `Question: ${question}\n\nTheir messages:\n\n${digest}`
     : `Question: ${question}\n\nThey have no matching messages.`;
 
-  const answer = await openai(
-    DRAFT_MODEL,
-    [
-      { role: "system", content: system },
-      { role: "user", content },
-    ],
-    false,
-  );
+  return [
+    { role: "system", content: ASK_SYSTEM },
+    { role: "user", content },
+  ];
+}
 
+async function ask(body: Record<string, unknown>) {
+  const question = String(body.question ?? "").slice(0, 500);
+  if (!question) return json({ error: "No question was asked." }, 400);
+
+  const answer = await openai(DRAFT_MODEL, askMessages(question, body), false);
   return json({ answer: answer.trim(), model: DRAFT_MODEL });
 }
 
@@ -296,6 +334,8 @@ Deno.serve(async (request) => {
         return await refine(payload);
       case "ask":
         return await ask(payload);
+      case "ask_stream":
+        return await askStream(payload);
       default:
         return json({ error: `unknown action: ${payload.action}` }, 400);
     }

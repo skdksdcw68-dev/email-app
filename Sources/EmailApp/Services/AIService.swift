@@ -157,6 +157,67 @@ enum AIService {
         }
     }
 
+    /// The same question, delivered a piece at a time.
+    ///
+    /// `onDelta` is called on the main actor for every fragment the model
+    /// produces, so the answer appears as it is written rather than arriving
+    /// whole after ten seconds of nothing. That wait is the difference between
+    /// an app that looks fast and one that looks stuck.
+    @MainActor
+    static func askStreaming(
+        question: String,
+        context: [Message],
+        onDelta: @MainActor (String) -> Void
+    ) async throws {
+        let digest = context.map { message in
+            [
+                "from": "\(message.sender.name) <\(message.sender.address)>",
+                "date": message.fullDate,
+                "subject": message.subject,
+                "body": String(message.body.prefix(400)),
+            ]
+        }
+
+        var request = URLRequest(url: SupabaseConfig.url.appending(path: "functions/v1/ai"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(await bearer())", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(
+            withJSONObject: ["action": "ask_stream", "question": question, "messages": digest]
+        )
+        request.timeoutInterval = 60
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AIError.malformed }
+        guard (200..<300).contains(http.statusCode) else {
+            // An error comes back as JSON on the same connection, so read what
+            // little there is rather than reporting a bare status code.
+            var body = ""
+            for try await line in bytes.lines { body += line }
+            let message = (try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])?["error"] as? String
+            throw AIError.server(message ?? "AI service returned \(http.statusCode).")
+        }
+
+        for try await line in bytes.lines {
+            // Server-sent events: `data: {json}` per line, terminated by
+            // `data: [DONE]`. Anything else is keepalive or blank.
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            if payload == "[DONE]" { return }
+
+            guard let data = payload.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let delta = choices.first?["delta"] as? [String: Any],
+                  let fragment = delta["content"] as? String,
+                  !fragment.isEmpty
+            else { continue }
+
+            onDelta(fragment)
+        }
+    }
+
     // MARK: - Transport
 
     private static func call<T: Decodable>(_ payload: [String: String]) async throws -> T {

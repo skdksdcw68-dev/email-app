@@ -113,11 +113,33 @@ struct AIChatView: View {
 
             let context = mail.context(for: question)
             do {
-                let result = try await AIService.ask(question: question, context: context)
-                replace(pendingID, with: result.answer, sources: context, failed: false)
+                // Streamed, so the answer types itself out instead of landing
+                // whole after a long silence.
+                try await AIService.askStreaming(question: question, context: context) { fragment in
+                    appendDelta(pendingID, fragment)
+                }
+                finish(pendingID, sources: context)
             } catch {
                 replace(pendingID, with: error.localizedDescription, sources: [], failed: true)
             }
+        }
+    }
+
+    /// Appends a fragment as it arrives. No animation on each one: animating
+    /// every token turns a smooth stream into a stutter.
+    private func appendDelta(_ id: ChatMessage.ID?, _ fragment: String) {
+        guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
+        turns[index].isPending = false
+        turns[index].text += fragment
+    }
+
+    /// Sources land only once the answer is complete, so citations do not pop
+    /// in underneath text that is still being written.
+    private func finish(_ id: ChatMessage.ID?, sources: [Message]) {
+        guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
+        withAnimation(.easeOut(duration: 0.25)) {
+            turns[index].sources = sources
+            turns[index].isPending = false
         }
     }
 
