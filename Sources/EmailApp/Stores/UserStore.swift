@@ -78,6 +78,19 @@ final class UserStore {
         !selections(for: question).isEmpty
     }
 
+    /// The `tone` answer, phrased as an instruction the drafting model can act
+    /// on. This is where that onboarding question finally earns its place.
+    var tonePreference: String {
+        switch selections(for: .tone).first {
+        case "professional": "formal and professional"
+        case "warm": "warm and friendly"
+        case "direct": "short and direct, no filler"
+        case "thorough": "detailed and thorough"
+        case "casual": "casual and relaxed"
+        default: "match how I already write"
+        }
+    }
+
     // MARK: - Flow
 
     /// A returning user still sees the splash -- they just land in the app

@@ -9,6 +9,7 @@ final class MailStore {
     private(set) var messages: [Message]
     private(set) var isConnecting = false
     private(set) var isRefreshing = false
+    private(set) var isEnhancing = false
     /// Surfaced in the UI rather than swallowed -- a declined consent screen
     /// or an expired grant must be visible, not a silently empty inbox.
     private(set) var connectionError: String?
@@ -42,6 +43,9 @@ final class MailStore {
                 connectedAt: .now
             )
             messages = try await GmailService.fetchInbox(accessToken: session.accessToken)
+            // Mail appears immediately; the model enriches it after, so the
+            // first render is never waiting on a round trip per message.
+            Task { await enhanceWithAI() }
         } catch {
             connectionError = error.localizedDescription
             account = nil
@@ -59,8 +63,59 @@ final class MailStore {
         do {
             let token = try await AuthService.currentGmailAccessToken()
             messages = try await GmailService.fetchInbox(accessToken: token)
+            Task { await enhanceWithAI() }
         } catch {
             connectionError = error.localizedDescription
+        }
+    }
+
+    /// Second pass over the mailbox: the model reads what the rules could only
+    /// guess at, and replaces the priority it inferred.
+    ///
+    /// Bulk mail is skipped entirely. The rules already settled it from a
+    /// List-Unsubscribe header, and it is the largest bucket -- not paying to
+    /// have a model confirm that a newsletter is a newsletter is most of the
+    /// cost saving.
+    func enhanceWithAI(limit: Int = 15) async {
+        guard isConnected, !isEnhancing else { return }
+        isEnhancing = true
+        defer { isEnhancing = false }
+
+        let targets = messages
+            .filter { $0.aiSummary == nil && !$0.tags.contains(.noReplyNeeded) }
+            .prefix(limit)
+        guard !targets.isEmpty else { return }
+
+        await withTaskGroup(of: (Message.ID, AIService.Classification?).self) { group in
+            for message in targets {
+                group.addTask { (message.id, try? await AIService.classify(message)) }
+            }
+            for await (id, classification) in group {
+                guard let classification else { continue }
+                apply(classification, to: id)
+            }
+        }
+    }
+
+    /// The model owns priority; the rules keep everything they can see that it
+    /// cannot -- starred, unread, bulk headers.
+    private func apply(_ classification: AIService.Classification, to id: Message.ID) {
+        update(id) { message in
+            message.aiSummary = classification.summary
+
+            if let tag = classification.tag {
+                message.tags.subtract([.urgent, .veryImportant, .important])
+                message.tags.insert(tag)
+            }
+
+            if classification.needsReply {
+                message.tags.insert(.needsReply)
+            } else {
+                message.tags.remove(.needsReply)
+            }
+
+            // Never leave a message untagged; it would appear in no filter.
+            if message.tags.isEmpty { message.tags.insert(.noReplyNeeded) }
         }
     }
 

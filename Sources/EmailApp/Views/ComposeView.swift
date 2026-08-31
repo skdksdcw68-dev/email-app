@@ -10,6 +10,10 @@ struct ComposeView: View {
     /// When set, the sheet opens as a reply: recipient and subject prefilled,
     /// with the original quoted underneath.
     var replyingTo: Message? = nil
+    /// A body written for the user -- an AI draft from dictation, say. It
+    /// replaces the quoted-original prefill so they see their reply, not a
+    /// wall of quoted text.
+    var initialBody: String? = nil
 
     @Environment(MailStore.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -221,7 +225,11 @@ struct ComposeView: View {
         subject = original.subject.lowercased().hasPrefix("re:")
             ? original.subject
             : "Re: \(original.subject)"
-        messageBody = "\n\n---\nOn \(original.fullDate), \(original.sender.name) wrote:\n\(original.body)"
+        if let initialBody {
+            messageBody = initialBody
+        } else {
+            messageBody = "\n\n---\nOn \(original.fullDate), \(original.sender.name) wrote:\n\(original.body)"
+        }
     }
 }
 

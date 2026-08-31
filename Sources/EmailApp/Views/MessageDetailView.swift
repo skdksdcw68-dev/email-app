@@ -5,9 +5,14 @@ struct MessageDetailView: View {
     let messageID: Message.ID
 
     @Environment(MailStore.self) private var store
+    @Environment(UserStore.self) private var user
     @Environment(\.dismiss) private var dismiss
 
     @State private var isReplying = false
+    @State private var dictation = DictationService()
+    @State private var isDrafting = false
+    @State private var draftedBody: String?
+    @State private var draftError: String?
 
     private var message: Message? { store.message(messageID) }
 
@@ -44,7 +49,7 @@ struct MessageDetailView: View {
         }
         .sheet(isPresented: $isReplying) {
             if let message {
-                ComposeView(replyingTo: message)
+                ComposeView(replyingTo: message, initialBody: draftedBody)
             }
         }
     }
@@ -55,38 +60,103 @@ struct MessageDetailView: View {
     /// real mailbox needs gmail.modify, which is a broader restricted scope
     /// than this app requests -- so these move the message here, not in Gmail.
     private var actionBar: some View {
-        HStack(spacing: 0) {
-            actionButton("archivebox", "Archive") {
-                if let message { store.move(message.id, to: .archive) }
-                dismiss()
+        VStack(spacing: 8) {
+            if let note = statusNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(dictation.isRecording ? Color.red : .secondary)
+                    .frame(maxWidth: .infinity)
             }
 
-            actionButton("trash", "Delete") {
-                if let message { store.delete(message.id) }
-                dismiss()
-            }
+            HStack(spacing: 6) {
+                actionButton("archivebox", "Archive") {
+                    if let message { store.move(message.id, to: .archive) }
+                    dismiss()
+                }
 
-            actionButton("arrowshape.turn.up.forward", "Forward") {
-                isReplying = true
-            }
+                actionButton("trash", "Delete") {
+                    if let message { store.delete(message.id) }
+                    dismiss()
+                }
 
-            Spacer(minLength: 8)
+                actionButton("arrowshape.turn.up.left", "Reply") {
+                    draftedBody = nil
+                    isReplying = true
+                }
 
-            Button {
-                isReplying = true
-            } label: {
-                Label("Reply", systemImage: "arrowshape.turn.up.left.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 11)
-                    .background(Capsule().fill(Color.accentColor))
+                holdToReply
             }
-            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    private var statusNote: String? {
+        if dictation.isRecording { return "Recording · release to draft" }
+        if isDrafting { return "Writing your reply…" }
+        if let draftError { return draftError }
+        if let error = dictation.error { return error }
+        return nil
+    }
+
+    /// Press and hold to speak, release to have it written. A tap alone opens
+    /// the normal reply sheet, so the button is never a dead end when
+    /// dictation is unavailable or permission was declined.
+    private var holdToReply: some View {
+        HStack(spacing: 8) {
+            Image(systemName: dictation.isRecording ? "waveform" : "mic.fill")
+                .font(.subheadline.weight(.semibold))
+            Text(dictation.isRecording ? "Listening" : "Hold to Reply")
+                .font(.subheadline.weight(.semibold))
+        }
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .background(
+            Capsule().fill(dictation.isRecording ? Color.red : Color.accentColor)
+        )
+        .opacity(isDrafting ? 0.6 : 1)
+        .scaleEffect(dictation.isRecording ? 1.02 : 1)
+        .animation(.snappy(duration: 0.18), value: dictation.isRecording)
+        .contentShape(Capsule())
+        // minimumDistance 0 makes this fire on touch-down rather than after a
+        // drag threshold, which is what "hold" has to mean.
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    guard !dictation.isRecording, !isDrafting else { return }
+                    Task { await dictation.start() }
+                }
+                .onEnded { _ in
+                    guard dictation.isRecording else { return }
+                    dictation.stop()
+                    Task { await writeReply() }
+                }
+        )
+        .disabled(isDrafting)
+        .accessibilityLabel("Hold to dictate a reply")
+    }
+
+    private func writeReply() async {
+        let spoken = dictation.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let message, !spoken.isEmpty else { return }
+
+        isDrafting = true
+        draftError = nil
+        defer { isDrafting = false }
+
+        do {
+            let draft = try await AIService.draft(
+                replyingTo: message,
+                instruction: spoken,
+                tone: user.tonePreference
+            )
+            draftedBody = draft.body
+            dictation.reset()
+            isReplying = true
+        } catch {
+            draftError = error.localizedDescription
+        }
     }
 
     private func actionButton(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
@@ -184,4 +254,5 @@ private struct AISummaryCard: View {
         MessageDetailView(messageID: store.messages(in: .inbox)[0].id)
     }
     .environment(store)
+    .environment(UserStore(defaults: .previews, startAt: .finished))
 }

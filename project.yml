@@ -76,6 +76,11 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # Hold-to-reply dictation. Both strings are shown verbatim in the
+        # system prompt, and an app that records without declaring them is
+        # rejected at review.
+        NSMicrophoneUsageDescription: Maily uses the microphone so you can dictate replies instead of typing them.
+        NSSpeechRecognitionUsageDescription: Maily turns what you say into a written reply for you to review before sending.
         # Google Sign-In. GIDClientID is read by the SDK at launch, and the
         # URL scheme is the client id with its dot-separated parts reversed --
         # Google redirects back to the app through it.
