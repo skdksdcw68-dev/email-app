@@ -17,14 +17,16 @@ struct ReplyCountStep: View {
 
     @State private var showsNumberPad = false
 
-    /// Every step that fits, plus the round hundred. Filtered to what the
-    /// mailbox can satisfy, so nobody is offered fifty out of twelve.
-    private var presets: [Int] {
-        [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 100].filter { $0 < available }
-    }
+    /// Every step, always shown. Ones the mailbox cannot satisfy are visibly
+    /// disabled rather than missing: a grid that changes shape depending on
+    /// how much mail you have is disorienting, and "why is 50 not there" is a
+    /// worse question than "50 is greyed out because you have 38".
+    private static let allPresets = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 100]
+
+    private func isAvailable(_ number: Int) -> Bool { number <= available }
 
     private var isCustom: Bool {
-        if case .count(let n) = selection { return !presets.contains(n) && n > 0 }
+        if case .count(let n) = selection { return !Self.allPresets.contains(n) && n > 0 }
         return false
     }
 
@@ -39,11 +41,12 @@ struct ReplyCountStep: View {
 
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(presets, id: \.self) { number in
+                    ForEach(Self.allPresets, id: \.self) { number in
                         tile(
                             title: "\(number)",
                             detail: "replies",
-                            isSelected: selection == .count(number)
+                            isSelected: selection == .count(number),
+                            isEnabled: isAvailable(number)
                         ) { selection = .count(number) }
                     }
 
@@ -101,6 +104,7 @@ struct ReplyCountStep: View {
         detail: String,
         symbol: String? = nil,
         isSelected: Bool,
+        isEnabled: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -130,6 +134,8 @@ struct ReplyCountStep: View {
             }
         }
         .buttonStyle(BouncyButtonStyle())
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.35)
     }
 }
 

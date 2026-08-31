@@ -230,8 +230,9 @@ numbered list of their messages and nothing else.
 Rules:
 - Answer only from the messages given. If they do not contain the answer, say
   so plainly. Never guess a name, a date, an amount or a commitment.
-- Cite the messages you used as [1], [2] inline, right after the claim they
-  support. Every specific fact needs one.
+- Do not number or cite the messages. No [1], no [2], no footnote markers.
+  The app shows the reader which emails were used; markers in the prose only
+  make it look like a report.
 - Be brief. A list of three things beats a paragraph about them.
 - No preamble. Do not restate the question.
 - If nothing is relevant, say "Nothing in your recent mail covers that."

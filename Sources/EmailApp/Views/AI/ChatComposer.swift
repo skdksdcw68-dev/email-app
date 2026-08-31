@@ -68,7 +68,8 @@ struct ChatComposer: View {
                 .font(.subheadline)
                 // At rest one line; focused it opens up so a long question is
                 // readable before it is sent.
-                .lineLimit(isExpanded ? 4...10 : 1...1)
+                .lineLimit(isExpanded ? 6...12 : 1...1)
+                .frame(minHeight: isExpanded ? 96 : 0, alignment: .topLeading)
                 .focused($isFocused)
                 .padding(.horizontal, 16)
                 .padding(.top, isExpanded ? 14 : 11)
@@ -78,6 +79,7 @@ struct ChatComposer: View {
                 HStack(spacing: 0) {
                     plusButton
                     Spacer(minLength: 0)
+                    dismissButton
                     sendButton
                 }
                 .padding(.horizontal, 8)
@@ -124,6 +126,23 @@ struct ChatComposer: View {
         }
         .buttonStyle(BouncyButtonStyle())
         .accessibilityLabel("More")
+    }
+
+    /// Puts the keyboard away. There was no way to do it at all while talking
+    /// to the AI, which left the chat half-covered with no way back.
+    private var dismissButton: some View {
+        Button {
+            isFocused = false
+            showsActions = false
+        } label: {
+            Image(systemName: "keyboard.chevron.compact.down")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
+                .contentShape(Circle())
+        }
+        .buttonStyle(BouncyButtonStyle())
+        .accessibilityLabel("Hide keyboard")
     }
 
     private var sendButton: some View {

@@ -39,6 +39,13 @@ struct PeopleView: View {
     var body: some View {
         NavigationStack {
             List {
+                if availableCategories.count > 1 {
+                    categoryBar
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+
                 if !important.isEmpty {
                     Section {
                         ForEach(important) { row($0) }
@@ -67,9 +74,6 @@ struct PeopleView: View {
             }
             .navigationTitle("People")
             .searchable(text: $query, prompt: "Search people")
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if availableCategories.count > 1 { categoryBar }
-            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {

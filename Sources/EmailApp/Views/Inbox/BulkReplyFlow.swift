@@ -174,12 +174,7 @@ struct BulkReplyFlow: View {
         }
         .navigationTitle("Choose emails")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Clear") { manualPicks.removeAll() }
-                    .disabled(manualPicks.isEmpty)
-            }
-        }
+
     }
 
     // MARK: - Style
@@ -306,6 +301,10 @@ struct BulkReplyFlow: View {
 
     // MARK: - Work
 
+    /// @MainActor is load-bearing. A plain async method called from a
+    /// MainActor context does not stay on it, so `generated += 1` ran off the
+    /// main actor and the counter sat at zero until the whole loop finished.
+    @MainActor
     private func generateAll() async {
         generated = 0
         errorMessage = nil
@@ -336,6 +335,7 @@ struct BulkReplyFlow: View {
         step = .review
     }
 
+    @MainActor
     private func sendAll() async {
         let queue = unsent.map(\.id)
         sentCount = 0
@@ -347,6 +347,7 @@ struct BulkReplyFlow: View {
         step = .done
     }
 
+    @MainActor
     private func send(_ id: Message.ID) async {
         guard let index = drafts.firstIndex(where: { $0.id == id }) else { return }
         let draft = drafts[index]

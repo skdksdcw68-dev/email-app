@@ -1,189 +1,163 @@
 import SwiftUI
+import UIKit
 
-/// The You tab: how Maily works.
+/// The You tab: who you are, which mailbox you are using, and how Maily
+/// should behave.
 ///
-/// The onboarding answers are not decoration -- automation level, approval
-/// rules and writing style are literally the `autonomy`, `approvals` and `tone`
-/// questions, surfaced here so the user can see what their AI is set to.
+/// Deliberately short. Profile is the handful of controls worth reaching in
+/// one tap; everything deeper lives behind Settings. A forty-item menu here
+/// would be a settings screen wearing a profile's name.
 struct YouView: View {
     @Environment(UserStore.self) private var user
     @Environment(MailStore.self) private var mail
 
-    @State private var autoTagging = true
-    @State private var summaries = true
-    @State private var urgentAlerts = true
-    @State private var showingDisconnectAlert = false
-    @State private var showingSignOutAlert = false
-
     var body: some View {
         NavigationStack {
             List {
-                accountSection
-                inboxSection
+                Section { header }
+                    .listRowInsets(EdgeInsets(top: 16, leading: 20, bottom: 16, trailing: 20))
 
-                Section("AI") {
-                    Toggle("Tag incoming mail", isOn: $autoTagging)
-                    Toggle("Write summaries", isOn: $summaries)
-                    Toggle("Notify me about urgent mail", isOn: $urgentAlerts)
-                }
+                mailboxSection
 
-                preferencesSection
-                subscriptionSection
+                Section {
+                    NavigationLink {
+                        PersonalPreferencesView()
+                    } label: {
+                        row("Personal", "paintbrush.fill", "Appearance, writing style")
+                    }
 
-                Section("About") {
-                    LabeledContent("Version", value: appVersion)
-                    Link(destination: URL(string: "https://github.com/skdksdcw68-dev/email-app")!) {
-                        Label("Help & feedback", systemImage: "questionmark.circle")
+                    NavigationLink {
+                        AIPreferencesView()
+                    } label: {
+                        row("AI", "sparkles", "What Maily is allowed to do")
                     }
                 }
 
                 Section {
-                    Button("Sign out", role: .destructive) { showingSignOutAlert = true }
+                    HStack(spacing: 14) {
+                        Image(systemName: "star.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.tint)
+                            .frame(width: 26)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Free")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Every feature, and you pay your own AI costs.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                } header: {
+                    Text("Plan")
+                }
+
+                Section {
+                    NavigationLink {
+                        AppSettingsView()
+                    } label: {
+                        row("Settings", "gearshape.fill", "Privacy, data, account")
+                    }
                 }
             }
             .navigationTitle("You")
-            .alert("Disconnect inbox?", isPresented: $showingDisconnectAlert) {
-                Button("Cancel", role: .cancel) {}
-                Button("Disconnect", role: .destructive) { mail.disconnect() }
-            } message: {
-                Text("Removes the mailbox and every cached message from this device. Your Maily account and preferences are kept.")
-            }
-            .alert("Sign out of Maily?", isPresented: $showingSignOutAlert) {
-                Button("Cancel", role: .cancel) {}
-                Button("Sign out", role: .destructive) {
-                    mail.disconnect()
-                    user.signOut()
-                    // Ends the Supabase session as well; clearing only the
-                    // local copy would leave the device still authenticated.
-                    Task { await AuthService.signOut() }
-                }
-            } message: {
-                Text("This clears your account and your AI preferences on this device.")
-            }
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(spacing: 14) {
+            SenderAvatar(
+                contact: Contact(
+                    name: user.account?.displayName ?? "You",
+                    address: user.account?.email ?? ""
+                ),
+                size: 58
+            )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(user.account?.displayName ?? "You")
+                    .font(.title3.weight(.bold))
+                Text(user.account?.email ?? "Not signed in")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if let provider = user.account?.provider {
+                    Text("Signed in with \(provider.title)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - Mailbox
 
     @ViewBuilder
-    private var accountSection: some View {
-        if let account = user.account {
-            Section("Maily account") {
+    private var mailboxSection: some View {
+        Section {
+            if let account = mail.account {
                 HStack(spacing: 12) {
-                    Circle()
-                        .fill(Color.accentColor.opacity(0.18))
-                        .frame(width: 46, height: 46)
-                        .overlay {
-                            Text(account.initials)
-                                .font(.headline)
-                                .foregroundStyle(.tint)
-                        }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(account.displayName).font(.headline)
+                    SenderAvatar(
+                        contact: Contact(name: account.displayName, address: account.email),
+                        size: 34
+                    )
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(account.displayName)
+                            .font(.subheadline.weight(.medium))
                         Text(account.email)
-                            .font(.subheadline)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
+                    Spacer(minLength: 0)
+                    Text("Current")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tint)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.14)))
                 }
-                .padding(.vertical, 4)
-
-                LabeledContent("Signed in with", value: account.provider.title)
+                .padding(.vertical, 2)
+            } else {
+                Label("No mailbox connected", systemImage: "envelope.badge.shield.half.filled")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
+        } header: {
+            Text("Gmail")
+        } footer: {
+            // Said plainly rather than left as a missing button somebody hunts
+            // for. One mailbox is what the app supports today.
+            Text(mail.account == nil
+                 ? "Connect a mailbox from the Inbox tab."
+                 : "Maily reads and organises this mailbox on your behalf. Support for a second account is not built yet.")
         }
     }
 
-    /// Separate from the account above: this is a grant of access to one
-    /// mailbox, not an identity. Disconnecting it keeps the account intact.
-    @ViewBuilder
-    private var inboxSection: some View {
-        if let inbox = mail.account {
-            Section {
-                LabeledContent("Connected", value: inbox.email)
-                Button("Disconnect inbox", role: .destructive) {
-                    showingDisconnectAlert = true
-                }
-            } header: {
-                Text("Connected accounts")
-            } footer: {
-                Text("Maily reads and organizes this mailbox on your behalf.")
-            }
-        } else {
-            Section("Connected accounts") {
-                Label("No inbox connected", systemImage: "exclamationmark.triangle.fill")
+    private func row(_ title: String, _ symbol: String, _ detail: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol)
+                .font(.body)
+                .foregroundStyle(.tint)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                Text(detail)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
-    }
-
-    /// Automation level, approval rules and writing style are the onboarding
-    /// answers, shown under the names the user would look for.
-    @ViewBuilder
-    private var preferencesSection: some View {
-        let answered = user.questions.filter { !user.selections(for: $0).isEmpty }
-        if !answered.isEmpty {
-            Section {
-                ForEach(answered) { question in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(settingName(for: question))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(summary(for: question))
-                            .font(.subheadline)
-                    }
-                    .padding(.vertical, 2)
-                }
-            } header: {
-                Text("Your preferences")
-            } footer: {
-                Text("Collected during setup. These shape how your AI works.")
-            }
-        }
-    }
-
-    private var subscriptionSection: some View {
-        Section {
-            LabeledContent("Plan", value: "Maily Free")
-        } header: {
-            Text("Subscription")
-        } footer: {
-            Text("Pro adds AI drafting, follow-up management, multiple accounts and daily briefings.")
-        }
-    }
-
-    // MARK: - Helpers
-
-    /// The onboarding wording is a question; here it should read as a setting.
-    private func settingName(for question: OnboardingQuestion) -> String {
-        switch question.id {
-        case "autonomy": "Automation level"
-        case "approvals": "Approval rules"
-        case "tone": "Writing style"
-        case "response_time": "Response expectations"
-        case "priorities": "What matters most"
-        case "delegate": "Delegated to Maily"
-        case "role": "Your role"
-        case "usage": "What you use email for"
-        default: question.title
-        }
-    }
-
-    private func summary(for question: OnboardingQuestion) -> String {
-        let selected = user.selections(for: question)
-        let labels = question.options.filter { selected.contains($0.id) }.map(\.label)
-        return labels.isEmpty ? "Not set" : labels.joined(separator: ", ")
-    }
-
-    private var appVersion: String {
-        let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "1.0"
-        let build = info?["CFBundleVersion"] as? String ?? "1"
-        return "\(short) (\(build))"
+        .padding(.vertical, 2)
     }
 }
 
 #Preview {
     YouView()
-        .environment(UserStore(defaults: .previews, startAt: .finished))
         .environment(MailStore.connected())
+        .environment(UserStore(defaults: .previews, startAt: .finished))
 }

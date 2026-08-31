@@ -319,6 +319,7 @@ final class MailStore {
     /// summary, so opening pays for that one message -- and only once, since
     /// the result is cached like any other.
     func summarize(_ id: Message.ID) async {
+        guard AppSettings.writesSummaries else { return }
         guard let message = message(id), message.aiSummary == nil else { return }
         guard !summarizing.contains(id) else { return }
 
@@ -405,6 +406,9 @@ final class MailStore {
     /// have a model confirm that a newsletter is a newsletter is most of the
     /// cost saving.
     func enhanceWithAI(limit: Int = 15) async {
+        // The setting is real: off means nothing leaves the device and nothing
+        // is charged. Local rules still tag, because those cost nothing.
+        guard AppSettings.tagsIncomingMail else { return }
         guard isConnected, !isEnhancing else { return }
         isEnhancing = true
         defer { isEnhancing = false }

@@ -93,14 +93,15 @@ struct SourceList: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            ForEach(Array(shown.enumerated()), id: \.element.id) { index, message in
+            // Unnumbered. The model no longer writes [1], [2] into the prose,
+            // so numbering these would point at markers that are not there.
+            ForEach(shown) { message in
                 NavigationLink(value: message.id) {
                     HStack(alignment: .top, spacing: 9) {
-                        Text("\(index + 1)")
-                            .font(.caption2.weight(.bold))
+                        Image(systemName: "envelope.fill")
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                             .frame(width: 18, height: 18)
-                            .background(Circle().fill(Color(uiColor: .tertiarySystemFill)))
 
                         VStack(alignment: .leading, spacing: 1) {
                             Text(message.sender.name)

@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct RootView: View {
+    @State private var appearance = AppSettings.appearance
+
     @Environment(UserStore.self) private var user
 
     var body: some View {
@@ -12,6 +14,11 @@ struct RootView: View {
             }
         }
         .animation(.snappy(duration: 0.3), value: user.phase == .finished)
+        // Applied here so the choice reaches every screen, sheets included.
+        .preferredColorScheme(appearance.colorScheme)
+        .onReceive(NotificationCenter.default.publisher(for: .appearanceChanged)) { _ in
+            appearance = AppSettings.appearance
+        }
     }
 }
 

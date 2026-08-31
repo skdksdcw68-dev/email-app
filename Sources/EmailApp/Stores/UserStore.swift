@@ -78,6 +78,13 @@ final class UserStore {
         !selections(for: question).isEmpty
     }
 
+    /// Changes the tone answer from Settings, without walking onboarding again.
+    /// Writes the same store the questions do, so the two can never disagree.
+    func setTone(_ optionID: String) {
+        answers[OnboardingQuestion.tone.id] = [optionID]
+        persistAnswers()
+    }
+
     /// The `tone` answer, phrased as an instruction the drafting model can act
     /// on. This is where that onboarding question finally earns its place.
     var tonePreference: String {

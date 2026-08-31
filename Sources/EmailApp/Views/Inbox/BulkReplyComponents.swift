@@ -104,14 +104,19 @@ struct CheckboxToggleStyle: ToggleStyle {
     }
 }
 
-/// Writing in progress. A full screen rather than a spinner in a sheet: this
-/// can take minutes, and the count climbing is the only honest reassurance
-/// there is.
+/// Writing in progress.
+///
+/// A full screen rather than a spinner in a sheet: this can take minutes, and
+/// the count climbing is the only honest reassurance there is. The ring is
+/// determinate, but a second ring sweeps continuously behind it so the screen
+/// is never still between one reply finishing and the next -- a bar that does
+/// not move for eight seconds reads as a hang.
 struct GeneratingStep: View {
     let done: Int
     let total: Int
 
-    @State private var spin = false
+    @State private var sweep = false
+    @State private var pop = false
 
     private var fraction: Double {
         total > 0 ? Double(done) / Double(total) : 0
@@ -124,27 +129,40 @@ struct GeneratingStep: View {
             ZStack {
                 Circle()
                     .stroke(Color(uiColor: .tertiarySystemFill), lineWidth: 10)
+
+                // Always turning, so the screen has a pulse even while one
+                // reply is being written.
+                Circle()
+                    .trim(from: 0, to: 0.12)
+                    .stroke(Color.accentColor.opacity(0.35),
+                            style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                    .rotationEffect(.degrees(sweep ? 360 : 0))
+                    .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: sweep)
+
                 Circle()
                     .trim(from: 0, to: max(0.02, fraction))
                     .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 10, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .animation(.easeOut(duration: 0.35), value: fraction)
+                    .animation(.spring(response: 0.5, dampingFraction: 0.7), value: fraction)
 
                 VStack(spacing: 1) {
-                    Text("\(done)")
-                        .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
-                    Text("of \(total)")
+                    Text("(done)")
+                        .font(.system(size: 38, weight: .bold, design: .rounded).monospacedDigit())
+                        .contentTransition(.numericText())
+                        // A small kick each time one lands, so the number is
+                        // visibly counting rather than quietly changing.
+                        .scaleEffect(pop ? 1.14 : 1)
+                    Text("of (total)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 148, height: 148)
+            .frame(width: 152, height: 152)
 
             VStack(spacing: 8) {
                 Text(done == 0 ? "Starting" : (fraction >= 0.85 ? "Almost there" : "Writing your replies"))
                     .font(.title3.weight(.bold))
                     .contentTransition(.opacity)
-                    .animation(.easeInOut(duration: 0.25), value: done == 0)
 
                 Text("Maily is reading each email and writing a reply. Nothing is sent.")
                     .font(.subheadline)
@@ -164,6 +182,14 @@ struct GeneratingStep: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("")
         .navigationBarBackButtonHidden()
+        .onAppear { sweep = true }
+        .onChange(of: done) { _, _ in
+            withAnimation(.spring(response: 0.22, dampingFraction: 0.5)) { pop = true }
+            Task {
+                try? await Task.sleep(for: .milliseconds(160))
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { pop = false }
+            }
+        }
     }
 }
 
@@ -312,6 +338,13 @@ struct DraftCard: View {
                 Label("Sent", systemImage: "checkmark.circle.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.green)
+            } else if draft.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // Nothing was written for this one, usually because the
+                // network dropped mid-run. Offering "Send" here was the bug:
+                // it promised to send an empty reply.
+                Label("Could not be written. Try again later.", systemImage: "wifi.exclamationmark")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } else {
                 Button(action: onSend) {
                     Label("Send this one", systemImage: "paperplane.fill")
