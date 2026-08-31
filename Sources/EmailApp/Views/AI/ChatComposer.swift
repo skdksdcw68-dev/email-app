@@ -1,16 +1,15 @@
 import SwiftUI
 import UIKit
 
-/// The chat input.
+/// The chat input, ported from Drobe's `chat-input-bar.tsx`.
 ///
-/// One line at rest, growing as you type up to five, then scrolling inside
-/// itself. An earlier version forced a tall card the moment the field was
-/// focused, which meant a two word question sat in a mostly empty box and the
-/// list jumped every time the keyboard appeared. Growing with the text is both
-/// calmer and what every good chat input actually does.
+/// The structural point I kept missing: this is a panel, not a capsule with
+/// controls tucked inside it. Text on top, a toolbar row underneath, always,
+/// in both states. That is what makes the resting height look deliberate and
+/// what lets it grow without the buttons being pushed anywhere.
 ///
-/// The `+` opens a menu above the field rather than a sheet, so the keyboard
-/// stays up and what you were typing stays visible.
+/// Metrics are Drobe's: 20pt corner, 16pt padding, 12pt between rows, 15/20
+/// text from one line up to 120pt then scrolling, and a 32pt round send.
 struct ChatComposer: View {
     @Binding var text: String
     @FocusState.Binding var isFocused: Bool
@@ -41,89 +40,88 @@ struct ChatComposer: View {
         }
     }
 
-    private var hasText: Bool {
+    private var hasRequest: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var canSend: Bool { !isWorking && hasText }
+    private var canSend: Bool { hasRequest && !isWorking }
 
     var body: some View {
         VStack(spacing: 0) {
             if showsActions { actionMenu }
 
-            HStack(alignment: .bottom, spacing: 8) {
-                plusButton
-
-                field
-
-                if isFocused { dismissButton }
-                sendButton
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            panel
+                .padding(.horizontal, 14)
+                .padding(.top, showsActions ? 4 : 8)
+                .padding(.bottom, 8)
         }
-        // Frosted, so the conversation blurs underneath rather than being cut
-        // off by an opaque bar.
         .background(.regularMaterial)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showsActions)
-        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: isFocused)
-        // The click on send, which is most of what makes a control feel real.
         .sensoryFeedback(.impact(weight: .medium), trigger: isWorking)
     }
 
-    // MARK: - The field
+    // MARK: - The panel
 
-    private var field: some View {
-        TextField("Ask Maily", text: $text, axis: .vertical)
-            .font(.subheadline)
-            // Grows to five lines, then scrolls inside itself.
-            .lineLimit(1...5)
-            .focused($isFocused)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemBackground))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .strokeBorder(
-                                hasText ? Color.accentColor.opacity(0.35) : Color(uiColor: .separator).opacity(0.4),
-                                lineWidth: 0.5
-                            )
-                    }
+    private var panel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            TextField(isWorking ? "Maily is typing…" : "Ask Maily", text: $text, axis: .vertical)
+                .font(.system(size: 15))
+                .lineSpacing(4)
+                // One line at rest, growing to six, then scrolling inside
+                // itself. No fixed height: a pinned height makes every state
+                // other than the resting one wrong.
+                .lineLimit(1...6)
+                .focused($isFocused)
+
+            HStack(alignment: .center, spacing: 0) {
+                plusButton
+                Spacer(minLength: 0)
+                if isFocused { dismissButton }
+                sendButton
             }
-            // A soft glow only while there is something to send, so the field
-            // reads as live rather than as a permanently lit box.
-            .shadow(color: hasText ? Color.accentColor.opacity(0.18) : .clear, radius: 8, y: 2)
-            .animation(.easeInOut(duration: 0.2), value: hasText)
+        }
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemBackground))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(
+                            hasRequest ? Color.accentColor.opacity(0.3) : Color(uiColor: .separator).opacity(0.35),
+                            lineWidth: 0.5
+                        )
+                }
+        }
+        .shadow(color: hasRequest ? Color.accentColor.opacity(0.14) : .clear, radius: 8, y: 2)
+        .animation(.easeInOut(duration: 0.2), value: hasRequest)
+        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: isFocused)
     }
 
+    /// The same button closes what it opened, so there is never a second,
+    /// differently placed way out of the menu.
     private var plusButton: some View {
         Button {
             showsActions.toggle()
         } label: {
-            Image(systemName: "plus")
-                .font(.body.weight(.medium))
-                .foregroundStyle(.secondary)
-                .rotationEffect(.degrees(showsActions ? 45 : 0))
-                .frame(width: 32, height: 36)
+            Image(systemName: showsActions ? "xmark" : "plus")
+                .font(.system(size: showsActions ? 18 : 22, weight: .regular))
+                .foregroundStyle(.primary)
+                .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
         .buttonStyle(BouncyButtonStyle())
-        .accessibilityLabel("More")
+        .accessibilityLabel(showsActions ? "Close menu" : "More")
     }
 
-    /// Puts the keyboard away. Only present while it is up, so it does not sit
-    /// there as a dead control.
     private var dismissButton: some View {
         Button {
             isFocused = false
             showsActions = false
         } label: {
             Image(systemName: "keyboard.chevron.compact.down")
-                .font(.subheadline)
+                .font(.system(size: 16))
                 .foregroundStyle(.secondary)
-                .frame(width: 30, height: 36)
+                .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
         .buttonStyle(BouncyButtonStyle())
@@ -134,19 +132,20 @@ struct ChatComposer: View {
     private var sendButton: some View {
         Button(action: onSend) {
             Image(systemName: "arrow.up")
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(canSend ? Color.white : Color.secondary)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(canSend ? Color.white : Color.white.opacity(0.85))
                 .frame(width: 32, height: 32)
                 .background {
-                    Circle().fill(canSend ? Color.accentColor : Color(uiColor: .tertiarySystemFill))
+                    Circle().fill(
+                        canSend
+                            ? AnyShapeStyle(Color.accentColor)
+                            : AnyShapeStyle(Color.primary.opacity(0.2))
+                    )
                 }
-                // Comes alive the moment there is something to send.
-                .scaleEffect(canSend ? 1 : 0.88)
-                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: canSend)
         }
         .buttonStyle(BouncyButtonStyle())
         .disabled(!canSend)
-        .padding(.bottom, 2)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: canSend)
         .accessibilityLabel("Send")
     }
 
@@ -187,13 +186,13 @@ struct ChatComposer: View {
 }
 
 /// The press feel iOS controls have and SwiftUI's plain style does not: a
-/// small, fast scale under the finger. Applied to the chat controls because
-/// "it bounces when you tap it" is most of what makes a native app feel native.
+/// small, fast scale under the finger. "It bounces when you tap it" is most of
+/// what makes a control feel native.
 struct BouncyButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.9 : 1)
-            .opacity(configuration.isPressed ? 0.7 : 1)
-            .animation(.spring(response: 0.22, dampingFraction: 0.6), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.88 : 1)
+            .opacity(configuration.isPressed ? 0.65 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 0.55), value: configuration.isPressed)
     }
 }

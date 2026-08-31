@@ -10,20 +10,14 @@ import UIKit
 struct PeopleView: View {
     @Environment(MailStore.self) private var mail
 
-    @State private var query = ""
     @State private var category: PersonCategory?
     @State private var showsServices = false
+    @State private var isSearching = false
 
     private var people: [Person] {
         mail.people
             .filter { showsServices || $0.category.isPerson }
             .filter { category == nil || $0.category == category }
-            .filter {
-                query.isEmpty
-                    || $0.contact.name.localizedCaseInsensitiveContains(query)
-                    || $0.contact.address.localizedCaseInsensitiveContains(query)
-                    || ($0.organization ?? "").localizedCaseInsensitiveContains(query)
-            }
     }
 
     private var important: [Person] { people.filter { $0.isImportant } }
@@ -39,13 +33,6 @@ struct PeopleView: View {
     var body: some View {
         NavigationStack {
             List {
-                if availableCategories.count > 1 {
-                    categoryBar
-                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                }
-
                 if !important.isEmpty {
                     Section {
                         ForEach(important) { row($0) }
@@ -72,17 +59,30 @@ struct PeopleView: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if availableCategories.count > 1 { categoryBar }
+            }
             .keyboardDismissable()
             .navigationTitle("People")
-            .searchable(text: $query, prompt: "Search people")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                // Search and the menu together in the corner, so the list
+                // starts at the top of the screen instead of under a bar.
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        isSearching = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+
                     Menu {
                         Toggle("Show services", isOn: $showsServices)
                     } label: {
-                        Label("Options", systemImage: "ellipsis")
+                        Image(systemName: "ellipsis")
                     }
                 }
+            }
+            .sheet(isPresented: $isSearching) {
+                PeopleSearchView()
             }
             .navigationDestination(for: Person.ID.self) { PersonDetailView(address: $0) }
             .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
@@ -108,7 +108,7 @@ struct PeopleView: View {
             .padding(.vertical, 8)
         }
         .scrollIndicators(.hidden)
-        .background(Color(uiColor: .systemBackground))
+        .background(Color(uiColor: .systemGroupedBackground))
     }
 
     private func categoryChip(_ option: PersonCategory?, title: String, symbol: String) -> some View {
@@ -140,12 +140,12 @@ struct PeopleView: View {
     @ViewBuilder
     private var emptyState: some View {
         ContentUnavailableView(
-            query.isEmpty ? "No People Yet" : "No Results",
-            systemImage: query.isEmpty ? "person.2" : "magnifyingglass",
+            category == nil ? "No People Yet" : "Nobody here",
+            systemImage: category?.systemImage ?? "person.2",
             description: Text(
-                query.isEmpty
+                category == nil
                     ? "Once your inbox syncs, the people you email appear here."
-                    : "Nobody matches \u{201C}\(query)\u{201D}."
+                    : "No \(category?.title.lowercased() ?? "") contacts yet."
             )
         )
     }
@@ -202,4 +202,59 @@ struct PersonRow: View {
     PeopleView()
         .environment(MailStore.connected())
         .environment(UserStore(defaults: .previews, startAt: .finished))
+}
+
+/// Searching people, in a sheet rather than a bar pinned above the list.
+///
+/// A permanent search field cost a whole row of the screen to something used
+/// occasionally, and pushed the filter chips and the first person down with
+/// it. In the corner it costs a button.
+struct PeopleSearchView: View {
+    @Environment(MailStore.self) private var mail
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var text = ""
+    @FocusState private var isFocused: Bool
+
+    private var results: [Person] {
+        guard !text.isEmpty else { return [] }
+        return mail.people.filter {
+            $0.contact.name.localizedCaseInsensitiveContains(text)
+                || $0.contact.address.localizedCaseInsensitiveContains(text)
+                || ($0.organization ?? "").localizedCaseInsensitiveContains(text)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(results) { person in
+                    NavigationLink(value: person.id) { PersonRow(person: person) }
+                }
+            }
+            .listStyle(.plain)
+            .keyboardDismissable()
+            .searchable(text: $text, isPresented: .constant(true), prompt: "Search people")
+            .navigationTitle("Search")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: Person.ID.self) { PersonDetailView(address: $0) }
+            .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .overlay {
+                if text.isEmpty {
+                    ContentUnavailableView(
+                        "Search people",
+                        systemImage: "magnifyingglass",
+                        description: Text("By name, email address or company.")
+                    )
+                } else if results.isEmpty {
+                    ContentUnavailableView.search(text: text)
+                }
+            }
+        }
+    }
 }
