@@ -167,6 +167,29 @@ struct InboxHomeView: View {
                 }
                 .listRowSeparator(.hidden)
                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 10, trailing: 16))
+            } else if !mail.messages.isEmpty {
+                // The reward for clearing it. A warning that simply vanishes
+                // gives no sense that anything was achieved -- and an empty
+                // gap where a red row used to be reads like a bug.
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(Color(uiColor: .systemGreen))
+                        .frame(width: 26)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Your inbox is clean")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Nothing is waiting on you right now.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 3)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 10, trailing: 16))
+                .transition(.opacity)
             }
         }
     }

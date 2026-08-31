@@ -46,7 +46,13 @@ struct AttentionListView: View {
         List {
             Section {
                 ForEach(messages) { message in
-                    NavigationLink(value: message.id) {
+                    // View-based, not value-based. This screen is itself
+                    // pushed by a view-based link, and mixing the two in one
+                    // stack means the value never resolves -- tapping a row
+                    // did nothing at all.
+                    NavigationLink {
+                        MessageDetailView(messageID: message.id)
+                    } label: {
                         AttentionRow(message: message)
                     }
                     .messageSwipeActions(for: message)
@@ -57,11 +63,14 @@ struct AttentionListView: View {
         }
         .navigationTitle("Needs your attention")
         .navigationBarTitleDisplayMode(.inline)
+        // A full-screen context, like reading a message. Leaving the tab bar
+        // under the action bar stacks two chrome layers over one list.
+        .toolbar(.hidden, for: .tabBar)
         .safeAreaInset(edge: .bottom) {
             if !messages.isEmpty { bulkActions }
         }
-        .sheet(isPresented: $isBulkReplying) {
-            BulkReplyView(messages: messages)
+        .fullScreenCover(isPresented: $isBulkReplying) {
+            BulkReplyFlow(messages: messages)
         }
         .overlay {
             if messages.isEmpty {

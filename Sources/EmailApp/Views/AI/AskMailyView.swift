@@ -42,6 +42,7 @@ struct AskMailyView: View {
             }
             .padding(16)
         }
+        .dismissesKeyboardOnTap()
         .navigationTitle("Ask Maily")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { askBar }

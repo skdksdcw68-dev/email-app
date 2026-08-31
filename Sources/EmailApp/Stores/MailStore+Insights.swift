@@ -40,6 +40,11 @@ extension MailStore {
     /// meaningful thing on the screen, so it stays short on purpose.
     func needsAttention(limit: Int = 3) -> [Message] {
         messages(in: .inbox)
+            // Unread as well as important. Without this, marking everything
+            // read left the list exactly as it was, and nothing the user did
+            // could ever clear it. Anything read but still unanswered is not
+            // lost -- it is in Follow-ups, which is the right home for it.
+            .filter { !$0.isRead }
             .filter { $0.tags.contains(.urgent) || $0.tags.contains(.needsReply) }
             .sorted { lhs, rhs in
                 let l = lhs.topPriority?.priorityRank ?? Int.max

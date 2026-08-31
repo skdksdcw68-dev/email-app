@@ -69,6 +69,7 @@ struct ComposeView: View {
                 bodyEditor
                 bottomBar
             }
+            .dismissesKeyboardOnTap()
             .navigationTitle(replyingTo == nil ? "New Message" : "Reply")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear(perform: prefill)
@@ -218,12 +219,6 @@ struct ComposeView: View {
             try? await Task.sleep(for: .seconds(1.4))
             justDrafted = false
         }
-    }
-
-    private func dismissKeyboard() {
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
-        )
     }
 
     // MARK: - Header rows
