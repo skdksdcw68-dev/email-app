@@ -220,44 +220,64 @@ struct ComposeView: View {
             }
 
             HStack(spacing: 12) {
-                Button {
-                    // Attachments need a picker and an upload path; neither
-                    // exists yet, so this stays visibly unavailable rather
-                    // than looking live and doing nothing.
-                } label: {
-                    Image(systemName: "paperclip")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 44, height: 44)
-                        .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
-                }
-                .buttonStyle(.plain)
-                .disabled(true)
-                .frame(width: isExpanded ? 0 : 44)
-                .opacity(isExpanded ? 0 : 1)
-                .clipped()
-
+                attachButton
+                // Attachment hard left, microphone hard right. Without this
+                // the row hugs its contents and the whole cluster floats in
+                // the middle of the screen.
+                Spacer(minLength: 0)
                 holdToReply
             }
-            .animation(.spring(response: 0.34, dampingFraction: 0.74), value: isExpanded)
+            .animation(.spring(response: 0.32, dampingFraction: 0.78), value: isExpanded)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        // The bar spans the screen. Without this it is only as wide as the
+        // buttons inside it, and `.bar` paints a floating grey slab around
+        // them instead of a toolbar along the bottom edge.
+        .frame(maxWidth: .infinity)
         .background(.bar)
+    }
+
+    private var attachButton: some View {
+        Button {
+            // Attachments need a picker and an upload path; neither exists
+            // yet, so this stays visibly unavailable rather than looking
+            // live and doing nothing.
+        } label: {
+            Image(systemName: "paperclip")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
+        }
+        .buttonStyle(.plain)
+        .disabled(true)
+        .frame(width: isExpanded ? 0 : 44)
+        .opacity(isExpanded ? 0 : 1)
+        .clipped()
     }
 
     /// Full width only while it is doing something. At rest it is a compact
     /// pill, so the paperclip beside it has room to be a real target.
-    private var isExpanded: Bool { dictation.isRecording || isDrafting }
+    ///
+    /// Keyed to the finger, not to the audio engine. `isRecording` only turns
+    /// true once AVAudioEngine is actually running, which is a good fraction
+    /// of a second after the touch lands -- and much longer the first time,
+    /// when the permission prompt appears. Animating from it meant every
+    /// press felt like the button had missed it.
+    private var isExpanded: Bool { isHolding || isDrafting }
 
     /// Press and hold, speak, release. One view throughout -- swapping it out
     /// mid-press would lose the gesture and the release would never fire.
+    ///
+    /// Every visual here reads `isHolding`, which is set synchronously on
+    /// touch-down, so the button moves in the same frame as the finger.
     private var holdToReply: some View {
         HStack(spacing: 8) {
             if isDrafting {
                 ProgressView().tint(.white)
             } else {
-                Image(systemName: dictation.isRecording ? "waveform" : "mic.fill")
+                Image(systemName: isHolding ? "waveform" : "mic.fill")
                     .font(.subheadline.weight(.semibold))
             }
 
@@ -265,7 +285,7 @@ struct ComposeView: View {
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
 
-            if dictation.isRecording {
+            if isHolding {
                 Text("· release to send")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.85))
@@ -274,10 +294,14 @@ struct ComposeView: View {
         .foregroundStyle(.white)
         .padding(.horizontal, isExpanded ? 20 : 18)
         .frame(maxWidth: isExpanded ? .infinity : nil)
-        .frame(height: dictation.isRecording ? 54 : 46)
-        .background(Capsule().fill(dictation.isRecording ? Color.red : Color.accentColor))
-        .shadow(color: Color.red.opacity(dictation.isRecording ? 0.35 : 0), radius: 12)
+        .frame(height: isHolding ? 54 : 46)
+        .background(Capsule().fill(isHolding ? Color.red : Color.accentColor))
+        .shadow(color: Color.red.opacity(isHolding ? 0.35 : 0), radius: 12)
         .contentShape(Capsule())
+        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: isHolding)
+        // A tap on the send button gives a click; this should too, and the
+        // haptic is what actually sells the press as instant.
+        .sensoryFeedback(.impact(weight: .medium), trigger: isHolding)
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in beginHold() }
@@ -289,7 +313,7 @@ struct ComposeView: View {
 
     private var buttonLabel: String {
         if isDrafting { return "Updating Draft…" }
-        return dictation.isRecording ? "Recording" : "Hold to Reply"
+        return isHolding ? "Recording" : "Hold to Reply"
     }
 
     private func beginHold() {
@@ -302,6 +326,15 @@ struct ComposeView: View {
         guard isHolding else { return }
         isHolding = false
         dictation.stop()
+
+        // Hand straight over to the drafting state. Setting isDrafting inside
+        // the task instead costs a runloop hop, and for that hop neither flag
+        // is set -- the button snaps back to its compact size and then expands
+        // again. The condition has to match writeFromDictation's guard exactly
+        // or the spinner would never be cleared.
+        let spoken = dictation.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if replyingTo != nil, !spoken.isEmpty { isDrafting = true }
+
         Task { await writeFromDictation() }
     }
 
