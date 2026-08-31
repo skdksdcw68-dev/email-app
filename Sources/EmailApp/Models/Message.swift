@@ -50,10 +50,11 @@ struct Message: Identifiable, Hashable, Codable {
     }
 
     /// First line of the body, collapsed to a single line for the list preview.
+    /// One line of actual content. Alt-text markers, tracking padding and bare
+    /// URLs are stripped -- a message that opens with a logo previewed as
+    /// "[image: Google]", which tells the reader nothing at all.
     var preview: String {
-        body
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        GmailService.previewText(from: body)
     }
 
     /// Today shows a time, this week a weekday, anything older a short date --

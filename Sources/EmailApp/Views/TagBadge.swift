@@ -21,18 +21,9 @@ struct TagBadge: View {
                     .foregroundStyle(.primary)
             }
         }
-        .padding(.horizontal, showsTitle ? 8 : 5)
-        .padding(.vertical, 3.5)
-        .background {
-            // Tinted with the tag's colour, matching the filter pills. A
-            // neutral grey capsule with one coloured glyph in it reads as a
-            // system control that happens to be here, not as this app's tag.
-            Capsule()
-                .fill(tag.color.opacity(0.14))
-                .overlay {
-                    Capsule().strokeBorder(tag.color.opacity(0.22), lineWidth: 0.5)
-                }
-        }
+        .padding(.horizontal, showsTitle ? 7 : 5)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color(uiColor: .tertiarySystemFill)))
     }
 }
 

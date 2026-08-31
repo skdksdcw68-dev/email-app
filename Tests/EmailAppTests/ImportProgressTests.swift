@@ -55,7 +55,7 @@ final class ImportProgressTests: XCTestCase {
         // The import screen keys off this. If finished stayed "running" the
         // overlay would never come down.
         XCTAssertFalse(ImportProgress.idle.isRunning)
-        XCTAssertFalse(ImportProgress.finished.isRunning)
+        XCTAssertFalse(ImportProgress.finished(count: 10).isRunning)
     }
 
     // MARK: - Every state says something
@@ -67,7 +67,7 @@ final class ImportProgressTests: XCTestCase {
             .importing(done: 0, total: 0),
             .importing(done: 5, total: 10),
             .saving,
-            .finished,
+            .finished(count: 42),
         ]
         for state in states {
             XCTAssertFalse(state.title.isEmpty, "\(state) has no title")

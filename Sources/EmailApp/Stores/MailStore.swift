@@ -195,9 +195,11 @@ final class MailStore {
                 knownTotal = token == nil ? collected.count : collected.count + Self.importPageSize
                 importProgress = .importing(done: collected.count, total: knownTotal)
 
-                // Show them as they arrive rather than after everything: the
-                // list fills in behind the progress view.
-                messages = collected
+                // Deliberately NOT publishing `messages` here. Assigning the
+                // growing array every page made the list rebuild itself at 50,
+                // 100, 500, 1000 rows while the import was still running, and
+                // on a real mailbox that locks the phone up. The counter is
+                // the live feedback; the mail lands once, at the end.
             } catch {
                 connectionError = error.localizedDescription
                 break
@@ -207,8 +209,12 @@ final class MailStore {
         importProgress = .saving
         await MessageArchive.save(collected)
 
+        // Everything arrives at once, after the progress screen has said it is
+        // finishing. One layout pass instead of twenty.
+        messages = collected
+        applyLocalReadState()
         nextPageToken = nil
-        importProgress = .finished
+        importProgress = .finished(count: collected.count)
         hasImported = true
         Task { await enhanceWithAI() }
     }
@@ -242,6 +248,8 @@ final class MailStore {
                 byRemoteID[remoteID] = messages.count - 1
             }
         }
+
+        applyLocalReadState()
     }
 
     /// Restores the archive so a cold launch has mail on screen before any
@@ -251,6 +259,7 @@ final class MailStore {
         let stored = await MessageArchive.load()
         guard !stored.isEmpty, messages.isEmpty else { return }
         messages = stored
+        applyLocalReadState()
     }
 
     /// Pulls the next page as the user reaches the end of the list.
@@ -393,6 +402,7 @@ final class MailStore {
         account = nil
         messages = []
         MessageArchive.clear()
+        UserDefaults.standard.removeObject(forKey: Self.readKey)
         hasImported = false
         importProgress = .idle
         connectionError = nil
@@ -443,8 +453,37 @@ final class MailStore {
 
     // MARK: - Writing
 
+    /// Messages read inside Maily.
+    ///
+    /// Without `gmail.modify` there is no way to tell Gmail about it, and a
+    /// refresh brings Gmail's UNREAD label back with it -- so every message
+    /// just read would turn bold again. Remembering it here is what makes
+    /// reading stick, and it is why `merge` prefers this over what Gmail says.
+    private static let readKey = "mail.readLocally"
+
+    private var locallyRead: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: Self.readKey) ?? []) }
+        set { UserDefaults.standard.set(Array(newValue), forKey: Self.readKey) }
+    }
+
     func markRead(_ id: Message.ID, _ isRead: Bool = true) {
+        if let remoteID = message(id)?.remoteID {
+            var read = locallyRead
+            if isRead { read.insert(remoteID) } else { read.remove(remoteID) }
+            locallyRead = read
+        }
         update(id) { $0.isRead = isRead }
+    }
+
+    /// Applies what the user has read here on top of what Gmail reported.
+    private func applyLocalReadState() {
+        let read = locallyRead
+        guard !read.isEmpty else { return }
+        for index in messages.indices {
+            if let remoteID = messages[index].remoteID, read.contains(remoteID) {
+                messages[index].isRead = true
+            }
+        }
     }
 
     func toggleFlag(_ id: Message.ID) {

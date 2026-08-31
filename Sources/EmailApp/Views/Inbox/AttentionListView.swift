@@ -6,7 +6,41 @@ import SwiftUI
 struct AttentionListView: View {
     @Environment(MailStore.self) private var mail
 
+    @State private var isBulkReplying = false
+
     private var messages: [Message] { mail.needsAttention(limit: .max) }
+
+    /// Two ways out of a long list: answer it, or accept it.
+    private var bulkActions: some View {
+        HStack(spacing: 10) {
+            Button {
+                for message in messages { mail.markRead(message.id) }
+            } label: {
+                Label("Mark all read", systemImage: "envelope.open")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(Capsule().fill(Color(uiColor: .tertiarySystemFill)))
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                isBulkReplying = true
+            } label: {
+                Label("Reply with AI", systemImage: "sparkles")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(Capsule().fill(Color.accentColor))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+    }
 
     var body: some View {
         List {
@@ -23,6 +57,12 @@ struct AttentionListView: View {
         }
         .navigationTitle("Needs your attention")
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            if !messages.isEmpty { bulkActions }
+        }
+        .sheet(isPresented: $isBulkReplying) {
+            BulkReplyView(messages: messages)
+        }
         .overlay {
             if messages.isEmpty {
                 ContentUnavailableView(
@@ -71,4 +111,5 @@ private struct AttentionRow: View {
             .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
     }
     .environment(MailStore.connected())
+    .environment(UserStore(defaults: .previews, startAt: .finished))
 }

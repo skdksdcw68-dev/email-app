@@ -46,7 +46,9 @@ struct InboxHomeView: View {
                     NavigationLink(value: message.id) { EmptyView() }.opacity(0)
                     MessageRow(message: message, threadCount: mail.threadCount(for: message))
                 }
-                .listRowSeparator(.hidden)
+                .listRowSeparator(.visible)
+                .listRowSeparatorTint(Color(uiColor: .separator).opacity(0.45))
+                .alignmentGuide(.listRowSeparatorLeading) { _ in 68 }
                 .messageSwipeActions(for: message)
                 .onAppear {
                     // The end of the list is the trigger for the next page.
@@ -142,65 +144,31 @@ struct InboxHomeView: View {
             }
 
             if !attention.isEmpty {
-                // Zero-opacity link behind it, so the banner keeps its own
-                // shape instead of getting a list disclosure chevron bolted
-                // onto the right of it.
-                ZStack {
-                    NavigationLink { AttentionListView() } label: { EmptyView() }
-                        .opacity(0)
-                    attentionBanner
+                NavigationLink {
+                    AttentionListView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(Color(uiColor: .systemRed))
+                            .frame(width: 26)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(attentionTitle)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(attentionDetail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.vertical, 3)
                 }
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 6, trailing: 16))
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 10, trailing: 16))
             }
         }
-    }
-
-    /// The one thing on this screen that is allowed to shout. It sits above a
-    /// flat, quiet list, so it earns real height and a tinted panel rather
-    /// than being another row with a red glyph on it.
-    private var attentionBanner: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(Color(uiColor: .systemRed).opacity(0.16))
-                    .frame(width: 46, height: 46)
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(Color(uiColor: .systemRed))
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(attentionTitle)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(attentionDetail)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.bold))
-                .foregroundStyle(Color(uiColor: .systemRed).opacity(0.55))
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 15)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(uiColor: .systemRed).opacity(0.11))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(Color(uiColor: .systemRed).opacity(0.22), lineWidth: 0.5)
-                }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
     }
 
     private var attentionTitle: String {

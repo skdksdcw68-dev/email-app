@@ -14,9 +14,9 @@ enum ImportProgress: Equatable {
     case counting
     /// `done` of `total` message bodies fetched.
     case importing(done: Int, total: Int)
-    /// Everything is down; writing it to disk.
+    /// Everything is down; writing it to disk and handing it to the app.
     case saving
-    case finished
+    case finished(count: Int)
 
     var isRunning: Bool {
         switch self {
@@ -39,7 +39,7 @@ enum ImportProgress: Equatable {
     var title: String {
         switch self {
         case .idle: ""
-        case .connecting: "Connecting to Gmail"
+        case .connecting: "Getting started"
         case .counting: "Looking through your mailbox"
         case .importing(let done, let total):
             // The wording tracks the actual fraction. "Almost there" appears
@@ -51,7 +51,7 @@ enum ImportProgress: Equatable {
             } else {
                 "Importing your email"
             }
-        case .saving: "Saving for offline"
+        case .saving: "Finalising"
         case .finished: "All set"
         }
     }
@@ -65,8 +65,9 @@ enum ImportProgress: Equatable {
             total > 0
                 ? "\(done) of \(total) messages"
                 : "\(done) messages so far"
-        case .saving: "So your mail is here even without a connection."
-        case .finished: "Your inbox is ready."
+        case .saving: "Adding your mail to Maily and saving it for offline."
+        case .finished(let count):
+            count == 1 ? "1 message ready." : "\(count) messages ready."
         }
     }
 }

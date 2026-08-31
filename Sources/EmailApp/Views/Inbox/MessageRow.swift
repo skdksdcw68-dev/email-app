@@ -3,21 +3,14 @@ import SwiftUI
 /// One message in a list. Shared by the inbox and anywhere else messages are
 /// listed, so the row looks identical everywhere.
 ///
-/// Three lines: who, what, and the opening of it. The reference app's list
-/// reads calmly because that is all it shows -- no chevron, no stack of
-/// chips, no card around each row. The one badge here is the loudest thing
-/// the AI decided; the rest of the tags live on the filter pills above, where
-/// they can be acted on rather than just read.
+/// Three lines: who, what, and the opening of it. Nothing else -- no chevron,
+/// no card, and deliberately no tag badge. A label on every single row is not
+/// information, it is wallpaper; the tags live on the filter pills above,
+/// where they can actually be acted on.
 struct MessageRow: View {
     let message: Message
     /// How many messages are in this conversation. 1 hides the count.
     var threadCount: Int = 1
-
-    /// At most one. Priority wins over kind: "Very Urgent" earns the space
-    /// more than "Newsletter" does.
-    private var badge: AITag? {
-        message.topPriority ?? message.sortedTags.first { AITag.kinds.contains($0) }
-    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -72,16 +65,13 @@ struct MessageRow: View {
                     }
                 }
 
-                if let badge {
-                    TagBadge(tag: badge)
-                        .padding(.top, 3)
-                }
             }
         }
         .padding(.vertical, 6)
+        // Vertically centred on the row rather than pinned to the top: as a
+        // top-aligned mark it sat level with the sender's name and read as
+        // punctuation attached to it.
         .overlay(alignment: .leading) {
-            // Unread marker, hard against the leading edge so it reads as a
-            // margin mark rather than as part of the avatar.
             if !message.isRead {
                 Circle()
                     .fill(.tint)

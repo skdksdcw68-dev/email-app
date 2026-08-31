@@ -44,9 +44,12 @@ enum AITag: String, CaseIterable, Identifiable, Codable {
 
     var systemImage: String {
         switch self {
-        case .urgent:         "exclamationmark.3"
-        case .veryImportant:  "exclamationmark.2"
-        case .important:      "exclamationmark"
+        // Real symbols, not stacked punctuation. Three exclamation marks read
+        // as shouting rather than as a category, and at badge size they were
+        // an unreadable smear.
+        case .urgent:         "bolt.fill"
+        case .veryImportant:  "flame.fill"
+        case .important:      "star.fill"
         case .needsReply:     "arrowshape.turn.up.left.fill"
         case .noReplyNeeded:  "checkmark.circle.fill"
         case .meeting:        "calendar"
