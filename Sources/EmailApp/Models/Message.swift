@@ -11,6 +11,15 @@ struct Message: Identifiable, Hashable, Codable {
     var isFlagged: Bool = false
     var mailbox: Mailbox = .inbox
 
+    /// Gmail's own identifier. `id` is a fresh UUID each fetch, so this is the
+    /// only key stable enough to cache a classification against.
+    var remoteID: String? = nil
+
+    /// The sender's real HTML, kept for display. `body` stays the stripped
+    /// text -- that is what classification, search and the row preview use, and
+    /// none of them want markup.
+    var htmlBody: String? = nil
+
     /// Shown as a paperclip on the row, the way every mail client marks it.
     var hasAttachment: Bool = false
 

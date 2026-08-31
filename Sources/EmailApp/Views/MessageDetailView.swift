@@ -13,6 +13,9 @@ struct MessageDetailView: View {
     @State private var isDrafting = false
     @State private var draftedBody: String?
     @State private var draftError: String?
+    /// Latched synchronously on touch-down; see beginHold.
+    @State private var isHolding = false
+    @State private var htmlHeight: CGFloat = 40
 
     private var message: Message? { store.message(messageID) }
 
@@ -61,102 +64,128 @@ struct MessageDetailView: View {
     /// than this app requests -- so these move the message here, not in Gmail.
     private var actionBar: some View {
         VStack(spacing: 8) {
-            if let note = statusNote {
-                Text(note)
-                    .font(.caption)
-                    .foregroundStyle(dictation.isRecording ? Color.red : .secondary)
-                    .frame(maxWidth: .infinity)
-            }
+            statusRow
 
-            HStack(spacing: 6) {
-                actionButton("archivebox", "Archive") {
-                    if let message { store.move(message.id, to: .archive) }
-                    dismiss()
+            HStack(spacing: dictation.isRecording ? 0 : 6) {
+                // Collapsed rather than removed while recording. Taking these
+                // out of the hierarchy mid-press would change the sibling
+                // layout enough to lose the drag gesture, and the release
+                // would never fire.
+                HStack(spacing: 6) {
+                    actionButton("archivebox", "Archive") {
+                        if let message { store.move(message.id, to: .archive) }
+                        dismiss()
+                    }
+                    actionButton("ellipsis", "More") {
+                        draftedBody = nil
+                        isReplying = true
+                    }
+                    actionButton("arrowshape.turn.up.forward", "Forward") {
+                        draftedBody = nil
+                        isReplying = true
+                    }
                 }
-
-                actionButton("trash", "Delete") {
-                    if let message { store.delete(message.id) }
-                    dismiss()
-                }
-
-                actionButton("arrowshape.turn.up.left", "Reply") {
-                    draftedBody = nil
-                    isReplying = true
-                }
+                .frame(width: dictation.isRecording ? 0 : nil)
+                .opacity(dictation.isRecording ? 0 : 1)
+                .clipped()
 
                 holdToReply
             }
+            .animation(.snappy(duration: 0.22), value: dictation.isRecording)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
     }
 
-    private var statusNote: String? {
-        if dictation.isRecording { return "Recording · release to draft" }
-        if isDrafting { return "Writing your reply…" }
-        if let draftError { return draftError }
-        if let error = dictation.error { return error }
-        return nil
+    /// Label on the left, secondary note on the right -- not centred.
+    @ViewBuilder
+    private var statusRow: some View {
+        if isDrafting {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text("Updating draft…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Text("Applying your changes")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        } else if let problem = draftError ?? dictation.error {
+            HStack {
+                Text(problem)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                Spacer(minLength: 0)
+            }
+        }
     }
 
-    /// Press and hold to speak, release to have it written. A tap alone opens
-    /// the normal reply sheet, so the button is never a dead end when
-    /// dictation is unavailable or permission was declined.
+    /// Press and hold to speak, release to have it written.
+    ///
+    /// While held it takes the whole bar and turns red; while drafting it
+    /// stays full width and reports progress. One view throughout, so the
+    /// gesture is never interrupted by an identity change.
     private var holdToReply: some View {
         HStack(spacing: 8) {
-            Image(systemName: dictation.isRecording ? "waveform" : "mic.fill")
+            if isDrafting {
+                ProgressView().tint(.white)
+            } else {
+                Image(systemName: dictation.isRecording ? "waveform" : "mic.fill")
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            Text(buttonLabel)
                 .font(.subheadline.weight(.semibold))
-            Text(dictation.isRecording ? "Listening" : "Hold to Reply")
-                .font(.subheadline.weight(.semibold))
+
+            if dictation.isRecording {
+                Text("· release to send")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+            }
         }
         .foregroundStyle(.white)
-        .frame(maxWidth: .infinity, minHeight: 44)
+        .frame(maxWidth: .infinity)
+        .frame(height: dictation.isRecording ? 54 : 46)
         .background(
             Capsule().fill(dictation.isRecording ? Color.red : Color.accentColor)
         )
-        .opacity(isDrafting ? 0.6 : 1)
-        .scaleEffect(dictation.isRecording ? 1.02 : 1)
-        .animation(.snappy(duration: 0.18), value: dictation.isRecording)
+        .shadow(
+            color: (dictation.isRecording ? Color.red : Color.accentColor).opacity(dictation.isRecording ? 0.35 : 0),
+            radius: 12
+        )
         .contentShape(Capsule())
-        // minimumDistance 0 makes this fire on touch-down rather than after a
-        // drag threshold, which is what "hold" has to mean.
+        // minimumDistance 0 fires on touch-down instead of after a drag
+        // threshold, which is what "hold" has to mean.
         .gesture(
             DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    guard !dictation.isRecording, !isDrafting else { return }
-                    Task { await dictation.start() }
-                }
-                .onEnded { _ in
-                    guard dictation.isRecording else { return }
-                    dictation.stop()
-                    Task { await writeReply() }
-                }
+                .onChanged { _ in beginHold() }
+                .onEnded { _ in endHold() }
         )
         .disabled(isDrafting)
         .accessibilityLabel("Hold to dictate a reply")
     }
 
-    private func writeReply() async {
-        let spoken = dictation.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let message, !spoken.isEmpty else { return }
+    private var buttonLabel: String {
+        if isDrafting { return "Updating Draft…" }
+        return dictation.isRecording ? "Recording" : "Hold to Reply"
+    }
 
-        isDrafting = true
-        draftError = nil
-        defer { isDrafting = false }
+    /// onChanged fires continuously for the whole press, so this needs a
+    /// synchronous latch -- `isRecording` does not flip until the audio engine
+    /// is up, several events later.
+    private func beginHold() {
+        guard !isHolding, !isDrafting else { return }
+        isHolding = true
+        Task { await dictation.start() }
+    }
 
-        do {
-            let draft = try await AIService.draft(
-                replyingTo: message,
-                instruction: spoken,
-                tone: user.tonePreference
-            )
-            draftedBody = draft.body
-            dictation.reset()
-            isReplying = true
-        } catch {
-            draftError = error.localizedDescription
-        }
+    private func endHold() {
+        guard isHolding else { return }
+        isHolding = false
+        dictation.stop()
+        Task { await writeReply() }
     }
 
     private func actionButton(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
@@ -216,10 +245,16 @@ struct MessageDetailView: View {
 
                 Divider()
 
-                Text(message.body)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let html = message.htmlBody, !html.isEmpty {
+                    HTMLMessageView(html: html, height: $htmlHeight)
+                        .frame(height: htmlHeight)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Text(message.body)
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .padding()
         }

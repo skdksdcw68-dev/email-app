@@ -175,7 +175,9 @@ enum GmailService {
             isFlagged: labels.contains("STARRED"),
             mailbox: .inbox
         )
+        message.remoteID = json["id"] as? String
         message.hasAttachment = hasAttachment(in: payload)
+        message.htmlBody = firstPart(in: payload, mimeType: "text/html")
 
         message.tags = MessageClassifier.tags(for: message, headers: headers, labels: labels)
         return message
@@ -231,7 +233,7 @@ enum GmailService {
         return nil
     }
 
-    private static func firstPart(in payload: [String: Any], mimeType: String) -> String? {
+    static func firstPart(in payload: [String: Any], mimeType: String) -> String? {
         if payload["mimeType"] as? String == mimeType,
            let body = payload["body"] as? [String: Any],
            let data = body["data"] as? String {

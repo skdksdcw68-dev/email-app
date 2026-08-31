@@ -81,6 +81,17 @@ final class MailStore {
         isEnhancing = true
         defer { isEnhancing = false }
 
+        // Anything already classified comes back from the cache for free.
+        // Without this a pull-to-refresh discards every tag and pays to derive
+        // them all over again.
+        for message in messages {
+            guard message.aiSummary == nil,
+                  let remoteID = message.remoteID,
+                  let cached = ClassificationCache.entry(for: remoteID)
+            else { continue }
+            apply(AIService.Classification(cached), to: message.id)
+        }
+
         let targets = messages
             .filter { $0.aiSummary == nil && !$0.tags.contains(.noReplyNeeded) }
             .prefix(limit)
@@ -93,6 +104,9 @@ final class MailStore {
             for await (id, classification) in group {
                 guard let classification else { continue }
                 apply(classification, to: id)
+                if let remoteID = message(id)?.remoteID {
+                    ClassificationCache.store(classification, for: remoteID)
+                }
             }
         }
     }

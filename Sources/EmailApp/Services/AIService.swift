@@ -16,6 +16,12 @@ enum AIService {
         let needsReply: Bool
         let summary: String
 
+        init(priority: String, needsReply: Bool, summary: String) {
+            self.priority = priority
+            self.needsReply = needsReply
+            self.summary = summary
+        }
+
         enum CodingKeys: String, CodingKey {
             case priority
             case needsReply = "needs_reply"
