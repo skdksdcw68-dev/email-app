@@ -113,37 +113,86 @@ struct InboxHomeView: View {
     private var summaryCard: some View {
         Section {
             if let error = mail.connectionError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(.red)
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.octagon.fill")
+                        .font(.footnote)
+                    Text(error)
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(Color(uiColor: .systemRed))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(uiColor: .systemRed).opacity(0.11))
+                }
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 0, trailing: 16))
             }
 
             if !attention.isEmpty {
-                NavigationLink {
-                    AttentionListView()
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.title3)
-                            .foregroundStyle(Color(uiColor: .systemRed))
-                            .frame(width: 26)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(attentionTitle)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                            Text(attentionDetail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    .padding(.vertical, 3)
+                // Zero-opacity link behind it, so the banner keeps its own
+                // shape instead of getting a list disclosure chevron bolted
+                // onto the right of it.
+                ZStack {
+                    NavigationLink { AttentionListView() } label: { EmptyView() }
+                        .opacity(0)
+                    attentionBanner
                 }
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 10, trailing: 16))
+                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 6, trailing: 16))
             }
         }
+    }
+
+    /// The one thing on this screen that is allowed to shout. It sits above a
+    /// flat, quiet list, so it earns real height and a tinted panel rather
+    /// than being another row with a red glyph on it.
+    private var attentionBanner: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color(uiColor: .systemRed).opacity(0.16))
+                    .frame(width: 46, height: 46)
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(Color(uiColor: .systemRed))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(attentionTitle)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(attentionDetail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(Color(uiColor: .systemRed).opacity(0.55))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(uiColor: .systemRed).opacity(0.11))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color(uiColor: .systemRed).opacity(0.22), lineWidth: 0.5)
+                }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
     }
 
     private var attentionTitle: String {

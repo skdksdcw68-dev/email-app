@@ -41,8 +41,6 @@ private struct Pill: View {
             HStack(spacing: 6) {
                 Image(systemName: tag.systemImage)
                     .font(.footnote.weight(.bold))
-                    // Unselected the colour lives on the glyph, so the label
-                    // stays readable; selected, the pill is the colour.
                     .foregroundStyle(isSelected ? tag.onColor : tag.color)
 
                 Text(tag.title)
@@ -50,15 +48,39 @@ private struct Pill: View {
                     .foregroundStyle(isSelected ? tag.onColor : Color.primary)
                     .fixedSize()
 
+                // The count sits in its own well, the way a badge does in
+                // Mail's sidebar. Loose next to the label it read as part of
+                // the title.
                 Text("\(count)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(isSelected ? tag.onColor.opacity(0.7) : Color.secondary)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(isSelected ? tag.color : tag.color)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background {
+                        Capsule().fill(isSelected ? tag.onColor : tag.color.opacity(0.16))
+                    }
             }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 8)
+            .padding(.leading, 12)
+            .padding(.trailing, 8)
+            .padding(.vertical, 7)
             .background {
-                Capsule().fill(isSelected ? tag.color : Color(uiColor: .tertiarySystemFill))
+                // Tinted with the tag's own colour rather than a neutral
+                // grey. The grey fill was the thing making these read as
+                // generic controls instead of as this app's tags -- Apple
+                // tints the whole chip and lets the label stay legible.
+                Capsule()
+                    .fill(isSelected ? tag.color : tag.color.opacity(0.13))
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(tag.color.opacity(isSelected ? 0 : 0.22), lineWidth: 0.5)
+                    }
             }
+            // Just enough lift to read as a control sitting on the page.
+            .shadow(
+                color: tag.color.opacity(isSelected ? 0.28 : 0),
+                radius: 6,
+                y: 2
+            )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(tag.title), \(count) messages")
