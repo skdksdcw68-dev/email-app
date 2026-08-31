@@ -99,12 +99,14 @@ async function classify(body: Record<string, string>) {
 async function draft(body: Record<string, string>) {
   const tone = body.tone ?? "match how I already write";
 
-  // Emoji only where the chosen tone invites it. A formal reply with a
-  // smiley in it reads worse than no emoji at all.
-  const playful = /casual|warm|friendly|match how/i.test(tone);
-  const emojiRule = playful
-    ? "Use an emoji where it genuinely adds warmth -- usually one, never more than two, and never in the opening words."
-    : "No emoji.";
+  // Emoji everywhere except the one tone that is actively hurt by them.
+  // Gating on "casual or warm" was tried and reverted: the tone question is
+  // optional and the direct/thorough answers are common, so most people would
+  // have seen no emoji at all and assumed the setting did nothing.
+  const formal = /formal|professional/i.test(tone);
+  const emojiRule = formal
+    ? "No emoji."
+    : "Use an emoji where it genuinely adds warmth -- usually one, never more than two, and never in the opening words.";
 
   const system = `You write email replies on behalf of the user.
 
