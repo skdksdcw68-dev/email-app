@@ -80,6 +80,16 @@ final class UserStore {
 
     /// Changes the tone answer from Settings, without walking onboarding again.
     /// Writes the same store the questions do, so the two can never disagree.
+    /// Renames the account. The only part of the profile the user owns; the
+    /// email comes from whoever they signed in with and cannot be edited here.
+    func setDisplayName(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var updated = account, !trimmed.isEmpty else { return }
+        updated.displayName = trimmed
+        account = updated
+        persistAccount()
+    }
+
     func setTone(_ optionID: String) {
         answers[OnboardingQuestion.tone.id] = [optionID]
         persistAnswers()
