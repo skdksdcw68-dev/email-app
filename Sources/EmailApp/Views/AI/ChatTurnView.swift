@@ -38,6 +38,15 @@ struct ChatTurnView: View {
                         .foregroundStyle(.primary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        // Selection alone is fiddly on a long answer; this
+                        // takes the whole thing in one gesture.
+                        .contextMenu {
+                            Button {
+                                UIPasteboard.general.string = turn.text
+                            } label: {
+                                Label("Copy answer", systemImage: "doc.on.doc")
+                            }
+                        }
 
                     if !turn.sources.isEmpty {
                         SourceList(sources: turn.sources)

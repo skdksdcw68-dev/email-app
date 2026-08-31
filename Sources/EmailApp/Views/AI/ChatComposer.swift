@@ -3,13 +3,14 @@ import UIKit
 
 /// The chat input.
 ///
-/// At rest it is a pill. Focused, it grows into a card with the controls along
-/// the bottom, which is the shape every good chat input on iOS has -- it gives
-/// a long question room to be read back before it is sent, and it makes the
-/// transition into typing feel like something happened.
+/// One line at rest, growing as you type up to five, then scrolling inside
+/// itself. An earlier version forced a tall card the moment the field was
+/// focused, which meant a two word question sat in a mostly empty box and the
+/// list jumped every time the keyboard appeared. Growing with the text is both
+/// calmer and what every good chat input actually does.
 ///
 /// The `+` opens a menu above the field rather than a sheet, so the keyboard
-/// stays up and the thing you were typing stays visible.
+/// stays up and what you were typing stays visible.
 struct ChatComposer: View {
     @Binding var text: String
     @FocusState.Binding var isFocused: Bool
@@ -40,96 +41,80 @@ struct ChatComposer: View {
         }
     }
 
-    private var isExpanded: Bool { isFocused || !text.isEmpty }
-
-    private var canSend: Bool {
-        !isWorking && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var hasText: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+
+    private var canSend: Bool { !isWorking && hasText }
 
     var body: some View {
         VStack(spacing: 0) {
             if showsActions { actionMenu }
 
-            composer
-                .padding(.horizontal, 14)
-                .padding(.top, showsActions ? 4 : 8)
-                .padding(.bottom, 8)
+            HStack(alignment: .bottom, spacing: 8) {
+                plusButton
+
+                field
+
+                if isFocused { dismissButton }
+                sendButton
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
-        .background(.bar)
-        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: isExpanded)
+        // Frosted, so the conversation blurs underneath rather than being cut
+        // off by an opaque bar.
+        .background(.regularMaterial)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showsActions)
+        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: isFocused)
+        // The click on send, which is most of what makes a control feel real.
+        .sensoryFeedback(.impact(weight: .medium), trigger: isWorking)
     }
 
     // MARK: - The field
 
-    private var composer: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            TextField("Ask Maily", text: $text, axis: .vertical)
-                .font(.subheadline)
-                // At rest one line; focused it opens up so a long question is
-                // readable before it is sent.
-                .lineLimit(isExpanded ? 6...12 : 1...1)
-                .frame(minHeight: isExpanded ? 96 : 0, alignment: .topLeading)
-                .focused($isFocused)
-                .padding(.horizontal, 16)
-                .padding(.top, isExpanded ? 14 : 11)
-                .padding(.bottom, isExpanded ? 6 : 11)
-
-            if isExpanded {
-                HStack(spacing: 0) {
-                    plusButton
-                    Spacer(minLength: 0)
-                    dismissButton
-                    sendButton
-                }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 8)
-                .transition(.opacity)
+    private var field: some View {
+        TextField("Ask Maily", text: $text, axis: .vertical)
+            .font(.subheadline)
+            // Grows to five lines, then scrolls inside itself.
+            .lineLimit(1...5)
+            .focused($isFocused)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(
+                                hasText ? Color.accentColor.opacity(0.35) : Color(uiColor: .separator).opacity(0.4),
+                                lineWidth: 0.5
+                            )
+                    }
             }
-        }
-        .overlay(alignment: .trailing) {
-            // Collapsed, the controls sit inside the pill instead of below it.
-            if !isExpanded {
-                HStack(spacing: 4) {
-                    plusButton
-                    sendButton
-                }
-                .padding(.trailing, 6)
-            }
-        }
-        .background {
-            RoundedRectangle(cornerRadius: isExpanded ? 24 : 22, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemBackground))
-                .overlay {
-                    RoundedRectangle(cornerRadius: isExpanded ? 24 : 22, style: .continuous)
-                        .strokeBorder(Color(uiColor: .separator).opacity(0.45), lineWidth: 0.5)
-                }
-                .shadow(color: .black.opacity(isExpanded ? 0.06 : 0), radius: 10, y: 3)
-        }
+            // A soft glow only while there is something to send, so the field
+            // reads as live rather than as a permanently lit box.
+            .shadow(color: hasText ? Color.accentColor.opacity(0.18) : .clear, radius: 8, y: 2)
+            .animation(.easeInOut(duration: 0.2), value: hasText)
     }
 
     private var plusButton: some View {
         Button {
-            if isFocused && !showsActions {
-                // Keep the keyboard: the menu sits above it.
-                showsActions = true
-            } else {
-                showsActions.toggle()
-            }
+            showsActions.toggle()
         } label: {
             Image(systemName: "plus")
                 .font(.body.weight(.medium))
                 .foregroundStyle(.secondary)
                 .rotationEffect(.degrees(showsActions ? 45 : 0))
-                .frame(width: 34, height: 34)
-                .contentShape(Circle())
+                .frame(width: 32, height: 36)
+                .contentShape(Rectangle())
         }
         .buttonStyle(BouncyButtonStyle())
         .accessibilityLabel("More")
     }
 
-    /// Puts the keyboard away. There was no way to do it at all while talking
-    /// to the AI, which left the chat half-covered with no way back.
+    /// Puts the keyboard away. Only present while it is up, so it does not sit
+    /// there as a dead control.
     private var dismissButton: some View {
         Button {
             isFocused = false
@@ -138,10 +123,11 @@ struct ChatComposer: View {
             Image(systemName: "keyboard.chevron.compact.down")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-                .frame(width: 34, height: 34)
-                .contentShape(Circle())
+                .frame(width: 30, height: 36)
+                .contentShape(Rectangle())
         }
         .buttonStyle(BouncyButtonStyle())
+        .transition(.scale.combined(with: .opacity))
         .accessibilityLabel("Hide keyboard")
     }
 
@@ -150,14 +136,17 @@ struct ChatComposer: View {
             Image(systemName: "arrow.up")
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(canSend ? Color.white : Color.secondary)
-                .frame(width: 30, height: 30)
+                .frame(width: 32, height: 32)
                 .background {
                     Circle().fill(canSend ? Color.accentColor : Color(uiColor: .tertiarySystemFill))
                 }
+                // Comes alive the moment there is something to send.
+                .scaleEffect(canSend ? 1 : 0.88)
+                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: canSend)
         }
         .buttonStyle(BouncyButtonStyle())
         .disabled(!canSend)
-        .padding(.trailing, 4)
+        .padding(.bottom, 2)
         .accessibilityLabel("Send")
     }
 
@@ -190,7 +179,6 @@ struct ChatComposer: View {
                 }
             }
         }
-        .background(Color(uiColor: .systemBackground))
         .transition(.asymmetric(
             insertion: .move(edge: .bottom).combined(with: .opacity),
             removal: .opacity
