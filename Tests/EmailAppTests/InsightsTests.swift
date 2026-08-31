@@ -133,16 +133,25 @@ final class InsightsTests: XCTestCase {
     }
 
     func testPeopleNeverIncludeTheUser() {
+        // Sent mail is imported now, so a message the user sent produces a
+        // person for the recipient -- but never for the user themselves.
         let store = connected([
             Message(sender: .me, recipients: [alice], subject: "Sent", body: "-",
                     date: .now, isRead: true, mailbox: .sent),
         ])
-        XCTAssertTrue(store.people.isEmpty)
+        XCTAssertFalse(store.people.contains { $0.contact.address == "abel@example.com" })
+        XCTAssertTrue(store.people.contains { $0.contact.address == alice.address })
     }
 
-    func testPriorityContactIsFlagged() {
+    // Importance used to be derived from whether a contact had any urgent mail.
+    // It is now something the user sets, so what is left to check here is the
+    // count of what is genuinely unanswered. See PeopleTests for importance.
+    func testUnansweredCountsOnlyInboxMailNeedingAReply() {
         let people = makeStore().people
-        XCTAssertEqual(people.first { $0.contact.address == bob.address }?.isPriority, true)
+        XCTAssertEqual(people.first { $0.contact.address == bob.address }?.awaitingReply, 1)
+        // Alice has two needing a reply in the inbox; her trashed urgent one
+        // must not count.
+        XCTAssertEqual(people.first { $0.contact.address == alice.address }?.awaitingReply, 2)
     }
 
     // MARK: - AI questions
