@@ -188,6 +188,31 @@ struct MessageDetailView: View {
         Task { await writeReply() }
     }
 
+    /// The spoken words are an instruction, not the reply text -- the model
+    /// turns "tell him thursday works" into an actual email, in the tone the
+    /// user picked during onboarding.
+    private func writeReply() async {
+        let spoken = dictation.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let message, !spoken.isEmpty else { return }
+
+        isDrafting = true
+        draftError = nil
+        defer { isDrafting = false }
+
+        do {
+            let draft = try await AIService.draft(
+                replyingTo: message,
+                instruction: spoken,
+                tone: user.tonePreference
+            )
+            draftedBody = draft.body
+            dictation.reset()
+            isReplying = true
+        } catch {
+            draftError = error.localizedDescription
+        }
+    }
+
     private func actionButton(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
