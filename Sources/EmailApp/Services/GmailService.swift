@@ -34,9 +34,28 @@ enum GmailService {
 
     // MARK: - Fetching
 
+    /// One page of inbox mail, newest first, plus the cursor for the next one.
+    ///
+    /// Gmail paginates and will not hand over a whole mailbox at once. Without
+    /// carrying `nextPageToken` forward the app could only ever show the newest
+    /// `limit` messages, which is exactly what it did.
+    struct Page {
+        let messages: [Message]
+        /// `nil` once the mailbox is exhausted.
+        let nextPageToken: String?
+    }
+
     /// Recent inbox mail, newest first.
-    static func fetchInbox(accessToken: String, limit: Int = 25) async throws -> [Message] {
-        let ids = try await messageIDs(accessToken: accessToken, limit: limit)
+    static func fetchInbox(
+        accessToken: String,
+        limit: Int = 25,
+        pageToken: String? = nil
+    ) async throws -> Page {
+        let (ids, next) = try await messageIDs(
+            accessToken: accessToken,
+            limit: limit,
+            pageToken: pageToken
+        )
 
         // Fetch details concurrently but keep the fan-out modest; Gmail's
         // per-user rate limit is generous, not infinite.
@@ -54,19 +73,26 @@ enum GmailService {
 
         // Restore the order the list endpoint gave us -- it is already
         // newest-first, and the task group finishes in arbitrary order.
-        return ids.compactMap { byID[$0] }
+        return Page(messages: ids.compactMap { byID[$0] }, nextPageToken: next)
     }
 
-    private static func messageIDs(accessToken: String, limit: Int) async throws -> [String] {
+    private static func messageIDs(
+        accessToken: String,
+        limit: Int,
+        pageToken: String?
+    ) async throws -> ([String], String?) {
         var components = URLComponents(string: "\(base)/messages")!
-        components.queryItems = [
+        var query: [URLQueryItem] = [
             .init(name: "maxResults", value: String(limit)),
             .init(name: "labelIds", value: "INBOX"),
         ]
+        if let pageToken { query.append(.init(name: "pageToken", value: pageToken)) }
+        components.queryItems = query
 
         let json = try await get(components.url!, accessToken: accessToken)
-        guard let messages = json["messages"] as? [[String: Any]] else { return [] }
-        return messages.compactMap { $0["id"] as? String }
+        let next = json["nextPageToken"] as? String
+        guard let messages = json["messages"] as? [[String: Any]] else { return ([], next) }
+        return (messages.compactMap { $0["id"] as? String }, next)
     }
 
     private static func fetchMessage(id: String, accessToken: String) async throws -> Message {
@@ -176,6 +202,7 @@ enum GmailService {
             mailbox: .inbox
         )
         message.remoteID = json["id"] as? String
+        message.threadID = json["threadId"] as? String
         message.hasAttachment = hasAttachment(in: payload)
         message.htmlBody = firstPart(in: payload, mimeType: "text/html")
 

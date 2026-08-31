@@ -34,6 +34,7 @@ struct ComposeView: View {
     @State private var messageBody = ""
     @State private var showsCcBcc = false
     @State private var isConfirmingCancel = false
+    @State private var isWriting = false
 
     private var canSend: Bool {
         recipient.contains("@") && !recipient.hasSuffix("@")
@@ -58,11 +59,34 @@ struct ComposeView: View {
             .navigationTitle(replyingTo == nil ? "New Message" : "Reply")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear(perform: prefill)
+            .sheet(isPresented: $isWriting) {
+                AIWriterSheet(
+                    replyingTo: replyingTo,
+                    existingText: messageBody.trimmingCharacters(in: .whitespacesAndNewlines),
+                    tone: user.tonePreference
+                ) { written in
+                    messageBody = written
+                    markJustDrafted()
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         if hasContent { isConfirmingCancel = true } else { dismiss() }
                     }
+                    // A popover anchored to Cancel, not an action sheet from
+                    // the bottom of the screen. presentationCompactAdaptation
+                    // is what stops iPhone turning a popover into a sheet.
+                    .popover(isPresented: $isConfirmingCancel, arrowEdge: .top) {
+                        draftOptions
+                            .presentationCompactAdaptation(.popover)
+                    }
+                }
+
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { dismissKeyboard() }
+                        .font(.subheadline.weight(.semibold))
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -80,15 +104,68 @@ struct ComposeView: View {
                     .disabled(!canSend)
                 }
             }
-            .confirmationDialog("Keep this draft?", isPresented: $isConfirmingCancel, titleVisibility: .visible) {
-                Button("Save draft") {
-                    store.saveDraft(subject: subject, to: recipient, body: messageBody)
-                    dismiss()
-                }
-                Button("Discard draft", role: .destructive) { dismiss() }
-                Button("Continue editing", role: .cancel) {}
-            }
         }
+    }
+
+    // MARK: - Draft popover
+
+    private var draftOptions: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Keep this draft?")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 10)
+
+            Divider()
+
+            draftOption("Save draft", "tray.and.arrow.down") {
+                store.saveDraft(subject: subject, to: recipient, body: messageBody)
+                dismiss()
+            }
+            Divider()
+            draftOption("Discard draft", "trash", isDestructive: true) { dismiss() }
+            Divider()
+            draftOption("Continue editing", "pencil") { isConfirmingCancel = false }
+        }
+        .frame(width: 236)
+    }
+
+    private func draftOption(
+        _ title: String,
+        _ symbol: String,
+        isDestructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.footnote)
+                    .frame(width: 18)
+                Text(title).font(.subheadline)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(isDestructive ? Color.red : Color.primary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func markJustDrafted() {
+        justDrafted = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.4))
+            justDrafted = false
+        }
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+        )
     }
 
     // MARK: - Header rows
@@ -270,28 +347,25 @@ struct ComposeView: View {
         .clipped()
     }
 
-    /// Rewrites what is already in the box, as opposed to dictation, which
-    /// writes from speech. Takes the user's own words and tightens them.
+    /// Opens the writer: pick a style, add an instruction, read what it wrote,
+    /// and decide. Distinct from dictation, which goes straight into the body.
     private var aiRefineButton: some View {
         Button {
-            Task { await refineDraft() }
+            dismissKeyboard()
+            isWriting = true
         } label: {
             Image(systemName: "wand.and.stars")
                 .font(.system(size: 19, weight: .medium))
-                .foregroundStyle(canRefine ? Color.accentColor : Color.secondary)
+                .foregroundStyle(isDrafting ? Color.secondary : Color.accentColor)
                 .frame(width: 44, height: 44)
                 .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
         }
         .buttonStyle(.plain)
-        .disabled(!canRefine)
+        .disabled(isDrafting)
         .frame(width: isExpanded ? 0 : 44)
         .opacity(isExpanded ? 0 : 1)
         .clipped()
-        .accessibilityLabel("Refine with AI")
-    }
-
-    private var canRefine: Bool {
-        !isDrafting && !messageBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        .accessibilityLabel("Write with AI")
     }
 
     /// Full width only while it is doing something. At rest it is a compact
@@ -394,40 +468,7 @@ struct ComposeView: View {
             )
             messageBody = draft.body
             dictation.reset()
-
-            justDrafted = true
-            Task {
-                try? await Task.sleep(for: .seconds(1.4))
-                justDrafted = false
-            }
-        } catch {
-            draftError = error.localizedDescription
-        }
-    }
-
-    /// Same landing animation as a dictated draft: the text changes under the
-    /// user, and it should be visible that it did.
-    private func refineDraft() async {
-        let current = messageBody.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !current.isEmpty, !isDrafting else { return }
-
-        isDrafting = true
-        draftError = nil
-        defer { isDrafting = false }
-
-        do {
-            let refined = try await AIService.refine(
-                text: current,
-                replyingTo: replyingTo,
-                tone: user.tonePreference
-            )
-            messageBody = refined.body
-
-            justDrafted = true
-            Task {
-                try? await Task.sleep(for: .seconds(1.4))
-                justDrafted = false
-            }
+            markJustDrafted()
         } catch {
             draftError = error.localizedDescription
         }

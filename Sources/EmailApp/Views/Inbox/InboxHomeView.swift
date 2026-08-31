@@ -28,18 +28,41 @@ struct InboxHomeView: View {
                 summaryCard
             }
 
-            Section {
-                ForEach(messages) { message in
-                    NavigationLink(value: message.id) {
-                        MessageRow(message: message)
-                    }
-                    .messageSwipeActions(for: message)
+            if mail.isLoadingFirstPage {
+                // Scrollable placeholder rows, so connecting a mailbox shows
+                // the shape of a list instead of a blank screen.
+                ForEach(0..<8, id: \.self) { _ in
+                    MessageRowSkeleton()
+                        .listRowSeparator(.hidden)
                 }
-            } header: {
-                Text(tag?.title ?? (isBrowsing ? "Inbox" : mailbox.title))
+            }
+
+            ForEach(messages) { message in
+                // A ZStack with a zero-opacity link behind the row, rather
+                // than a NavigationLink label: the label form draws a
+                // disclosure chevron on every row, which the reference list
+                // does not have and which cannot be turned off.
+                ZStack {
+                    NavigationLink(value: message.id) { EmptyView() }.opacity(0)
+                    MessageRow(message: message, threadCount: mail.threadCount(for: message))
+                }
+                .listRowSeparator(.hidden)
+                .messageSwipeActions(for: message)
+                .onAppear {
+                    // The end of the list is the trigger for the next page.
+                    if message.id == messages.last?.id {
+                        Task { await mail.loadMore() }
+                    }
+                }
+            }
+
+            if mail.hasMoreMail && !messages.isEmpty {
+                MessageRowSkeleton()
+                    .listRowSeparator(.hidden)
+                    .onAppear { Task { await mail.loadMore() } }
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .refreshable { await mail.refresh() }
         .navigationTitle(isBrowsing ? "Maily" : mailbox.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -54,7 +77,7 @@ struct InboxHomeView: View {
         }
         .overlay(alignment: .bottomTrailing) { composeButton }
         .overlay {
-            if messages.isEmpty { emptyState }
+            if messages.isEmpty && !mail.isLoadingFirstPage { emptyState }
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -117,6 +140,8 @@ struct InboxHomeView: View {
                     }
                     .padding(.vertical, 3)
                 }
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 10, trailing: 16))
             }
         }
     }

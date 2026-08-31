@@ -23,10 +23,10 @@ struct TagFilterBar: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
         }
         .scrollIndicators(.hidden)
-        .background(Color(uiColor: .systemGroupedBackground))
+        .background(Color(uiColor: .systemBackground))
     }
 }
 
@@ -38,7 +38,7 @@ private struct Pill: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
                 Image(systemName: tag.systemImage)
                     .font(.footnote.weight(.bold))
                     // Unselected the colour lives on the glyph, so the label
@@ -46,18 +46,18 @@ private struct Pill: View {
                     .foregroundStyle(isSelected ? tag.onColor : tag.color)
 
                 Text(tag.title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(isSelected ? tag.onColor : Color.primary)
                     .fixedSize()
 
                 Text("\(count)")
-                    .font(.footnote.weight(.semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(isSelected ? tag.onColor.opacity(0.7) : Color.secondary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 11)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 8)
             .background {
-                Capsule().fill(isSelected ? tag.color : Color(uiColor: .secondarySystemFill))
+                Capsule().fill(isSelected ? tag.color : Color(uiColor: .tertiarySystemFill))
             }
         }
         .buttonStyle(.plain)

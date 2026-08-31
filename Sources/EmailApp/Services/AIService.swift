@@ -77,19 +77,25 @@ enum AIService {
         )
     }
 
-    /// `instruction` is what the user said out loud. The model turns it into a
-    /// reply; it does not invent facts beyond it.
-    static func draft(replyingTo message: Message, instruction: String, tone: String) async throws -> Draft {
-        try await call(
-            [
-                "action": "draft",
-                "from": "\(message.sender.name) <\(message.sender.address)>",
-                "subject": message.subject,
-                "body": message.body,
-                "instruction": instruction,
-                "tone": tone,
-            ]
-        )
+    /// `instruction` is what the user asked for -- spoken aloud, or picked
+    /// from the writer's styles. The model turns it into a reply; it does not
+    /// invent facts beyond it.
+    ///
+    /// `message` is optional so the writer also works on a new email, where
+    /// there is no thread to answer and the instruction is all the context
+    /// there is.
+    static func draft(replyingTo message: Message?, instruction: String, tone: String) async throws -> Draft {
+        var payload = [
+            "action": "draft",
+            "instruction": instruction,
+            "tone": tone,
+        ]
+        if let message {
+            payload["from"] = "\(message.sender.name) <\(message.sender.address)>"
+            payload["subject"] = message.subject
+            payload["body"] = message.body
+        }
+        return try await call(payload)
     }
 
     /// Tightens what the user has already written, rather than writing from

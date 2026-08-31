@@ -15,6 +15,11 @@ struct Message: Identifiable, Hashable, Codable {
     /// only key stable enough to cache a classification against.
     var remoteID: String? = nil
 
+    /// Gmail's conversation id. Every message in a back-and-forth shares one,
+    /// which is what lets the list collapse four "Security alert" rows into a
+    /// single row saying 4.
+    var threadID: String? = nil
+
     /// The sender's real HTML, kept for display. `body` stays the stripped
     /// text -- that is what classification, search and the row preview use, and
     /// none of them want markup.
@@ -63,5 +68,20 @@ struct Message: Identifiable, Hashable, Codable {
 
     var fullDate: String {
         date.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+extension Array where Element == Message {
+    /// One row per conversation, keeping the newest message of each.
+    ///
+    /// Four "Security alert" mails from Google are one conversation to Gmail
+    /// and should be one row here. Assumes the array is already sorted
+    /// newest-first, which is how every list in the app orders it.
+    func collapsingThreads() -> [Message] {
+        var seen = Set<String>()
+        return filter { message in
+            guard let thread = message.threadID else { return true }
+            return seen.insert(thread).inserted
+        }
     }
 }

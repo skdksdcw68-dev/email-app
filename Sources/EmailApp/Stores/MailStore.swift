@@ -14,7 +14,21 @@ final class MailStore {
     /// or an expired grant must be visible, not a silently empty inbox.
     private(set) var connectionError: String?
 
+    /// Gmail's cursor for the next page. `nil` means the mailbox is exhausted.
+    private(set) var nextPageToken: String?
+    private(set) var isLoadingMore = false
+    /// Messages currently being summarised on demand, so the reading view can
+    /// show a skeleton for exactly the one being read.
+    private(set) var summarizing: Set<Message.ID> = []
+
     var isConnected: Bool { account != nil }
+    var hasMoreMail: Bool { nextPageToken != nil }
+    /// The very first load, when there is nothing to show yet. Drives the
+    /// skeleton list rather than an empty screen.
+    var isLoadingFirstPage: Bool { (isConnecting || isRefreshing) && messages.isEmpty }
+    /// How many pages to pull at a time. Each id costs a second request for
+    /// the full message, so a bigger page is a lot more requests in flight.
+    static let pageSize = 25
 
     private static let accountKey = "mail.account"
 
@@ -59,8 +73,11 @@ final class MailStore {
         )
         persistAccount()
 
-        if let messages = try? await GmailService.fetchInbox(accessToken: session.accessToken) {
-            self.messages = messages
+        if let page = try? await GmailService.fetchInbox(
+            accessToken: session.accessToken, limit: Self.pageSize
+        ) {
+            self.messages = page.messages
+            self.nextPageToken = page.nextPageToken
             Task { await enhanceWithAI() }
         }
     }
@@ -87,7 +104,11 @@ final class MailStore {
                 connectedAt: .now
             )
             persistAccount()
-            messages = try await GmailService.fetchInbox(accessToken: session.accessToken)
+            let page = try await GmailService.fetchInbox(
+                accessToken: session.accessToken, limit: Self.pageSize
+            )
+            messages = page.messages
+            nextPageToken = page.nextPageToken
             // Mail appears immediately; the model enriches it after, so the
             // first render is never waiting on a round trip per message.
             Task { await enhanceWithAI() }
@@ -107,11 +128,78 @@ final class MailStore {
 
         do {
             let token = try await AuthService.currentGmailAccessToken()
-            messages = try await GmailService.fetchInbox(accessToken: token)
+            let page = try await GmailService.fetchInbox(accessToken: token, limit: Self.pageSize)
+            messages = page.messages
+            nextPageToken = page.nextPageToken
             Task { await enhanceWithAI() }
         } catch {
             connectionError = error.localizedDescription
         }
+    }
+
+    /// Pulls the next page as the user reaches the end of the list.
+    ///
+    /// Gmail hands over a page at a time and will not give up a whole mailbox
+    /// at once, so "show me everything" is this, called repeatedly, rather
+    /// than one big request.
+    func loadMore() async {
+        guard isConnected, !isLoadingMore, !isRefreshing, let token = nextPageToken else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+
+        do {
+            let accessToken = try await AuthService.currentGmailAccessToken()
+            let page = try await GmailService.fetchInbox(
+                accessToken: accessToken, limit: Self.pageSize, pageToken: token
+            )
+
+            // A message arriving while the user scrolls shifts Gmail's paging
+            // window, so the same id can come back on two pages. Appending it
+            // twice would crash the list on duplicate ids.
+            let known = Set(messages.compactMap(\.remoteID))
+            let fresh = page.messages.filter { message in
+                guard let remoteID = message.remoteID else { return true }
+                return !known.contains(remoteID)
+            }
+
+            messages.append(contentsOf: fresh)
+            nextPageToken = page.nextPageToken
+            Task { await enhanceWithAI() }
+        } catch {
+            connectionError = error.localizedDescription
+        }
+    }
+
+    /// Summarises one message on demand, when it is opened.
+    ///
+    /// The background pass only reaches the top of the list, and skips bulk
+    /// mail to save money. But anything a person actually opens should have a
+    /// summary, so opening pays for that one message -- and only once, since
+    /// the result is cached like any other.
+    func summarize(_ id: Message.ID) async {
+        guard let message = message(id), message.aiSummary == nil else { return }
+        guard !summarizing.contains(id) else { return }
+
+        if let remoteID = message.remoteID,
+           let cached = ClassificationCache.entry(for: remoteID) {
+            apply(AIService.Classification(cached), to: id)
+            return
+        }
+
+        summarizing.insert(id)
+        defer { summarizing.remove(id) }
+
+        guard let classification = try? await AIService.classify(message) else { return }
+        apply(classification, to: id)
+        if let remoteID = message.remoteID {
+            ClassificationCache.store(classification, for: remoteID)
+        }
+    }
+
+    /// How many messages share this one's conversation. 1 means it stands alone.
+    func threadCount(for message: Message) -> Int {
+        guard let thread = message.threadID else { return 1 }
+        return messages.filter { $0.threadID == thread }.count
     }
 
     /// Second pass over the mailbox: the model reads what the rules could only
@@ -212,6 +300,7 @@ final class MailStore {
             .filter { !unreadOnly || !$0.isRead }
             .filter { query.isEmpty || $0.matches(query) }
             .sorted { $0.date > $1.date }
+            .collapsingThreads()
     }
 
     func unreadCount(in mailbox: Mailbox) -> Int {

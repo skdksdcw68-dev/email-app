@@ -12,11 +12,13 @@ struct MessageDetailView: View {
 
     private var message: Message? { store.message(messageID) }
 
-    /// The model is still working on this one.
+    /// The model is still working on this one. Keyed to this message rather
+    /// than to the background pass, because opening a message now summarises
+    /// it on demand -- every email that gets read gets a summary, including
+    /// the bulk mail the background pass deliberately skips.
     private var isSummaryPending: Bool {
         guard let message else { return false }
-        return message.aiSummary == nil && store.isEnhancing
-            && !message.tags.contains(.noReplyNeeded)
+        return message.aiSummary == nil && store.summarizing.contains(messageID)
     }
 
     var body: some View {
@@ -40,7 +42,10 @@ struct MessageDetailView: View {
                 if let message { optionsMenu(for: message) }
             }
         }
-        .onAppear { store.markRead(messageID) }
+        .onAppear {
+            store.markRead(messageID)
+            Task { await store.summarize(messageID) }
+        }
         .sheet(isPresented: $isReplying) {
             if let message {
                 ComposeView(replyingTo: message)
