@@ -29,11 +29,13 @@ struct Person: Identifiable, Equatable {
 
     var lastContactedDescription: String {
         let days = Calendar.current.dateComponents([.day], from: lastContacted, to: .now).day ?? 0
+        // Explicit returns: the `let` above means the switch is no longer the
+        // sole expression in the getter, so implicit return does not apply.
         switch days {
-        case ..<1: "Today"
-        case 1: "Yesterday"
-        case 2...29: "\(days) days ago"
-        default: "\(max(1, days / 30)) months ago"
+        case ..<1: return "Today"
+        case 1: return "Yesterday"
+        case 2...29: return "\(days) days ago"
+        default: return "\(max(1, days / 30)) months ago"
         }
     }
 
