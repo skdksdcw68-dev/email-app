@@ -168,6 +168,12 @@ enum MessageClassifier {
         if !message.sender.name.contains("@") && message.sender.name.count > 2 { score += 6 }
         if !message.isRead { score += 5 }
 
+        // What the user has said about this person. Weight, not a verdict:
+        // +15 lifts a borderline message a tier, it does not make everything
+        // from someone urgent. A rule like that would empty the loudest tag of
+        // meaning within a week.
+        score += PersonPreferences.scoreAdjustment(for: message.sender.address)
+
         return score
     }
 

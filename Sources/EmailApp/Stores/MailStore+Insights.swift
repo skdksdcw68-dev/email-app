@@ -114,28 +114,11 @@ extension MailStore {
 
     // MARK: - People
 
-    /// Correspondents assembled from their messages, busiest relationships and
-    /// anyone awaiting a reply first.
+    /// Correspondents assembled from their messages, busiest relationships,
+    /// anyone marked important, and anyone left waiting first.
     var people: [Person] {
-        let inbound = messages.filter { $0.sender.address != Contact.me.address }
-        let grouped = Dictionary(grouping: inbound, by: { $0.sender.address })
-
-        return grouped.compactMap { _, msgs -> Person? in
-            guard let first = msgs.first else { return nil }
-            return Person(
-                contact: first.sender,
-                conversationCount: msgs.count,
-                awaitingReply: msgs.filter { $0.tags.contains(.needsReply) }.count,
-                lastContacted: msgs.map(\.date).max() ?? first.date,
-                isPriority: msgs.contains {
-                    $0.tags.contains(.urgent) || $0.tags.contains(.veryImportant)
-                }
-            )
-        }
-        .sorted { lhs, rhs in
-            if lhs.awaitingReply != rhs.awaitingReply { return lhs.awaitingReply > rhs.awaitingReply }
-            return lhs.lastContacted > rhs.lastContacted
-        }
+        guard let account else { return [] }
+        return messages.people(myAddress: account.email)
     }
 }
 
