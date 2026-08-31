@@ -52,10 +52,20 @@ final class PeopleTests: XCTestCase {
         )
     }
 
-    func testAnotherCompanyIsExternal() {
+    func testAPersonAtAnotherCompanyIsExternal() {
+        XCTAssertEqual(
+            PersonCategory.inferred(for: "sara@stripe.com", myDomain: "maily.com"),
+            .external
+        )
+    }
+
+    func testARoleAddressAtAnotherCompanyIsAService() {
+        // billing@ is a mailbox, not a person, even on a real company domain.
+        // The first version of the test above used billing@stripe.com and
+        // expected External -- the test was wrong, not the rule.
         XCTAssertEqual(
             PersonCategory.inferred(for: "billing@stripe.com", myDomain: "maily.com"),
-            .external
+            .service
         )
     }
 

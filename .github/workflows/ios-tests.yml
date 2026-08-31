@@ -24,6 +24,24 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      # Dependencies dominate the build: Supabase, GoogleSignIn and AppAuth
+      # were being compiled from source on every push, which is around eleven
+      # minutes of a thirteen minute job. macOS runners bill at ten times the
+      # Linux rate, so this is the single biggest saving available.
+      #
+      # Keyed on project.yml, which is where the package list lives -- change a
+      # dependency and the cache correctly misses. restore-keys still gives a
+      # partial hit so a miss is never worse than no cache at all.
+      - name: Cache derived data
+        uses: actions/cache@v4
+        with:
+          path: |
+            DerivedData
+            SourcePackages
+          key: ${{ runner.os }}-deriveddata-${{ hashFiles('project.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-deriveddata-
+
       # No .xcodeproj is committed -- it is generated from project.yml so the
       # project file never has to be edited by hand on Windows.
       - name: Generate Xcode project
@@ -55,6 +73,8 @@ jobs:
             -project EmailApp.xcodeproj \
             -scheme EmailApp \
             -destination "platform=iOS Simulator,name=$DEVICE" \
+            -derivedDataPath DerivedData \
+            -clonedSourcePackagesDirPath SourcePackages \
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 60 \
             -maximum-test-execution-time-allowance 180 \
