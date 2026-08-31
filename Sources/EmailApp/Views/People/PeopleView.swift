@@ -72,6 +72,7 @@ struct PeopleView: View {
                     }
                 }
             }
+            .keyboardDismissable()
             .navigationTitle("People")
             .searchable(text: $query, prompt: "Search people")
             .toolbar {

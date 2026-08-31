@@ -51,6 +51,7 @@ struct AIChatView: View {
                 }
             }
         }
+        .keyboardDismissable()
         .navigationTitle("Maily")
         .navigationBarTitleDisplayMode(.inline)
         // Pushed page, so the tab bar goes.

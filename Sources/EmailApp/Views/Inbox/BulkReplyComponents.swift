@@ -425,27 +425,3 @@ struct PrimaryButton: View {
         .padding(.bottom, 8)
     }
 }
-
-func dismissKeyboard() {
-    UIApplication.shared.sendAction(
-        #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
-    )
-}
-
-extension View {
-    /// A background that puts the keyboard away when tapped.
-    ///
-    /// Deliberately NOT a simultaneousGesture on the whole screen. That was
-    /// tried and it broke two things at once: it fired when tapping into a
-    /// field, so the keyboard closed as fast as it opened, and its tap
-    /// recogniser fought the hold-to-record DragGesture until recording
-    /// stopped working entirely. A gesture only on the background behind the
-    /// content cannot conflict with any control on top of it.
-    func dismissesKeyboardOnBackgroundTap() -> some View {
-        background {
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { dismissKeyboard() }
-        }
-    }
-}

@@ -30,6 +30,7 @@ struct EditProfileView: View {
                     Text("Your email comes from the account you signed in with and cannot be changed here.")
                 }
             }
+            .keyboardDismissable()
             .navigationTitle("Edit profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -223,6 +224,7 @@ struct WritingStyleView: View {
                 Text("Anything you want Maily to remember whenever it writes for you.")
             }
         }
+        .keyboardDismissable()
         .navigationTitle("Writing style")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)

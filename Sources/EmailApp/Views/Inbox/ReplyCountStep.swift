@@ -217,6 +217,7 @@ struct NumberPadSheet: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 16)
         }
+        .keyboardDismissable()
         .onAppear {
             if current > 0 { text = "\(current)" }
             isFocused = true

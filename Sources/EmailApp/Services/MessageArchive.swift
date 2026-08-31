@@ -59,3 +59,21 @@ enum MessageArchive {
         try? FileManager.default.removeItem(at: url)
     }
 }
+
+extension MessageArchive {
+    /// How much room the offline copy takes, for the storage screen.
+    static func formattedSize() async -> String {
+        guard let url else { return "0 KB" }
+        let path = url.path
+
+        return await Task.detached(priority: .utility) {
+            let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+            let bytes = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+
+            let formatter = ByteCountFormatter()
+            formatter.allowedUnits = [.useKB, .useMB]
+            formatter.countStyle = .file
+            return formatter.string(fromByteCount: bytes)
+        }.value
+    }
+}

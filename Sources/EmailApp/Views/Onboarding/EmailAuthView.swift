@@ -32,6 +32,7 @@ struct EmailAuthView: View {
                     fields
                 }
             }
+            .keyboardDismissable()
             .navigationTitle(mode == .create ? "Create account" : "Sign in")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

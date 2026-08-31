@@ -35,6 +35,7 @@ struct SearchView: View {
             }
             .listStyle(.plain)
             .searchable(text: $query, isPresented: $isFieldPresented, prompt: "Search all mail")
+            .keyboardDismissable()
             .navigationTitle("Search")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
