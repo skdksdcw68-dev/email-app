@@ -14,6 +14,8 @@ struct EmailAppApp: App {
     @State private var chats = ChatHistory()
     /// What Maily has been told to remember about the person.
     @State private var memory = AIMemory()
+    /// What they have looked for, so looking again is one tap.
+    @State private var searches = SearchHistory()
 
     var body: some Scene {
         WindowGroup {
@@ -22,6 +24,7 @@ struct EmailAppApp: App {
                 .environment(mail)
                 .environment(chats)
                 .environment(memory)
+                .environment(searches)
                 // Google redirects back through the reversed-client-id URL
                 // scheme declared in Info.plist; the SDK completes the flow.
                 .onOpenURL { url in
@@ -41,6 +44,7 @@ struct EmailAppApp: App {
                     Task {
                         await chats.pull()
                         await memory.pull()
+                        await searches.pull()
                     }
                     Analytics.record(.appOpened, ["mailbox": .bool(mail.isConnected)])
                 }

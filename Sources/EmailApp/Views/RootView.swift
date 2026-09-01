@@ -68,10 +68,12 @@ struct MainTabView: View {
     RootView()
         .environment(UserStore(defaults: .previews, startAt: .splash))
         .environment(MailStore())
+        .environment(SearchHistory(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-searches.json")))
 }
 
 #Preview("Signed in") {
     RootView()
         .environment(UserStore(defaults: .previews, startAt: .finished))
         .environment(MailStore.connected())
+        .environment(SearchHistory(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-searches.json")))
 }

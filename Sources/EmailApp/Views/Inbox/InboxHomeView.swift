@@ -15,6 +15,7 @@ import UIKit
 /// again when cancelled.
 struct InboxHomeView: View {
     @Environment(MailStore.self) private var mail
+    @Environment(SearchHistory.self) private var searches
 
     @State private var mailbox: Mailbox = .inbox
     @State private var tag: AITag?
@@ -67,7 +68,11 @@ struct InboxHomeView: View {
         let availableTags = AITag.allCases.filter { (counts.total[$0] ?? 0) > 0 }
 
         return List {
-            if isSearchActive {
+            // Field open, nothing typed: offer what they looked for before,
+            // rather than the inbox they just covered up.
+            if isSearching && query.isEmpty && !searches.entries.isEmpty {
+                recentSearches
+            } else if isSearchActive {
                 searchHeader
 
                 ForEach(searchResults) { message in
@@ -158,7 +163,7 @@ struct InboxHomeView: View {
                 AppSettings.hasSeenAISearchNotice = true
                 if let text = pendingAISearch {
                     pendingAISearch = nil
-                    Task { await mail.search(text, mode: .ai) }
+                    perform(text, mode: .ai)
                 }
             }
         } message: {
@@ -356,7 +361,7 @@ extension InboxHomeView {
         ])
 
         guard searchMode == .ai else {
-            Task { await mail.search(text, mode: .mail) }
+            perform(text, mode: .mail)
             return
         }
         // Said once, the first time it would cost something.
@@ -364,7 +369,70 @@ extension InboxHomeView {
             pendingAISearch = text
             return
         }
-        Task { await mail.search(text, mode: .ai) }
+        perform(text, mode: .ai)
+    }
+
+    /// Runs it and remembers it. Recorded after the results land so the row
+    /// can say how many there were, which is what makes "that one found
+    /// nothing" visible later.
+    fileprivate func perform(_ text: String, mode: MailStore.SearchMode) {
+        Task {
+            await mail.search(text, mode: mode)
+            searches.record(text, mode: mode, results: mail.searchResults.count)
+        }
+    }
+
+    /// Recent searches, offered while the box is open and empty.
+    ///
+    /// Looking for the same thing twice is the normal case in email: the
+    /// invoice you could not find on Tuesday is the one you cannot find on
+    /// Thursday.
+    @ViewBuilder
+    fileprivate var recentSearches: some View {
+        if !searches.entries.isEmpty {
+            Section {
+                ForEach(searches.entries.prefix(8)) { entry in
+                    Button {
+                        query = entry.text
+                        searchMode = MailStore.SearchMode(rawValue: entry.mode) ?? .mail
+                        perform(entry.text, mode: searchMode)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: entry.mode == "ai" ? "sparkles" : "clock.arrow.circlepath")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 20)
+                            Text(entry.text)
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            if entry.results == 0 {
+                                Text("nothing")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            searches.remove(entry.id)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Recent")
+                    Spacer()
+                    Button("Clear") { searches.clearAll() }
+                        .font(.caption)
+                        .textCase(nil)
+                }
+            }
+        }
     }
 
     /// The mode picker, and whatever the last search has to say for itself.
@@ -444,4 +512,5 @@ struct SearchWhenAsked: ViewModifier {
     }
     .environment(MailStore.connected())
     .environment(UserStore(defaults: .previews, startAt: .finished))
+    .environment(SearchHistory(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-searches.json")))
 }
