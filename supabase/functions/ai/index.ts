@@ -299,6 +299,9 @@ Rules:
   weeks back", "before the summer" against it. Never guess the year.
 - Prefer fewer operators. A query returning the right email and ten others
   beats a precise one returning nothing. When in doubt, drop the date.
+- Bare words are joined with AND, so each one you add makes the search
+  stricter. Two or three at most, and only words likely to be in the email
+  itself. If you want alternatives, write them with OR.
 - The query must name something: a word, a sender, a subject. A query built
   only from date operators, like "older_than:1d", matches every email ever
   received and is the same as no search at all. If they gave you nothing to
@@ -501,10 +504,16 @@ it. Reply with exactly one line and nothing else:
 
 SEARCH: the words to look for
 
-Write the words a person would remember the email by: a sender, a product
-name, a subject phrase. Not a question, not a sentence, not Gmail operators.
-"When did I register on Upwork" becomes SEARCH: upwork welcome registration,
-because a registration date lives in a welcome email.
+Two or three words. Never more.
+
+Every word you add makes the search stricter, not better: they are joined
+with AND, so five words demands an email containing all five and will find
+nothing. Write only the words that would actually appear in the email itself.
+"When did I register on Upwork" becomes SEARCH: upwork welcome, because a
+registration date lives in a welcome email and the word "registration" is
+probably nowhere in it.
+
+Not a question, not a sentence, not Gmail operators.
 
 Use it whenever looking would help. It costs one lookup and it is the whole
 difference between an assistant and a search box that has already given up.

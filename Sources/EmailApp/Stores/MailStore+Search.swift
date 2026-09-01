@@ -96,21 +96,64 @@ extension MailStore {
     func olderMail(matching question: String, limit: Int = 8) async -> (messages: [Message], searchedFor: String?) {
         guard isConnected else { return ([], nil) }
 
-        var query = question
         var explanation: String?
+        var terms: [String] = []
+        var planned: String?
         if let plan = try? await AIService.searchPlan(for: question), !plan.query.isEmpty {
-            query = plan.query
+            planned = plan.query
             explanation = plan.explanation
+            terms = plan.terms
         }
 
-        guard let token = try? await AuthService.currentGmailAccessToken(),
-              let page = try? await GmailService.fetchInbox(
-                  accessToken: token, limit: limit, query: query, label: nil
-              )
-        else { return ([], nil) }
+        guard let token = try? await AuthService.currentGmailAccessToken() else { return ([], nil) }
 
-        absorb(page.messages)
-        return (page.messages, explanation)
+        for query in Self.widening(from: planned, terms: terms, raw: question) {
+            guard let page = try? await GmailService.fetchInbox(
+                accessToken: token, limit: limit, query: query, label: nil
+            ) else { continue }
+            guard !page.messages.isEmpty else { continue }
+
+            absorb(page.messages)
+            return (page.messages, explanation)
+        }
+
+        return ([], explanation)
+    }
+
+    /// The same search, tried progressively less strictly.
+    ///
+    /// Gmail joins bare words with AND. "Upwork welcome registration account
+    /// created" therefore means *all five* words in one email, and the actual
+    /// Welcome to Upwork message contains neither "registration" nor
+    /// "created" -- so a search that ran perfectly was guaranteed to find
+    /// nothing, and the answer came back "not in your mail" about an email
+    /// sitting in the account.
+    ///
+    /// So: the exact query first, then the same words as alternatives, then
+    /// the single most distinctive one. Something too broad can be read; a
+    /// perfect query matching nothing cannot.
+    static func widening(from planned: String?, terms: [String], raw: String) -> [String] {
+        var attempts: [String] = []
+        if let planned, !planned.isEmpty { attempts.append(planned) }
+
+        let source = terms.isEmpty ? raw.components(separatedBy: " ") : terms
+        let words = source
+            .map { $0.trimmingCharacters(in: CharacterSet.alphanumerics.inverted) }
+            .filter { $0.count > 2 }
+        guard !words.isEmpty else { return attempts }
+
+        if words.count > 1 {
+            attempts.append(words.joined(separator: " OR "))
+        }
+        // The longest word is the one carrying the question: "registration"
+        // rather than "account". On its own it is broad, and broad is
+        // readable.
+        if let longest = words.max(by: { $0.count < $1.count }) {
+            attempts.append(longest)
+        }
+
+        var seen = Set<String>()
+        return attempts.filter { seen.insert($0.lowercased()).inserted }
     }
 
     func clearSearch() {
