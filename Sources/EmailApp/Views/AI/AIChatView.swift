@@ -586,14 +586,31 @@ struct AIChatView: View {
         // recency and hands over a dozen messages from last week that mention
         // none of it.
         var searchedFor: String?
-        if mail.looksLikeMailQuestion(question) || !context.isEmpty,
-           !mail.hasStrongMatch(for: question) {
-            setPending(pendingID, label: "Searching all your mail")
-            let older = await mail.olderMail(matching: question)
+        var found: [Message] = []
+
+        // Asked in so many words -- "search for it", "it's older", "look
+        // again" -- overrides everything. Deciding on somebody's behalf that
+        // their mail probably has it, when they have just said it does not,
+        // is the app arguing with the person using it.
+        let insisted = Self.asksToSearch(question)
+
+        if insisted || ((mail.looksLikeMailQuestion(question) || !context.isEmpty)
+                        && !mail.hasStrongMatch(for: question)) {
+            setPending(pendingID, label: "Working out what to look for")
+
+            // "Search for it it's older" contains no subject at all, so the
+            // topic comes from what was asked before it. Sending those six
+            // words to the query planner produced "older_than:1d", which
+            // matches every email ever received and finds nothing.
+            let subject = searchSubject(for: question)
+
+            let older = await mail.olderMail(matching: subject)
             searchedFor = older.searchedFor
+            found = older.messages
+            setPending(pendingID, label: found.isEmpty ? "Reading" : "Found \(found.count). Reading")
 
             var seen = Set<Message.ID>(context.map(\.id))
-            context += older.messages.filter { seen.insert($0.id).inserted }
+            context += found.filter { seen.insert($0.id).inserted }
         }
 
         do {
@@ -613,7 +630,7 @@ struct AIChatView: View {
             ) { fragment in
                 appendDelta(pendingID, fragment)
             }
-            finish(pendingID, sources: context, searchNote: searchedFor)
+            finish(pendingID, sources: context, searchNote: searchedFor, found: found)
             offered = context
 
             Analytics.record(.chatAsked, [
@@ -640,6 +657,38 @@ struct AIChatView: View {
         Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
+    /// They have asked for a search outright.
+    ///
+    /// Kept separate from every other signal because it outranks them: if
+    /// somebody says "it is older, go and look", the app has no business
+    /// deciding the answer is probably on the phone after all.
+    private static func asksToSearch(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return [
+            "search", "look older", "it's older", "its older", "older email",
+            "find it", "look for it", "look again", "keep looking", "check older",
+            "all my mail", "all my email", "everything", "go deeper", "dig",
+        ].contains { t.contains($0) }
+    }
+
+    /// What to actually search for.
+    ///
+    /// A short follow-up is a pronoun with no noun in it. "Search for it it's
+    /// older" says nothing about Upwork, so the subject comes from what was
+    /// asked before, and the query planner gets a topic rather than six words
+    /// about time.
+    private func searchSubject(for question: String) -> String {
+        guard question.split(separator: " ").count <= 8 else { return question }
+
+        let earlier = turns
+            .filter { $0.role == .user && !$0.text.isEmpty }
+            .dropLast()
+            .suffix(2)
+            .map(\.text)
+        guard !earlier.isEmpty else { return question }
+        return (earlier + [question]).joined(separator: ". ")
+    }
+
     /// Changes what the thinking indicator says while it is still thinking.
     /// "Searching all your mail" is a different wait from "Thinking", and a
     /// wait nobody can name feels twice as long.
@@ -659,7 +708,12 @@ struct AIChatView: View {
     /// The answer is complete. Sources land now, so citations do not pop in
     /// underneath text that is still being written -- and if the model wrote
     /// an email, it is lifted out of the prose into a card here.
-    private func finish(_ id: ChatMessage.ID?, sources: [Message], searchNote: String? = nil) {
+    private func finish(
+        _ id: ChatMessage.ID?,
+        sources: [Message],
+        searchNote: String? = nil,
+        found: [Message] = []
+    ) {
         guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
         turns[index].searchNote = searchNote
 
@@ -675,9 +729,18 @@ struct AIChatView: View {
         // was handed.
         let structured = AnswerFences.extract(from: text)
 
+        // An email that was gone and found is the answer, so it is shown as
+        // one: the card if there is a single result, a row each if there are
+        // several. Describing it in a sentence and hiding the thing itself
+        // behind "Based on 15 emails" makes the reader go looking twice.
+        var blocks = structured.blocks
+        if blocks.isEmpty, !found.isEmpty {
+            blocks = [.messages(Array(found.prefix(6)))]
+        }
+
         withAnimation(.easeOut(duration: 0.25)) {
             turns[index].text = structured.prose
-            turns[index].blocks = structured.blocks
+            turns[index].blocks = blocks
             turns[index].draft = emailDraft
             // A draft is its own evidence; the list of emails behind it is
             // noise next to a card that names the recipient.

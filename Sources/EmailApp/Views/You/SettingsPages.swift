@@ -71,6 +71,17 @@ struct NotificationSettingsView: View {
                     Text(push.token == nil ? "Not registered" : "Registered")
                         .foregroundStyle(push.token == nil ? Color.secondary : Color.green)
                 }
+                LabeledContent("Woken by Gmail") {
+                    if let at = push.lastPushAt {
+                        Text(at.formatted(.relative(presentation: .named)))
+                            .foregroundStyle(Color.green)
+                    } else {
+                        Text("Never").foregroundStyle(Color.secondary)
+                    }
+                }
+                if let result = push.lastPushResult {
+                    LabeledContent("Last wake", value: result)
+                }
             } header: {
                 Text("New mail")
             } footer: {

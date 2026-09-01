@@ -290,6 +290,16 @@ final class MailStoreTests: XCTestCase {
         XCTAssertFalse(store.hasStrongMatch(for: "find me my registration date on upwork"))
     }
 
+    func testTheWeakestWordMatchingIsNotEnough() {
+        // "date" turns up in half of everybody's subjects. Matching on it was
+        // enough to conclude the archive held an Upwork signup from 2024.
+        let store = MailStore(messages: [
+            Message(sender: .me, recipients: [], subject: "Pick a date for the review",
+                    body: "-", date: .now, mailbox: .inbox),
+        ])
+        XCTAssertFalse(store.hasStrongMatch(for: "whats my upwork registration date"))
+    }
+
     func testASubjectOrSenderMatchIsEvidence() {
         let store = MailStore(messages: [
             Message(sender: Contact(name: "Upwork", address: "no-reply@upwork.com"),

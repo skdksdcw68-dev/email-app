@@ -50,10 +50,18 @@ final class PushDelegate: NSObject, UIApplicationDelegate {
     }
 
     private func handle(historyID: String?) async -> UIBackgroundFetchResult {
-        if Self.push?.isRepeat(of: historyID) == true { return .noData }
+        if Self.push?.isRepeat(of: historyID) == true {
+            Self.push?.noteWoken(found: 0)
+            return .noData
+        }
         guard let mail = Self.mail else { return .noData }
 
         let arrived = await mail.catchUp()
+        // Recorded whether or not anything came of it. "A push arrived and
+        // there was nothing new" and "no push ever arrived" are different
+        // problems with the same symptom, and this is what tells them apart.
+        Self.push?.noteWoken(found: arrived.count)
+
         guard !arrived.isEmpty else { return .noData }
 
         await Self.announce(arrived)

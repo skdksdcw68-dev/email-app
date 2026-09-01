@@ -27,6 +27,20 @@ final class PushService: NSObject {
     /// The token APNs handed this install, once it has.
     private(set) var token: String?
 
+    /// When a push last woke the app, and what happened.
+    ///
+    /// Diagnostics, shown in Settings. Without it "no notification" has four
+    /// possible causes that all look identical from the outside: permission,
+    /// the token, Pub/Sub, or the app finding nothing new to announce. This
+    /// separates the first two from the last two.
+    private(set) var lastPushAt: Date?
+    private(set) var lastPushResult: String?
+
+    func noteWoken(found: Int) {
+        lastPushAt = .now
+        lastPushResult = found == 0 ? "Nothing new" : "\(found) new"
+    }
+
     /// Gmail republishes the same notification for a while, and the app is
     /// woken for each. This is the last history id acted on, so the same
     /// arrival is not fetched three times.

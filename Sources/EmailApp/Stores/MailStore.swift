@@ -501,16 +501,22 @@ final class MailStore {
     /// A subject or a sender is what a person actually remembers a message
     /// by, so a hit there is worth trusting and a hit in prose is not.
     func hasStrongMatch(for question: String) -> Bool {
-        let words = Set(
-            question.lowercased()
-                .components(separatedBy: CharacterSet.alphanumerics.inverted)
-                .filter { $0.count > 3 && !Self.stopWords.contains($0) }
-        )
+        let words = question.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count > 3 && !Self.stopWords.contains($0) }
         guard !words.isEmpty else { return true }
+
+        // The longest word, not any word. "What is my upwork registration
+        // date" has four content words, and matching the weakest of them --
+        // "date", which turns up in half of everybody's subjects -- was
+        // enough to conclude the archive had the answer and never look
+        // further. The longest word is the one carrying the question:
+        // "registration". If that is nowhere, this is not the mail meant.
+        guard let key = words.max(by: { $0.count < $1.count }) else { return true }
 
         return messages.contains { message in
             let named = "\(message.subject) \(message.sender.name) \(message.sender.address)".lowercased()
-            return words.contains { named.contains($0) }
+            return named.contains(key)
         }
     }
 

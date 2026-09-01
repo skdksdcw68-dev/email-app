@@ -299,6 +299,14 @@ Rules:
   weeks back", "before the summer" against it. Never guess the year.
 - Prefer fewer operators. A query returning the right email and ten others
   beats a precise one returning nothing. When in doubt, drop the date.
+- The query must name something: a word, a sender, a subject. A query built
+  only from date operators, like "older_than:1d", matches every email ever
+  received and is the same as no search at all. If they gave you nothing to
+  go on, use the plainest noun in what they said.
+- You may be given more than one line, because a short follow-up like
+  "search for it, it is older" carries no subject of its own. The earlier
+  lines are what they are looking for; the last line is usually only telling
+  you where to look. Search for the subject, not for the instruction.
 - Never invent an email address. If they name a person, write from:thatname
   and let Gmail match it.
 - Put quotes around a phrase only when the words must appear together.
