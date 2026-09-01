@@ -460,6 +460,34 @@ final class MailStore {
             .map(\.message)
     }
 
+    /// Whether this is a question about their mail, for callers deciding
+    /// whether a lookup is worth making.
+    func looksLikeMailQuestion(_ question: String) -> Bool {
+        mentionsMail(question)
+    }
+
+    /// Whether anything on this phone actually contains the words asked
+    /// about.
+    ///
+    /// Not the same as "retrieval returned nothing". Retrieval falls back to
+    /// recency, so a question about a two year old email still comes back
+    /// with a dozen messages from last week, none of which mention it. This
+    /// is the honest signal that the archive does not hold the answer and
+    /// Gmail is worth asking.
+    func hasKeywordMatch(for question: String) -> Bool {
+        let words = Set(
+            question.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { $0.count > 3 && !Self.stopWords.contains($0) }
+        )
+        guard !words.isEmpty else { return true }
+
+        return messages.contains { message in
+            let haystack = "\(message.subject) \(message.sender.name) \(message.body.prefix(400))".lowercased()
+            return words.contains { haystack.contains($0) }
+        }
+    }
+
     /// Whether the question is about the mailbox at all. Deliberately broad:
     /// handing over context that is not needed wastes tokens, but withholding
     /// it from a real question gives a wrong answer, so this errs towards yes.

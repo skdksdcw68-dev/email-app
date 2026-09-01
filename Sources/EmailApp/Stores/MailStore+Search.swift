@@ -81,6 +81,38 @@ extension MailStore {
         }
     }
 
+    /// The same reach the search box has, for the assistant.
+    ///
+    /// Retrieval in the chat only ever looked at the three months this phone
+    /// holds, so "what did the landlord send about the deposit" came back as
+    /// "nothing in your recent mail covers that" when the answer was sitting
+    /// in the account all along. This runs the question through the same
+    /// query planner the AI search uses and hands the results back, without
+    /// touching the search screen's state.
+    ///
+    /// Returns nothing rather than throwing: an assistant that loses a whole
+    /// answer because one lookup failed is worse than one that answers from
+    /// what it already had.
+    func olderMail(matching question: String, limit: Int = 8) async -> (messages: [Message], searchedFor: String?) {
+        guard isConnected else { return ([], nil) }
+
+        var query = question
+        var explanation: String?
+        if let plan = try? await AIService.searchPlan(for: question), !plan.query.isEmpty {
+            query = plan.query
+            explanation = plan.explanation
+        }
+
+        guard let token = try? await AuthService.currentGmailAccessToken(),
+              let page = try? await GmailService.fetchInbox(
+                  accessToken: token, limit: limit, query: query, label: nil
+              )
+        else { return ([], nil) }
+
+        absorb(page.messages)
+        return (page.messages, explanation)
+    }
+
     func clearSearch() {
         searchResults = []
         searchTerms = []

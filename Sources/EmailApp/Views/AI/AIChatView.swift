@@ -576,7 +576,25 @@ struct AIChatView: View {
         // do", "how does this work". A short follow-up borrows the subject of
         // whatever Maily said last, so "yes" still arrives with the mail it
         // is agreeing to.
-        let context = mail.context(for: question, following: history.last(where: { $0.role == "assistant" })?.content)
+        var context = mail.context(for: question, following: history.last(where: { $0.role == "assistant" })?.content)
+
+        // Local retrieval only sees the three months this phone holds, so a
+        // question about older mail came back as "nothing in your recent mail
+        // covers that" while the answer sat in the account. The trigger is
+        // that nothing here contains the words asked about -- not that
+        // retrieval returned nothing, which it never does: it falls back to
+        // recency and hands over a dozen messages from last week that mention
+        // none of it.
+        var searchedFor: String?
+        if mail.looksLikeMailQuestion(question), !mail.hasKeywordMatch(for: question) {
+            setPending(pendingID, label: "Searching all your mail")
+            let older = await mail.olderMail(matching: question)
+            searchedFor = older.searchedFor
+
+            var seen = Set<Message.ID>(context.map(\.id))
+            context += older.messages.filter { seen.insert($0.id).inserted }
+        }
+
         do {
             // Streamed, so the answer types itself out instead of landing
             // whole after a long silence.
@@ -594,7 +612,7 @@ struct AIChatView: View {
             ) { fragment in
                 appendDelta(pendingID, fragment)
             }
-            finish(pendingID, sources: context)
+            finish(pendingID, sources: context, searchNote: searchedFor)
             offered = context
 
             Analytics.record(.chatAsked, [
@@ -621,6 +639,14 @@ struct AIChatView: View {
         Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
+    /// Changes what the thinking indicator says while it is still thinking.
+    /// "Searching all your mail" is a different wait from "Thinking", and a
+    /// wait nobody can name feels twice as long.
+    private func setPending(_ id: ChatMessage.ID?, label: String) {
+        guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
+        turns[index].pendingLabel = label
+    }
+
     /// Appends a fragment as it arrives. No animation on each one: animating
     /// every token turns a smooth stream into a stutter.
     private func appendDelta(_ id: ChatMessage.ID?, _ fragment: String) {
@@ -632,8 +658,9 @@ struct AIChatView: View {
     /// The answer is complete. Sources land now, so citations do not pop in
     /// underneath text that is still being written -- and if the model wrote
     /// an email, it is lifted out of the prose into a card here.
-    private func finish(_ id: ChatMessage.ID?, sources: [Message]) {
+    private func finish(_ id: ChatMessage.ID?, sources: [Message], searchNote: String? = nil) {
         guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
+        turns[index].searchNote = searchNote
 
         var text = turns[index].text
         var emailDraft: ChatDraft?

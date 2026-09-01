@@ -66,7 +66,7 @@ struct ChatTurnView: View {
                     }
 
                     if !turn.sources.isEmpty {
-                        SourceList(sources: turn.sources)
+                        SourceList(sources: turn.sources, searchNote: turn.searchNote)
                     }
                 }
             }
@@ -166,8 +166,13 @@ struct ThinkingIndicator: View {
 /// link to the message.
 struct SourceList: View {
     let sources: [Message]
+    /// Set when Maily went past the mail on this phone to answer. Those
+    /// results are not a footnote, they are what was found, so they open
+    /// showing rather than folded away.
+    var searchNote: String? = nil
 
     @State private var isExpanded = false
+    @State private var hasSetInitialState = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -175,10 +180,11 @@ struct SourceList: View {
                 withAnimation(.snappy(duration: 0.22)) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "envelope.fill")
+                    Image(systemName: searchNote == nil ? "envelope.fill" : "magnifyingglass")
                         .font(.caption2)
-                    Text(sources.count == 1 ? "Based on 1 email" : "Based on \(sources.count) emails")
+                    Text(caption)
                         .font(.caption.weight(.semibold))
+                        .multilineTextAlignment(.leading)
                     Image(systemName: "chevron.right")
                         .font(.caption2.weight(.semibold))
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
@@ -188,11 +194,26 @@ struct SourceList: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isExpanded ? "Hide sources" : "Show sources")
+            .onAppear {
+                // Once, on the way in. Doing it on every render would fight
+                // the person the moment they folded it away themselves.
+                guard !hasSetInitialState else { return }
+                hasSetInitialState = true
+                isExpanded = searchNote != nil
+            }
 
             if isExpanded {
-                AnswerMessageList(messages: sources)
+                MessagesBlock(messages: sources)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+    }
+
+    /// What it looked at, or what it went looking for. The second is worth a
+    /// sentence: a search that reached past this phone should say so, or the
+    /// answer looks like it came from nowhere.
+    private var caption: String {
+        if let note = searchNote, !note.isEmpty { return note }
+        return sources.count == 1 ? "Based on 1 email" : "Based on \(sources.count) emails"
     }
 }

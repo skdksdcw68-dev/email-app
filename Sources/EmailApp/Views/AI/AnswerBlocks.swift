@@ -134,9 +134,12 @@ struct AnswerBlockView: View {
 
     var body: some View {
         switch block {
-        case .stats(let stats):       StatTileRow(stats: stats)
-        case .messages(let messages): AnswerMessageList(messages: messages)
-        case .chart(let chart):       AnswerChartView(chart: chart)
+        case .stats(let stats):
+            StatTileRow(stats: stats)
+        case .messages(let messages):
+            MessagesBlock(messages: messages)
+        case .chart(let chart):
+            AnswerChartView(chart: chart)
         }
     }
 }
@@ -171,6 +174,31 @@ struct StatTileRow: View {
 }
 
 /// Emails inside an answer, as tappable cards that open the message.
+/// Emails in an answer, drawn the way each case deserves.
+///
+/// One is an answer and gets read, so it gets the full card. Several are a
+/// choice and get picked from, so they get a row each. Using the card for
+/// both was the mistake: six cards is a wall somebody scrolls past rather
+/// than a set they choose from.
+struct MessagesBlock: View {
+    let messages: [Message]
+
+    var body: some View {
+        if let only = messages.first, messages.count == 1 {
+            EmailPeekCard(message: only)
+        } else {
+            AnswerMessageList(messages: messages)
+        }
+    }
+}
+
+/// Several emails to choose between.
+///
+/// A row each, never a stack of `EmailPeekCard`s. The card is right when
+/// there is one answer and the person wants to read it; six of them is a
+/// wall you scroll past rather than a set you choose from. Here the job is
+/// picking, so a row carries only what picking needs: who it is from, what
+/// it is about, and when.
 struct AnswerMessageList: View {
     let messages: [Message]
 
@@ -178,35 +206,52 @@ struct AnswerMessageList: View {
         VStack(spacing: 6) {
             ForEach(messages) { message in
                 NavigationLink(value: message.id) {
-                    HStack(spacing: 10) {
-                        SenderAvatar(contact: message.sender, size: 34)
-
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(message.sender.name)
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            Text(message.subject)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-
-                        Spacer(minLength: 6)
-
-                        Image(systemName: "chevron.right")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color(uiColor: .secondarySystemBackground))
-                    }
+                    row(for: message)
                 }
                 .buttonStyle(BouncyButtonStyle())
             }
+        }
+    }
+
+    private func row(for message: Message) -> some View {
+        HStack(spacing: 10) {
+            SenderAvatar(contact: message.sender, size: 34, isMuted: message.isRead)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(message.sender.name.isEmpty ? message.sender.address : message.sender.name)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    if let tag = message.topPriority {
+                        Image(systemName: tag.systemImage)
+                            .font(.caption2)
+                            .foregroundStyle(tag.color)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Text(message.listDate)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Text(message.subject.isEmpty ? "(No subject)" : message.subject)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemBackground))
         }
     }
 }

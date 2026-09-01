@@ -29,6 +29,10 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     var failed = false
     /// What an action actually did, once it has done it.
     var receipt: ChatReceipt? = nil
+    /// What Maily went and looked for beyond the mail on this phone, when it
+    /// had to. Present means the sources below are search results, and they
+    /// open showing rather than folded away.
+    var searchNote: String? = nil
 
     static func user(_ text: String) -> ChatMessage {
         ChatMessage(role: .user, text: text)
