@@ -277,53 +277,6 @@ final class MailStoreTests: XCTestCase {
         XCTAssertEqual(dates, dates.sorted(by: >))
     }
 
-    func testAWordInABodyIsNotEvidenceTheAnswerIsHere() {
-        // The bug: "find me my registration date on upwork" matched the word
-        // "date" in an unrelated message, so the archive was judged to hold
-        // the answer and Gmail was never asked about an email that existed.
-        let store = MailStore(messages: [
-            Message(sender: .me, recipients: [], subject: "Standup",
-                    body: "Let us agree a date for the review.",
-                    date: .now, mailbox: .inbox),
-        ])
-
-        XCTAssertFalse(store.hasStrongMatch(for: "find me my registration date on upwork"))
-    }
-
-    func testTheWeakestWordMatchingIsNotEnough() {
-        // "date" turns up in half of everybody's subjects. Matching on it was
-        // enough to conclude the archive held an Upwork signup from 2024.
-        let store = MailStore(messages: [
-            Message(sender: .me, recipients: [], subject: "Pick a date for the review",
-                    body: "-", date: .now, mailbox: .inbox),
-        ])
-        XCTAssertFalse(store.hasStrongMatch(for: "whats my upwork registration date"))
-    }
-
-    func testTheKeyWordMatchingASenderIsEvidence() {
-        let store = MailStore(messages: [
-            Message(sender: Contact(name: "Upwork", address: "no-reply@upwork.com"),
-                    recipients: [], subject: "Welcome to Upwork", body: "hello",
-                    date: .now, mailbox: .inbox),
-        ])
-
-        XCTAssertTrue(store.hasStrongMatch(for: "what did upwork send me"))
-    }
-
-    func testItErrsTowardsSearchingRatherThanAssuming() {
-        // Even with an Upwork email present, "registration" is what the
-        // question is about and it is nowhere here. Searching Gmail when the
-        // answer was already on the phone costs one request and finds the
-        // same email. Not searching when it was not costs the answer.
-        let store = MailStore(messages: [
-            Message(sender: Contact(name: "Upwork", address: "no-reply@upwork.com"),
-                    recipients: [], subject: "Your weekly Upwork digest", body: "jobs",
-                    date: .now, mailbox: .inbox),
-        ])
-
-        XCTAssertFalse(store.hasStrongMatch(for: "find me my registration date on upwork"))
-    }
-
     func testLookingSomethingUpCountsAsAMailQuestion() {
         // None of these say "email", and all of them are about mail.
         let store = makeStore()

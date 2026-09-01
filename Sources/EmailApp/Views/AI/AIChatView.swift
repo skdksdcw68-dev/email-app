@@ -578,40 +578,17 @@ struct AIChatView: View {
         // is agreeing to.
         var context = mail.context(for: question, following: history.last(where: { $0.role == "assistant" })?.content)
 
-        // Local retrieval only sees the three months this phone holds, so a
-        // question about older mail came back as "nothing in your recent mail
-        // covers that" while the answer sat in the account. The trigger is
-        // that nothing here contains the words asked about -- not that
-        // retrieval returned nothing, which it never does: it falls back to
-        // recency and hands over a dozen messages from last week that mention
-        // none of it.
+        // Set only when the model asks to look beyond the mail on this phone.
+        //
+        // The app used to decide that itself first, from whether any word in
+        // the question turned up in a subject. "The last email I got was
+        // what" lost "email" and "what" as stop words, was left with "last",
+        // found no subject containing it, and went to Gmail with the
+        // previous turns glued on -- which searched the whole account for
+        // "Hi". No rule about words knows what a question means. The model
+        // does, and it says SEARCH: when it needs to.
         var searchedFor: String?
         var found: [Message] = []
-
-        // Asked in so many words -- "search for it", "it's older", "look
-        // again" -- overrides everything. Deciding on somebody's behalf that
-        // their mail probably has it, when they have just said it does not,
-        // is the app arguing with the person using it.
-        let insisted = Self.asksToSearch(question)
-
-        if insisted || ((mail.looksLikeMailQuestion(question) || !context.isEmpty)
-                        && !mail.hasStrongMatch(for: question)) {
-            setPending(pendingID, label: "Working out what to look for")
-
-            // "Search for it it's older" contains no subject at all, so the
-            // topic comes from what was asked before it. Sending those six
-            // words to the query planner produced "older_than:1d", which
-            // matches every email ever received and finds nothing.
-            let subject = searchSubject(for: question)
-
-            let older = await mail.olderMail(matching: subject)
-            searchedFor = older.searchedFor
-            found = older.messages
-            setPending(pendingID, label: found.isEmpty ? "Reading" : "Found \(found.count). Reading")
-
-            var seen = Set<Message.ID>(context.map(\.id))
-            context += found.filter { seen.insert($0.id).inserted }
-        }
 
         do {
             // Streamed, so the answer types itself out instead of landing
@@ -667,8 +644,11 @@ struct AIChatView: View {
                 }
             }
 
-            finish(pendingID, sources: context, searchNote: searchedFor, found: found)
-            offered = context
+            finish(pendingID, context: context, searchNote: searchedFor, found: found)
+            // What is on screen is what "reply to it" means next turn: the
+            // emails the model showed if it showed any, else everything it
+            // was reading from.
+            offered = shown(in: pendingID) ?? context
 
             Analytics.record(.chatAsked, [
                 "length": .int(question.count),
@@ -694,36 +674,14 @@ struct AIChatView: View {
         Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
-    /// They have asked for a search outright.
-    ///
-    /// Kept separate from every other signal because it outranks them: if
-    /// somebody says "it is older, go and look", the app has no business
-    /// deciding the answer is probably on the phone after all.
-    private static func asksToSearch(_ text: String) -> Bool {
-        let t = text.lowercased()
-        return [
-            "search", "look older", "it's older", "its older", "older email",
-            "find it", "look for it", "look again", "keep looking", "check older",
-            "all my mail", "all my email", "everything", "go deeper", "dig",
-        ].contains { t.contains($0) }
-    }
-
-    /// What to actually search for.
-    ///
-    /// A short follow-up is a pronoun with no noun in it. "Search for it it's
-    /// older" says nothing about Upwork, so the subject comes from what was
-    /// asked before, and the query planner gets a topic rather than six words
-    /// about time.
-    private func searchSubject(for question: String) -> String {
-        guard question.split(separator: " ").count <= 8 else { return question }
-
-        let earlier = turns
-            .filter { $0.role == .user && !$0.text.isEmpty }
-            .dropLast()
-            .suffix(2)
-            .map(\.text)
-        guard !earlier.isEmpty else { return question }
-        return (earlier + [question]).joined(separator: ". ")
+    /// The emails the model put on screen in this turn, if any.
+    private func shown(in id: ChatMessage.ID?) -> [Message]? {
+        guard let id, let turn = turns.first(where: { $0.id == id }) else { return nil }
+        let messages = turn.blocks.flatMap { block -> [Message] in
+            if case .messages(let list) = block { return list }
+            return []
+        }
+        return messages.isEmpty ? nil : messages
     }
 
     private func currentText(of id: ChatMessage.ID?) -> String {
@@ -756,12 +714,15 @@ struct AIChatView: View {
         turns[index].text += fragment
     }
 
-    /// The answer is complete. Sources land now, so citations do not pop in
+    /// The answer is complete. Blocks land now, so cards do not pop in
     /// underneath text that is still being written -- and if the model wrote
     /// an email, it is lifted out of the prose into a card here.
+    ///
+    /// `context` is the numbered list the model was reading, in the order it
+    /// saw it, so a show block's numbers resolve to the right messages.
     private func finish(
         _ id: ChatMessage.ID?,
-        sources: [Message],
+        context: [Message],
         searchNote: String? = nil,
         found: [Message] = []
     ) {
@@ -771,31 +732,26 @@ struct AIChatView: View {
         var text = turns[index].text
         var emailDraft: ChatDraft?
         if let (prose, block) = EmailBlock.extract(from: text) {
-            emailDraft = makeDraft(from: block, sources: sources)
+            emailDraft = makeDraft(from: block, sources: context)
             text = prose.isEmpty ? "Here's the email. Send it, or edit it first." : prose
         }
 
-        // Tiles and charts, where the model asked for them. The app no longer
-        // decides which questions deserve structure -- it only draws what it
-        // was handed.
-        let structured = AnswerFences.extract(from: text)
-
-        // An email that was gone and found is the answer, so it is shown as
-        // one: the card if there is a single result, a row each if there are
-        // several. Describing it in a sentence and hiding the thing itself
-        // behind "Based on 15 emails" makes the reader go looking twice.
-        var blocks = structured.blocks
-        if blocks.isEmpty, !found.isEmpty {
-            blocks = [.messages(Array(found.prefix(6)))]
-        }
+        // Tiles, charts, and the emails themselves, where the model asked for
+        // them. The app decides neither which questions deserve structure nor
+        // which emails an answer is about. "The last email I got" used to be
+        // a correct sentence with six unrelated rows under it, because the
+        // app attached what it had rather than what was asked for.
+        let structured = AnswerFences.extract(from: text, messages: context)
 
         withAnimation(.easeOut(duration: 0.25)) {
             turns[index].text = structured.prose
-            turns[index].blocks = blocks
+            turns[index].blocks = structured.blocks
             turns[index].draft = emailDraft
-            // A draft is its own evidence; the list of emails behind it is
-            // noise next to a card that names the recipient.
-            turns[index].sources = emailDraft == nil ? sources : []
+            // What the search turned up, and only when there was one. The
+            // dozen messages retrieval picked were never the answer; listing
+            // them under it made every reply look like it had found twelve
+            // emails, and under "nothing matched" it looked like a lie.
+            turns[index].sources = searchNote == nil ? [] : found
             turns[index].isPending = false
         }
     }
@@ -816,7 +772,7 @@ struct AIChatView: View {
             replace(id, with: "Stopped.", failed: false)
         } else {
             turns[index].text = text
-            finish(id, sources: sources)
+            finish(id, context: sources)
         }
     }
 

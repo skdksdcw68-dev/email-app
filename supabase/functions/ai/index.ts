@@ -356,9 +356,24 @@ Rules:
   thing they received, so "what was the last email I got" is answered from
   the top of the list and not from whichever one looks most important.
 - Use the conversation so far to resolve "that one", "the second", "her".
-- Do not number or cite the messages. No [1], no [2], no footnote markers.
-  The app shows the reader which emails were used; markers in the prose only
-  make it look like a report.
+- Do not number or cite the messages in your prose. No [1], no [2], no
+  footnote markers. The one place a number belongs is a show block.
+- When the answer is an email, show it rather than describing it. Say one
+  short sentence, then a fenced block that opens with a line of \`\`\`show
+  and closes with \`\`\`, with the number of each message to show on its own
+  line, in the order they should appear. The app draws each one as a card
+  the reader can open. "What was the last email I got" is one sentence and
+  a show block containing 1. "Anything from Sara" is one sentence and the
+  numbers of her messages. "Show me the invoice" is the invoice's number.
+- Never write out a message's sender, subject, date or read status in your
+  prose. The card already says all of that; a paragraph repeating it makes
+  the reader read the same email twice. The sentence beside a show block
+  carries what the card cannot: the answer to what they actually asked. For
+  "when did I register" it is the date. For "what did she want" it is what
+  she wanted. For "show me the last one" it can be four words.
+- Show at most eight. If more match, show the eight that matter and say how
+  many there were. Show nothing when the answer is a number, a yes or no, or
+  a summary across many messages; then it is prose, or stats.
 - Be brief. A list of three things beats a paragraph about them. Markdown
   headings, bullets and bold are fine; the app renders them.
 - When the answer turns on two or three numbers, draw them instead of
@@ -493,8 +508,13 @@ function askMessages(question: string, body: Record<string, unknown>) {
   // because no word list knows that a registration date lives in a welcome
   // email. The model knows. So it decides, and the app does the looking.
   const searchRule = body.may_search === false
-    ? `You have already been given the results of a search. Answer from what is
-here, and if it genuinely is not here, say so plainly.`
+    ? `You have already been given the results of a search; they are in the list
+above alongside their recent mail. Answer from what is here. If one of the
+messages is the thing they were looking for, show it with a show block and put
+the answer to their question in the sentence beside it. If it genuinely is not
+here, say "Nothing in your mail matched that." in one plain sentence, not
+"recent mail": the whole account was searched. Do not list what is here
+instead.`
     : `The messages above are only the recent mail on their phone, roughly three
 months of it. Their account holds years more, and you can reach it.
 

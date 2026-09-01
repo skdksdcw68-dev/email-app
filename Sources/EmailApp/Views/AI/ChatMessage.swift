@@ -17,7 +17,9 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     /// The structured parts of an answer -- stat tiles, message cards, a
     /// chart. Local answers are mostly these; model answers are mostly prose.
     var blocks: [AnswerBlock] = []
-    /// The emails the answer leaned on, in the order the model cited them.
+    /// What a search turned up, when there was one. Empty otherwise: the
+    /// messages retrieval handed the model are not evidence of anything and
+    /// were never worth listing.
     var sources: [Message] = []
     /// An email Maily has written and is holding for the user's say-so.
     var draft: ChatDraft? = nil
@@ -33,6 +35,14 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     /// had to. Present means the sources below are search results, and they
     /// open showing rather than folded away.
     var searchNote: String? = nil
+
+    /// Whether the answer draws an email card or list of its own.
+    var showsMessages: Bool {
+        blocks.contains {
+            if case .messages = $0 { return true }
+            return false
+        }
+    }
 
     static func user(_ text: String) -> ChatMessage {
         ChatMessage(role: .user, text: text)

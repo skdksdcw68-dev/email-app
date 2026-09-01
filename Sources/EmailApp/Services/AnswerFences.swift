@@ -20,16 +20,31 @@ import Foundation
 ///     Important: 30
 ///     ```
 ///
+///     ```show
+///     1
+///     4
+///     ```
+///
+/// The last one is the emails themselves. The model reads a numbered list;
+/// when the answer *is* one of those emails, it names the number and the
+/// app draws the card, rather than the model typing the sender, subject and
+/// time back out as a paragraph. "Show me the last one" used to come back as
+/// bold text describing an email that was sitting one tap away.
+///
 /// Same contract as ```` ```email ````, and deliberately so: one way for the
 /// model to hand the app something richer than a paragraph.
 enum AnswerFences {
 
-    private static let kinds: Set<String> = ["stats", "chart"]
+    private static let kinds: Set<String> = ["stats", "chart", "show"]
 
     /// The prose with every block lifted out, and the blocks in the order
     /// they appeared. A fence that has not finished streaming is held back
     /// rather than shown half drawn.
-    static func extract(from text: String) -> (prose: String, blocks: [AnswerBlock]) {
+    ///
+    /// `messages` is the list the model was numbered against, in the same
+    /// order, so a show block resolves to real messages. Without it a show
+    /// block is dropped.
+    static func extract(from text: String, messages: [Message] = []) -> (prose: String, blocks: [AnswerBlock]) {
         var prose = ""
         var blocks: [AnswerBlock] = []
         var rest = Substring(text)
@@ -71,7 +86,7 @@ enum AnswerFences {
             }
 
             prose += head
-            if let block = parse(kind, String(afterTicks[bodyStart..<close.lowerBound])) {
+            if let block = parse(kind, String(afterTicks[bodyStart..<close.lowerBound]), messages: messages) {
                 blocks.append(block)
             }
             rest = afterTicks[close.upperBound...]
@@ -84,9 +99,13 @@ enum AnswerFences {
         return (tidied, blocks)
     }
 
+    /// The most a show block will draw. Past this it stops being a choice
+    /// and becomes the inbox again.
+    static let showLimit = 8
+
     // MARK: - Blocks
 
-    private static func parse(_ kind: String, _ body: String) -> AnswerBlock? {
+    private static func parse(_ kind: String, _ body: String, messages: [Message]) -> AnswerBlock? {
         let lines = body
             .split(separator: "\n")
             .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "*-\u{2022} \t")) }
@@ -94,6 +113,26 @@ enum AnswerFences {
         guard !lines.isEmpty else { return nil }
 
         switch kind {
+        case "show":
+            // Numbers into the list the model was reading. One per line is
+            // what it is told; a comma-separated line is accepted too. Only
+            // the first number on each piece counts, so "3. Sara, 10:31" is
+            // message three and not messages three, ten and thirty-one.
+            // Anything out of range is dropped, and nothing in range means no
+            // block rather than an empty one.
+            guard !messages.isEmpty else { return nil }
+            var seen = Set<Int>()
+            let picked = lines
+                .flatMap { $0.split(separator: ",") }
+                .compactMap { piece -> Int? in
+                    let digits = piece.drop { !$0.isNumber }.prefix { $0.isNumber }
+                    return Int(digits)
+                }
+                .filter { $0 >= 1 && $0 <= messages.count && seen.insert($0).inserted }
+                .prefix(showLimit)
+                .map { messages[$0 - 1] }
+            return picked.isEmpty ? nil : .messages(Array(picked))
+
         case "stats":
             // Three across is what the row fits. A fourth makes all of them
             // too narrow to read, so the model's extras are dropped rather

@@ -489,37 +489,6 @@ final class MailStore {
         mentionsMail(question)
     }
 
-    /// Whether the mail on this phone plausibly holds the answer.
-    ///
-    /// Deliberately looks at subjects and senders only, never bodies. A word
-    /// found in the body of an unrelated email is not evidence of anything:
-    /// "find me my registration date on upwork" matched "date" in somebody's
-    /// meeting invitation, the archive was judged to have the answer, Gmail
-    /// was never asked, and the reply was "nothing in your recent mail covers
-    /// that" about an email that was sitting in the account.
-    ///
-    /// A subject or a sender is what a person actually remembers a message
-    /// by, so a hit there is worth trusting and a hit in prose is not.
-    func hasStrongMatch(for question: String) -> Bool {
-        let words = question.lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { $0.count > 3 && !Self.stopWords.contains($0) }
-        guard !words.isEmpty else { return true }
-
-        // The longest word, not any word. "What is my upwork registration
-        // date" has four content words, and matching the weakest of them --
-        // "date", which turns up in half of everybody's subjects -- was
-        // enough to conclude the archive had the answer and never look
-        // further. The longest word is the one carrying the question:
-        // "registration". If that is nowhere, this is not the mail meant.
-        guard let key = words.max(by: { $0.count < $1.count }) else { return true }
-
-        return messages.contains { message in
-            let named = "\(message.subject) \(message.sender.name) \(message.sender.address)".lowercased()
-            return named.contains(key)
-        }
-    }
-
     /// Whether the question is about the mailbox at all. Deliberately broad:
     /// handing over context that is not needed wastes tokens, but withholding
     /// it from a real question gives a wrong answer, so this errs towards yes.

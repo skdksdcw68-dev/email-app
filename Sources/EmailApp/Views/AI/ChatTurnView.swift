@@ -73,9 +73,17 @@ struct ChatTurnView: View {
                     //
                     // A search is different. It says where the answer came
                     // from when the answer came from somewhere the reader
-                    // cannot see.
-                    if let note = turn.searchNote, !note.isEmpty, !turn.sources.isEmpty {
-                        SourceList(sources: turn.sources, searchNote: note)
+                    // cannot see -- and when nothing came, it says that, so
+                    // "I can't find it" reads as looked-and-missed rather
+                    // than never-looked.
+                    if let note = turn.searchNote, !note.isEmpty {
+                        SourceList(
+                            sources: turn.sources,
+                            searchNote: note,
+                            // Folded when the answer already shows the email
+                            // it found; open when the results are the answer.
+                            startsExpanded: !turn.showsMessages
+                        )
                     }
                 }
             }
@@ -176,54 +184,72 @@ struct ThinkingIndicator: View {
 struct SourceList: View {
     let sources: [Message]
     /// Set when Maily went past the mail on this phone to answer. Those
-    /// results are not a footnote, they are what was found, so they open
-    /// showing rather than folded away.
+    /// results are not a footnote, they are what was found.
     var searchNote: String? = nil
+    /// Open on arrival, or folded to a caption. Results that are the answer
+    /// open; results the answer has already drawn a card from fold, so the
+    /// same email is not on screen twice.
+    var startsExpanded = false
 
     @State private var isExpanded = false
     @State private var hasSetInitialState = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button {
-                withAnimation(.snappy(duration: 0.22)) { isExpanded.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: searchNote == nil ? "envelope.fill" : "magnifyingglass")
-                        .font(.caption2)
-                    Text(caption)
-                        .font(.caption.weight(.semibold))
-                        .multilineTextAlignment(.leading)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+        if sources.isEmpty {
+            // Looked, and found nothing. Saying what was looked for is what
+            // separates "not there" from "did not check". Not a button:
+            // there is nothing to unfold.
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.caption2)
+                Text("\(caption). Nothing matched.")
+                    .font(.caption.weight(.semibold))
+                    .multilineTextAlignment(.leading)
+            }
+            .foregroundStyle(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                Button {
+                    withAnimation(.snappy(duration: 0.22)) { isExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: searchNote == nil ? "envelope.fill" : "magnifyingglass")
+                            .font(.caption2)
+                        Text(caption)
+                            .font(.caption.weight(.semibold))
+                            .multilineTextAlignment(.leading)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    }
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
                 }
-                .foregroundStyle(.secondary)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isExpanded ? "Hide sources" : "Show sources")
-            .onAppear {
-                // Once, on the way in. Doing it on every render would fight
-                // the person the moment they folded it away themselves.
-                guard !hasSetInitialState else { return }
-                hasSetInitialState = true
-                isExpanded = searchNote != nil
-            }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isExpanded ? "Hide results" : "Show results")
+                .onAppear {
+                    // Once, on the way in. Doing it on every render would
+                    // fight the person the moment they folded it away.
+                    guard !hasSetInitialState else { return }
+                    hasSetInitialState = true
+                    isExpanded = startsExpanded
+                }
 
-            if isExpanded {
-                MessagesBlock(messages: sources)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                if isExpanded {
+                    MessagesBlock(messages: sources)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
     }
 
-    /// What it went looking for. Only ever shown after a real search, so
-    /// there is always something specific to say.
+    /// What it went looking for, with how much it got back. Only ever shown
+    /// after a real search, so there is always something specific to say.
     private var caption: String {
         guard let note = searchNote, !note.isEmpty else {
             return sources.count == 1 ? "1 email" : "\(sources.count) emails"
         }
-        return note
+        guard !sources.isEmpty else { return note }
+        return "\(note) · \(sources.count)"
     }
 }
