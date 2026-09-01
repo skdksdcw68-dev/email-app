@@ -32,6 +32,9 @@ struct Message: Identifiable, Hashable, Codable {
 
     /// Shown as a paperclip on the row, the way every mail client marks it.
     var hasAttachment: Bool = false
+    /// What came with it, without the bytes. Populated when Gmail parses the
+    /// message; empty for anything the app made itself.
+    var attachments: [Attachment] = []
 
     /// What the AI decided about this message.
     var tags: Set<AITag> = []

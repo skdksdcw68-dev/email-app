@@ -148,6 +148,14 @@ struct MessageDetailView: View {
                 Divider()
 
                 body(for: message)
+
+                // Under the message, not above it. What was sent matters
+                // before what came with it, and a deck of five files pushing
+                // the actual words off the screen gets the priority backwards.
+                if !message.attachments.isEmpty {
+                    AttachmentStrip(attachments: message.attachments)
+                        .padding(.top, 4)
+                }
             }
             .padding()
         }
@@ -259,4 +267,5 @@ private struct AISummaryCard: View {
     }
     .environment(store)
     .environment(UserStore(defaults: .previews, startAt: .finished))
+    .environment(AttachmentStore())
 }

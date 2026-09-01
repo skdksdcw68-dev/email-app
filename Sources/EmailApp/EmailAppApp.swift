@@ -16,6 +16,8 @@ struct EmailAppApp: App {
     @State private var memory = AIMemory()
     /// What they have looked for, so looking again is one tap.
     @State private var searches = SearchHistory()
+    /// Files pulled out of messages, on tap and never before.
+    @State private var attachments = AttachmentStore()
 
     var body: some Scene {
         WindowGroup {
@@ -25,6 +27,7 @@ struct EmailAppApp: App {
                 .environment(chats)
                 .environment(memory)
                 .environment(searches)
+                .environment(attachments)
                 // Google redirects back through the reversed-client-id URL
                 // scheme declared in Info.plist; the SDK completes the flow.
                 .onOpenURL { url in

@@ -291,6 +291,9 @@ enum GmailService {
         message.threadID = json["threadId"] as? String
         message.messageIDHeader = headers["message-id"]
         message.hasAttachment = hasAttachment(in: payload)
+        if let id = message.remoteID {
+            message.attachments = attachments(in: payload, messageID: id)
+        }
         message.htmlBody = firstPart(in: payload, mimeType: "text/html")
 
         message.tags = MessageClassifier.tags(for: message, headers: headers, labels: labels)
@@ -327,6 +330,70 @@ enum GmailService {
             if !disposition.lowercased().contains("inline") { return true }
         }
         return (payload["parts"] as? [[String: Any]] ?? []).contains { hasAttachment(in: $0) }
+    }
+
+    /// Every real attachment in a message, without their contents.
+    ///
+    /// Gmail hands over a filename, a size and an `attachmentId` here; the
+    /// bytes are a second request, made only when somebody opens one. Listing
+    /// a mailbox must not cost what downloading it costs.
+    static func attachments(in payload: [String: Any], messageID: String) -> [Attachment] {
+        var found: [Attachment] = []
+
+        func walk(_ part: [String: Any]) {
+            let filename = part["filename"] as? String ?? ""
+            let body = part["body"] as? [String: Any] ?? [:]
+
+            if !filename.isEmpty, let attachmentID = body["attachmentId"] as? String {
+                let headers = part["headers"] as? [[String: Any]] ?? []
+                let disposition = headers.first {
+                    ($0["name"] as? String)?.lowercased() == "content-disposition"
+                }?["value"] as? String ?? ""
+
+                // An image the HTML body draws inline is not something anybody
+                // wants offered as a file to open.
+                if !disposition.lowercased().contains("inline") {
+                    found.append(
+                        Attachment(
+                            id: attachmentID,
+                            messageRemoteID: messageID,
+                            filename: filename,
+                            mimeType: (part["mimeType"] as? String) ?? "application/octet-stream",
+                            size: (body["size"] as? Int) ?? 0
+                        )
+                    )
+                }
+            }
+
+            for child in part["parts"] as? [[String: Any]] ?? [] { walk(child) }
+        }
+
+        walk(payload)
+        return found
+    }
+
+    /// The bytes of one attachment. Only ever called because somebody tapped
+    /// it, which is what keeps a mailbox cheap to hold.
+    static func attachmentData(
+        messageID: String, attachmentID: String, accessToken: String
+    ) async throws -> Data {
+        let url = URL(string: "\(base)/messages/\(messageID)/attachments/\(attachmentID)")!
+        let json = try await get(url, accessToken: accessToken)
+        guard let encoded = json["data"] as? String,
+              let data = Data(base64Encoded: base64Standard(encoded))
+        else { throw ServiceError.malformed }
+        return data
+    }
+
+    /// Gmail returns base64url. Padding is stripped too, and Foundation's
+    /// decoder rejects both, so put all three back.
+    private static func base64Standard(_ text: String) -> String {
+        var standard = text
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = standard.count % 4
+        if remainder > 0 { standard += String(repeating: "=", count: 4 - remainder) }
+        return standard
     }
 
     /// "Abel Amare <abel@example.com>" -> Contact.
