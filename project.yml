@@ -71,6 +71,11 @@ targets:
         LSRequiresIPhoneOS: true
         UIRequiredDeviceCapabilities:
           - arm64
+        # Without this a silent push does not wake the app at all: iOS
+        # delivers it only to an app that has declared it can act on one.
+        # This is what makes new mail appear before the person opens Maily.
+        UIBackgroundModes:
+          - remote-notification
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}

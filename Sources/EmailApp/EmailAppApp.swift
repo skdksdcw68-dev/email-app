@@ -4,6 +4,9 @@ import GoogleSignIn
 @main
 struct EmailAppApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    /// Registering for push, receiving the token and being woken by one are
+    /// all UIKit delegate callbacks with no SwiftUI equivalent.
+    @UIApplicationDelegateAdaptor(PushDelegate.self) private var pushDelegate
 
     /// Onboarding state persists, so a returning user launches straight into
     /// the app after the splash. The mail store starts empty until an inbox is
@@ -20,6 +23,9 @@ struct EmailAppApp: App {
     @State private var searches = SearchHistory()
     /// Files pulled out of messages, on tap and never before.
     @State private var attachments = AttachmentStore()
+    /// Permission, the device token, and keeping Gmail's seven day watch
+    /// from lapsing.
+    @State private var push = PushService()
 
     var body: some Scene {
         WindowGroup {
@@ -30,6 +36,7 @@ struct EmailAppApp: App {
                 .environment(memory)
                 .environment(searches)
                 .environment(attachments)
+                .environment(push)
                 // Google redirects back through the reversed-client-id URL
                 // scheme declared in Info.plist; the SDK completes the flow.
                 .onOpenURL { url in
@@ -56,6 +63,20 @@ struct EmailAppApp: App {
                         await searches.pull()
                     }
                     Analytics.record(.appOpened, ["mailbox": .bool(mail.isConnected)])
+
+                    // The delegate is built by UIKit and cannot be handed
+                    // dependencies, so it is given them here.
+                    PushDelegate.mail = mail
+                    PushDelegate.push = push
+
+                    Task {
+                        await push.refreshAuthorization()
+                        // Gmail's watch lapses after seven days and then
+                        // stops silently, which is how an email app's
+                        // notifications die without anybody noticing.
+                        // Renewing every launch is free.
+                        if mail.isConnected { await push.startWatching(topic: PushService.topic) }
+                    }
                 }
                 // Coming back to the app checks for new mail the cheap way:
                 // one request that usually answers "nothing", instead of

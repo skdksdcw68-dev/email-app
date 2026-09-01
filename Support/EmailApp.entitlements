@@ -6,5 +6,14 @@
 	<array>
 		<string>Default</string>
 	</array>
+	<!-- Push. "production" because every build that reaches a device comes
+	     through TestFlight, which uses the production APNs environment.
+	     A build signed for "development" gets a sandbox device token, and
+	     sending it to the production APNs host fails with BadDeviceToken --
+	     a mismatch that reads like a broken token rather than a wrong host.
+	     The provisioning profile regenerated on 2026-09-01 carries the
+	     matching aps-environment, so this signs. -->
+	<key>aps-environment</key>
+	<string>production</string>
 </dict>
 </plist>

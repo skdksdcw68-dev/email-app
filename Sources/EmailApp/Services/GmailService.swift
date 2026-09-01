@@ -110,6 +110,38 @@ enum GmailService {
         return (messages.compactMap { $0["id"] as? String }, next)
     }
 
+    // MARK: - Watching
+
+    /// Asks Gmail to publish a notice to a Pub/Sub topic whenever this
+    /// mailbox changes.
+    ///
+    /// What Gmail publishes is only the address and a history id. No sender,
+    /// no subject, no body: the notice says "go and look", and the looking
+    /// happens on the phone with the phone's own credentials. That is what
+    /// keeps mail content off every server in the chain.
+    ///
+    /// Expires after seven days. Calling again renews rather than duplicating,
+    /// so this runs on every launch.
+    @discardableResult
+    static func watch(topic: String, accessToken: String) async throws -> String? {
+        let json = try await post(
+            URL(string: "\(base)/watch")!,
+            body: [
+                "topicName": topic,
+                "labelIds": ["INBOX"],
+                "labelFilterBehavior": "include",
+            ],
+            accessToken: accessToken
+        )
+        return json["historyId"] as? String
+    }
+
+    /// Stops it. Called when the mailbox is disconnected, so Google is not
+    /// left publishing about an account this app no longer watches.
+    static func stopWatching(accessToken: String) async throws {
+        _ = try? await post(URL(string: "\(base)/stop")!, body: [:], accessToken: accessToken)
+    }
+
     // MARK: - Catching up
 
     /// What changed since a point in time, as Gmail records it.
