@@ -3,8 +3,11 @@ import UIKit
 
 /// The chat, pushed from the AI tab.
 ///
-/// Entirely SwiftUI: the bubbles, the thinking dots and the floating
-/// composer are all native views. No web content anywhere.
+/// Entirely SwiftUI for content: the bubbles, the thinking dots and the
+/// composer are all native views. Positioning the composer is the one job
+/// handed to UIKit -- `KeyboardAttachedBar` pins it to the keyboard's layout
+/// guide so it moves on the keyboard's own curve and tracks an interactive
+/// dismissal exactly, which SwiftUI's safe-area machinery could not do.
 ///
 /// Questions are routed before anything is spent: what the mailbox can
 /// settle on its own is answered instantly on the device as structure
@@ -18,7 +21,9 @@ struct AIChatView: View {
     @State private var draft = ""
     @State private var isWorking = false
     @State private var showsActions = false
-    @FocusState private var isInputFocused: Bool
+    /// Reported by the attached bar, so the conversation leaves room for it.
+    /// Starts at the resting capsule height so the first frame is right.
+    @State private var barHeight: CGFloat = 54
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -47,13 +52,17 @@ struct AIChatView: View {
                 .padding(.bottom, 8)
                 .animation(.spring(response: 0.38, dampingFraction: 0.82), value: turns.count)
             }
+            // The conversation runs underneath the floating bar and shows
+            // through its material; this is only how far the last message
+            // clears it.
+            .contentMargins(.bottom, barHeight + KeyboardBarController.keyboardGap, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
             // A tap anywhere on the conversation puts the keyboard away.
             // Simultaneous, so the links inside answers still fire -- and
             // safe here because this screen has no press-and-hold control
             // for the gesture to fight.
             .simultaneousGesture(TapGesture().onEnded {
-                isInputFocused = false
+                dismissKeyboard()
                 showsActions = false
             })
             .onChange(of: turns.count) { _, _ in
@@ -61,6 +70,21 @@ struct AIChatView: View {
                 withAnimation(.easeOut(duration: 0.3)) {
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
+            }
+            .overlay {
+                KeyboardAttachedBar(height: $barHeight) {
+                    ChatComposer(
+                        text: $draft,
+                        showsActions: $showsActions,
+                        isWorking: isWorking,
+                        onSend: send,
+                        onAction: handleAction
+                    )
+                }
+                // Full-bleed on purpose: if SwiftUI shrank this for the
+                // keyboard, the bar would be back to following SwiftUI's
+                // layout instead of UIKit's guide.
+                .ignoresSafeArea()
             }
         }
         .keyboardDismissable()
@@ -84,16 +108,6 @@ struct AIChatView: View {
                 }
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            ChatComposer(
-                text: $draft,
-                isFocused: $isInputFocused,
-                showsActions: $showsActions,
-                isWorking: isWorking,
-                onSend: send,
-                onAction: handleAction
-            )
-        }
     }
 
     // MARK: - Asking
@@ -109,12 +123,12 @@ struct AIChatView: View {
         switch action {
         case .whatNeedsReply: ask("What do I need to reply to?")
         case .whoIsWaiting:   ask("Who am I keeping waiting?")
-        case .findSomething:  isInputFocused = true
+        case .findSomething:  break // The composer owns focus and handles this itself.
         }
     }
 
     private func ask(_ question: String) {
-        isInputFocused = false
+        dismissKeyboard()
         showsActions = false
         turns.append(.user(question))
 
