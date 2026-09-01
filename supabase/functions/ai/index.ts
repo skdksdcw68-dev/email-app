@@ -302,6 +302,12 @@ Rules:
 - When you are comparing more than three things, or showing a spread, use a
   block that opens with \`\`\`chart and closes with \`\`\`: a title on the
   first line, then "Label: number" per line. Values must be plain numbers.
+- Counts of two or three piles are stats. A breakdown of their whole inbox
+  by tag is a chart. "How is my inbox looking" is stats: pick the three that
+  matter, not all of them.
+- Always write one short sentence outside the block, saying what it means or
+  what to do about it. A block on its own is not an answer, it is a table.
+  Do not repeat the numbers in that sentence.
 - Use neither when the answer is a sentence. A tile with one number in it is
   worse than the sentence it replaced.
 - No preamble. Do not restate the question.
