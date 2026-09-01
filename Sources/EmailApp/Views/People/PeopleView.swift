@@ -21,7 +21,6 @@ struct PeopleView: View {
     @State private var isSearching = false
     @State private var query = ""
     @State private var scrolledAway = false
-    @State private var restingOffset: CGFloat?
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -43,24 +42,6 @@ struct PeopleView: View {
 
         return NavigationStack {
             List {
-                // Zero-height sentinel: its position in the list's coordinate
-                // space is how far the list has scrolled.
-                Section {
-                    Color.clear
-                        .frame(height: 0)
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .background {
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: PeopleScrollKey.self,
-                                    value: proxy.frame(in: .named("people")).minY
-                                )
-                            }
-                        }
-                }
-
                 if isSearching {
                     Section {
                         ForEach(searchResults) { row($0) }
@@ -93,17 +74,11 @@ struct PeopleView: View {
                     }
                 }
             }
-            .coordinateSpace(name: "people")
-            .onPreferenceChange(PeopleScrollKey.self) { offset in
-                // The first reading is where the list rests; anything a bit
-                // above that is scrolled. The header keeps one height in both
-                // states, so the resting point never moves under us.
-                if restingOffset == nil { restingOffset = offset }
-                let away = offset < (restingOffset ?? offset) - 24
-                if away != scrolledAway {
-                    withAnimation(.easeOut(duration: 0.18)) { scrolledAway = away }
-                }
-            }
+            // The first section starts just under the chips. The list's own
+            // top margin, plus a zero-height section that used to track the
+            // scroll, was most of the gap that sat there before.
+            .contentMargins(.top, 6, for: .scrollContent)
+            .modifier(ScrollAwayTracking(isAway: $scrolledAway))
             .keyboardDismissable()
             .safeAreaInset(edge: .top, spacing: 0) {
                 header(filters: filters)
@@ -135,7 +110,7 @@ struct PeopleView: View {
     /// with the capsule on the right; scrolled, the title is small and
     /// centred and the capsule is gone; searching, the row is the field.
     private func header(filters: [PeopleFilter]) -> some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 16) {
             ZStack {
                 Text("People")
                     .font(.headline)
@@ -167,7 +142,7 @@ struct PeopleView: View {
             }
         }
         .padding(.top, 4)
-        .padding(.bottom, 8)
+        .padding(.bottom, 6)
         .background(Color(uiColor: .systemGroupedBackground))
         .animation(.easeOut(duration: 0.18), value: scrolledAway)
         .animation(.snappy(duration: 0.22), value: isSearching)
@@ -297,6 +272,29 @@ struct PeopleView: View {
     }
 }
 
+/// Flips `isAway` once the list has scrolled a little past where it rests.
+///
+/// iOS 18's scroll geometry is exact and costs nothing, and it needs no
+/// sentinel row in the list -- the zero-height section that used to do this
+/// job brought a whole section's worth of spacing with it. Earlier systems
+/// keep the expanded header; only the collapse is lost.
+private struct ScrollAwayTracking: ViewModifier {
+    @Binding var isAway: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top > 24
+            } action: { _, away in
+                withAnimation(.easeOut(duration: 0.18)) { isAway = away }
+            }
+        } else {
+            content
+        }
+    }
+}
+
 /// A chip on the People page: one of the categories, or a relationship the
 /// user named themselves.
 enum PeopleFilter: Hashable {
@@ -338,13 +336,6 @@ enum PeopleFilter: Hashable {
         let customs = Set(people.compactMap(\.customRelationship))
         return PersonCategory.allCases.filter(categories.contains).map(PeopleFilter.category)
             + customs.sorted().map(PeopleFilter.custom)
-    }
-}
-
-private struct PeopleScrollKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 
