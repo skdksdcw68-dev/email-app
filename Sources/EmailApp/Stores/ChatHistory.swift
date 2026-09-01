@@ -43,7 +43,9 @@ final class ChatHistory {
     private(set) var conversations: [Conversation] = []
 
     let fileURL: URL
-    private var disconnectObserver: NSObjectProtocol?
+    /// Read in `deinit`, which is not on the main actor. The token is only
+    /// ever written once, in `init`, so there is nothing to race.
+    nonisolated(unsafe) private var disconnectObserver: NSObjectProtocol?
 
     init(fileURL: URL? = nil) {
         self.fileURL = fileURL ?? Self.defaultURL
