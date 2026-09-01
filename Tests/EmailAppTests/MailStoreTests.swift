@@ -300,14 +300,28 @@ final class MailStoreTests: XCTestCase {
         XCTAssertFalse(store.hasStrongMatch(for: "whats my upwork registration date"))
     }
 
-    func testASubjectOrSenderMatchIsEvidence() {
+    func testTheKeyWordMatchingASenderIsEvidence() {
         let store = MailStore(messages: [
             Message(sender: Contact(name: "Upwork", address: "no-reply@upwork.com"),
                     recipients: [], subject: "Welcome to Upwork", body: "hello",
                     date: .now, mailbox: .inbox),
         ])
 
-        XCTAssertTrue(store.hasStrongMatch(for: "find me my registration date on upwork"))
+        XCTAssertTrue(store.hasStrongMatch(for: "what did upwork send me"))
+    }
+
+    func testItErrsTowardsSearchingRatherThanAssuming() {
+        // Even with an Upwork email present, "registration" is what the
+        // question is about and it is nowhere here. Searching Gmail when the
+        // answer was already on the phone costs one request and finds the
+        // same email. Not searching when it was not costs the answer.
+        let store = MailStore(messages: [
+            Message(sender: Contact(name: "Upwork", address: "no-reply@upwork.com"),
+                    recipients: [], subject: "Your weekly Upwork digest", body: "jobs",
+                    date: .now, mailbox: .inbox),
+        ])
+
+        XCTAssertFalse(store.hasStrongMatch(for: "find me my registration date on upwork"))
     }
 
     func testLookingSomethingUpCountsAsAMailQuestion() {
