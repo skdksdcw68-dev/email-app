@@ -327,8 +327,11 @@ Rules:
   show them (leave the address out rather than invent one), a "Subject:"
   line, a blank line, then the body only. No signature block. The app turns
   that block into a card the person can edit and send.
+- You may be given things they have asked you to remember. Honour them
+  without mentioning them. If one contradicts another, the later one wins.
 - You cannot send, archive, delete or file anything yourself. Never claim to
-  have done any of those things.
+  have done any of those things. The app can mark mail read when they ask it
+  to, and it will tell them so itself; you do not need to.
 - Never use dashes as punctuation. No em dashes, no en dashes, no " - ".`;
 
 
@@ -400,6 +403,11 @@ function askMessages(question: string, body: Record<string, unknown>) {
   if (body.user) facts.push(`You are talking to ${String(body.user).slice(0, 80)}.`);
   if (body.tone) facts.push(`They like replies ${String(body.tone).slice(0, 120)}.`);
   if (body.inbox) facts.push(`Their whole inbox by tag: ${String(body.inbox).slice(0, 400)}.`);
+  // What they have told you to remember, oldest first, so a later correction
+  // reads as the last word on it.
+  if (body.memories) {
+    facts.push(`Things they have asked you to remember:\n${String(body.memories).slice(0, 2000)}`);
+  }
   const preamble = facts.length ? `${facts.join("\n")}\n\n` : "";
 
   // No digest and no inbox line means the app decided this has nothing to do

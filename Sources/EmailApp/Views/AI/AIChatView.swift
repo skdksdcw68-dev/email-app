@@ -35,6 +35,7 @@ struct AIChatView: View {
     @Environment(MailStore.self) private var mail
     @Environment(UserStore.self) private var user
     @Environment(ChatHistory.self) private var history
+    @Environment(AIMemory.self) private var memory
 
     @State private var turns: [ChatMessage] = []
     @State private var draft = ""
@@ -419,6 +420,9 @@ struct AIChatView: View {
         case .markRead(let request):
             markRead(request)
 
+        case .remember(let fact):
+            remember(fact)
+
         case .question:
             work = Task { await askModel(question) }
         }
@@ -463,6 +467,10 @@ struct AIChatView: View {
         }
 
         let changed = mail.markRead(targets.map(\.id))
+        Analytics.record(.markedRead, [
+            "count": .int(changed.count),
+            "scope": .string(request.isEverything ? "all" : (request.tag?.rawValue ?? "listed")),
+        ])
         let title = changed.count == 1
             ? "Marked 1 email as read"
             : "Marked \(changed.count) emails as read"
@@ -478,12 +486,35 @@ struct AIChatView: View {
         }
     }
 
+    // MARK: - Remembering
+
+    /// Told once, kept from then on. Shown as a receipt rather than a
+    /// sentence, because "I'll remember that" with nothing behind it is the
+    /// oldest lie an assistant tells.
+    private func remember(_ fact: String) {
+        guard let saved = memory.remember(fact) else {
+            turns.append(.say("Already knew that one."))
+            return
+        }
+
+        Analytics.record(.memorySaved, ["length": .int(saved.text.count)])
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+            turns.append(.did(ChatReceipt(
+                symbol: "brain",
+                title: saved.text,
+                detail: "I'll keep this in mind from now on. You can remove it in Settings.",
+                undo: []
+            )))
+        }
+    }
+
     private func undo(in turnID: ChatMessage.ID) {
         guard let index = turns.firstIndex(where: { $0.id == turnID }),
               let receipt = turns[index].receipt, !receipt.isUndone
         else { return }
 
         mail.markRead(receipt.undo, false)
+        Analytics.record(.markedReadUndone, ["count": .int(receipt.undo.count)])
         withAnimation(.snappy(duration: 0.25)) {
             turns[index].receipt?.isUndone = true
         }
@@ -502,6 +533,7 @@ struct AIChatView: View {
 
         turns.append(.thinking)
         let pendingID = turns.last?.id
+        let started = Date.now
 
         isWorking = true
         defer { isWorking = false }
@@ -523,17 +555,30 @@ struct AIChatView: View {
                 // about mail, which is what keeps an aside cheap.
                 inbox: context.isEmpty ? nil : mail.tagSummary,
                 signedInAs: user.account?.displayName,
-                tone: user.tonePreference
+                tone: user.tonePreference,
+                memories: memory.prompt
             ) { fragment in
                 appendDelta(pendingID, fragment)
             }
             finish(pendingID, sources: context)
             offered = context
+
+            Analytics.record(.chatAsked, [
+                "length": .int(question.count),
+                "words": .int(question.split(separator: " ").count),
+                "used_mail": .bool(!context.isEmpty),
+                "emails": .int(context.count),
+                "seconds": .int(Int(Date.now.timeIntervalSince(started))),
+                "wrote_email": .bool(turns.last?.draft != nil),
+                "drew_blocks": .int(turns.last?.blocks.count ?? 0),
+            ])
         } catch {
             if isCancellation(error) {
                 stopped(pendingID, sources: context)
+                Analytics.record(.chatStopped, ["seconds": .int(Int(Date.now.timeIntervalSince(started)))])
             } else {
                 replace(pendingID, with: error.localizedDescription, failed: true)
+                Analytics.record(.chatFailed, ["used_mail": .bool(!context.isEmpty)])
             }
         }
     }
@@ -755,6 +800,10 @@ struct AIChatView: View {
             }
             let recipient = pending.to.name.isEmpty ? pending.to.address : pending.to.name
             turns.append(.say("Sent to \(recipient)."))
+            Analytics.record(.draftSent, [
+                "was_reply": .bool(pending.replyingTo != nil),
+                "length": .int(pending.body.count),
+            ])
         } catch {
             withAnimation(.easeOut(duration: 0.2)) {
                 turns[index].draft?.status = .failed(error.localizedDescription)
@@ -767,6 +816,7 @@ struct AIChatView: View {
 
     private func discardDraft(in turnID: ChatMessage.ID) {
         guard let index = turns.firstIndex(where: { $0.id == turnID }) else { return }
+        Analytics.record(.draftDiscarded)
         withAnimation(.easeOut(duration: 0.2)) {
             turns[index].draft = nil
             turns[index].text = "Dropped that draft."
@@ -792,4 +842,5 @@ struct AIChatView: View {
     .environment(MailStore.connected())
     .environment(UserStore(defaults: .previews, startAt: .finished))
     .environment(ChatHistory(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-chats.json")))
+    .environment(AIMemory(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-memory.json")))
 }

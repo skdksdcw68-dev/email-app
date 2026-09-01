@@ -129,4 +129,5 @@ struct ChatHistoryView: View {
         ChatHistoryView()
     }
     .environment(ChatHistory(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-chats.json")))
+    .environment(AIMemory(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-memory.json")))
 }

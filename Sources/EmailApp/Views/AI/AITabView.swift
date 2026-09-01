@@ -169,4 +169,5 @@ struct AITabView: View {
         .environment(MailStore.connected())
         .environment(UserStore(defaults: .previews, startAt: .finished))
         .environment(ChatHistory(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-chats.json")))
+    .environment(AIMemory(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-memory.json")))
 }

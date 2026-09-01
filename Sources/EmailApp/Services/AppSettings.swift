@@ -68,6 +68,23 @@ enum AppSettings {
         get { UserDefaults.standard.string(forKey: "settings.customInstructions") ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: "settings.customInstructions") }
     }
+
+    // MARK: - Privacy
+
+    /// Whether conversations with the assistant follow the account to another
+    /// device. Off keeps them on this phone, where they used to live.
+    static var syncsChats: Bool {
+        get { UserDefaults.standard.object(forKey: "settings.syncsChats") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.syncsChats") }
+    }
+
+    /// Whether the app reports how it is used: which features get opened,
+    /// how often an answer fails, how long one takes. Shape, never content --
+    /// no email and nothing typed into the assistant is in it.
+    static var sharesUsageData: Bool {
+        get { UserDefaults.standard.object(forKey: "settings.usageData") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.usageData") }
+    }
 }
 
 extension Notification.Name {

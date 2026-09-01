@@ -202,6 +202,7 @@ enum AIService {
         inbox: String? = nil,
         signedInAs: String? = nil,
         tone: String? = nil,
+        memories: String? = nil,
         onDelta: @MainActor (String) -> Void
     ) async throws {
         // 300, not 400. Twelve messages at 400 characters is most of what a
@@ -233,6 +234,7 @@ enum AIService {
         if let inbox, !inbox.isEmpty { payload["inbox"] = inbox }
         if let signedInAs, !signedInAs.isEmpty { payload["user"] = signedInAs }
         if let tone, !tone.isEmpty { payload["tone"] = tone }
+        if let memories, !memories.isEmpty { payload["memories"] = memories }
 
         var request = URLRequest(url: SupabaseConfig.url.appending(path: "functions/v1/ai"))
         request.httpMethod = "POST"

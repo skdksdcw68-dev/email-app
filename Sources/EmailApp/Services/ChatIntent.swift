@@ -23,6 +23,8 @@ enum ChatIntent: Equatable {
     case draft(DraftRequest)
     /// "mark these as read", "mark the newsletters read".
     case markRead(MarkReadRequest)
+    /// "remember that I sign off as Abel".
+    case remember(String)
     /// Everything else: a question about the mailbox.
     case question
 }
@@ -66,9 +68,53 @@ enum ChatIntentParser {
         // "mark the reply from Sara as read" would otherwise trip the reply
         // verb and start writing an email nobody asked for.
         if let request = markReadRequest(in: text) { return .markRead(request) }
+        if let fact = memoryRequest(in: raw) { return .remember(fact) }
         if let request = draftRequest(in: text) { return .draft(request) }
         return .question
     }
+
+    // MARK: - Remembering
+
+    /// "remember that I sign off as Abel", "keep in mind I hate exclamation
+    /// marks". Takes the raw text rather than the normalised one, because
+    /// what gets stored is read back to the person and should keep its
+    /// capitals.
+    ///
+    /// Openers only. "Do you remember what Sara said" is a question about
+    /// the mailbox, and storing it as a fact about the person would be both
+    /// wrong and hard to notice.
+    private static func memoryRequest(in raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowered = trimmed.lowercased()
+
+        guard let opener = memoryOpeners.first(where: { lowered.hasPrefix($0) }) else { return nil }
+
+        var fact = String(trimmed.dropFirst(opener.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: ": \t"))
+        // "remember that ..." and "remember, ..." are the same request.
+        for filler in ["that ", "this: ", "this "] where fact.lowercased().hasPrefix(filler) {
+            fact = String(fact.dropFirst(filler.count))
+            break
+        }
+
+        fact = fact.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard fact.count >= 3 else { return nil }
+        // "Remember to reply to Sara" is a task, not a fact about them, and
+        // Maily has nowhere to put a task. Let it fall through to the writer.
+        guard !fact.lowercased().hasPrefix("to ") else { return nil }
+        return fact
+    }
+
+    /// Longest first, so "remember that" is stripped whole rather than
+    /// leaving "that" behind.
+    private static let memoryOpeners: [String] = [
+        "please remember that", "always remember that", "just remember that",
+        "please remember", "always remember", "just remember",
+        "keep in mind that", "keep in mind", "don't forget that",
+        "dont forget that", "don't forget", "dont forget",
+        "note that", "make a note that", "make a note",
+        "remember that", "remember,", "remember",
+    ].sorted { $0.count > $1.count }
 
     // MARK: - Marking read
 

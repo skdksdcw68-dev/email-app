@@ -122,12 +122,44 @@ struct AIAutomationSettingsView: View {
 struct PrivacySettingsView: View {
     @Environment(UserStore.self) private var user
     @Environment(MailStore.self) private var mail
+    @Environment(ChatHistory.self) private var chats
+    @Environment(AIMemory.self) private var memory
 
     @State private var showingDisconnect = false
     @State private var showingSignOut = false
+    @State private var syncsChats = AppSettings.syncsChats
+    @State private var sharesUsageData = AppSettings.sharesUsageData
 
     var body: some View {
         List {
+            Section {
+                NavigationLink {
+                    MemorySettingsView()
+                } label: {
+                    LabeledContent("What Maily remembers", value: "\(memory.facts.count)")
+                }
+            } header: {
+                Text("Assistant memory")
+            } footer: {
+                Text("Say \"remember that…\" in a chat and it is kept here. Nothing is remembered unless you ask for it.")
+            }
+
+            Section {
+                Toggle("Sync chats to my account", isOn: $syncsChats)
+                    .onChange(of: syncsChats) { _, value in
+                        AppSettings.syncsChats = value
+                        if !value { Task { try? await Backend.deleteAll("chats") } }
+                    }
+                Toggle("Share usage data", isOn: $sharesUsageData)
+                    .onChange(of: sharesUsageData) { _, value in
+                        AppSettings.sharesUsageData = value
+                    }
+            } header: {
+                Text("Sync and diagnostics")
+            } footer: {
+                Text("Syncing keeps your conversations on your Maily account so they follow you to another device. They include the email content quoted in them. Turning it off removes the synced copy and keeps everything on this phone.\n\nUsage data is how the app is used, never what is in it: which screens get opened, how long an answer takes, how often one fails. No email and nothing you type is included.")
+            }
+
             Section {
                 Label("Read your mail", systemImage: "envelope.open")
                 Label("Create drafts and send", systemImage: "paperplane")
@@ -176,11 +208,65 @@ struct PrivacySettingsView: View {
             Button("Sign out", role: .destructive) {
                 mail.disconnect()
                 PersonPreferences.clearAll()
+                // Memory is about the person rather than the mailbox, so
+                // disconnecting an inbox keeps it. Signing out does not.
+                memory.forgetAll()
+                chats.clearAll()
                 user.signOut()
                 Task { await AuthService.signOut() }
             }
         } message: {
             Text("Signs you out and removes the mailbox, the offline copy and your saved preferences from this device.")
+        }
+    }
+}
+
+/// Everything Maily has been told to remember, and the way to take it back.
+///
+/// A memory the person cannot see is a memory they cannot correct, and an
+/// assistant that quietly holds a wrong fact about somebody is worse than
+/// one that holds none.
+struct MemorySettingsView: View {
+    @Environment(AIMemory.self) private var memory
+
+    @State private var showingClear = false
+
+    var body: some View {
+        List {
+            if memory.facts.isEmpty {
+                Section {
+                    ContentUnavailableView(
+                        "Nothing yet",
+                        systemImage: "brain",
+                        description: Text("Tell Maily \"remember that I sign off as Abel\" and it will keep it here.")
+                    )
+                }
+            } else {
+                Section {
+                    ForEach(memory.facts) { fact in
+                        Text(fact.text)
+                            .font(.subheadline)
+                    }
+                    .onDelete { offsets in
+                        for index in offsets { memory.forget(memory.facts[index].id) }
+                    }
+                } footer: {
+                    Text("Swipe to remove one. These are sent with every question you ask.")
+                }
+
+                Section {
+                    Button("Forget everything", role: .destructive) { showingClear = true }
+                }
+            }
+        }
+        .navigationTitle("Memory")
+        .navigationBarTitleDisplayMode(.inline)
+        .hidesTabBar()
+        .alert("Forget everything?", isPresented: $showingClear) {
+            Button("Cancel", role: .cancel) {}
+            Button("Forget", role: .destructive) { memory.forgetAll() }
+        } message: {
+            Text("Maily will stop applying all \(memory.facts.count) of these. It cannot be undone.")
         }
     }
 }

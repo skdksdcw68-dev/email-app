@@ -81,16 +81,79 @@ final class ChatHistory {
         conversations.append(conversation)
         conversations.sort { $0.updatedAt > $1.updatedAt }
         persist()
+        push(conversation)
     }
 
     func delete(_ id: UUID) {
         conversations.removeAll { $0.id == id }
         persist()
+        guard AppSettings.syncsChats else { return }
+        Task.detached(priority: .background) { try? await Backend.delete("chats", id: id) }
     }
 
     func clearAll() {
         conversations = []
         try? FileManager.default.removeItem(at: fileURL)
+        // What the phone forgets, the server forgets. Disconnecting a mailbox
+        // has always wiped the local file; leaving the synced copy behind
+        // would make that promise a lie.
+        Task.detached(priority: .background) { try? await Backend.deleteAll("chats") }
+    }
+
+    // MARK: - Sync
+    //
+    // The local file stays the source of truth for what is on screen: the
+    // chat has to open instantly and work on a plane. The server is a copy
+    // that follows the account to another device. Writes go both ways as
+    // they happen; reads happen once, when the app has a session.
+
+    /// A conversation as the `chats` table holds it.
+    private struct Row: Codable {
+        var id: UUID
+        var user_id: UUID
+        var title: String
+        var turns: [ChatMessage]
+        var created_at: Date
+        var updated_at: Date
+    }
+
+    private func push(_ conversation: Conversation) {
+        guard AppSettings.syncsChats else { return }
+        Task.detached(priority: .background) {
+            guard let userID = try? await Backend.userID() else { return }
+            let row = Row(
+                id: conversation.id,
+                user_id: userID,
+                title: conversation.title,
+                turns: conversation.turns,
+                created_at: conversation.createdAt,
+                updated_at: conversation.updatedAt
+            )
+            try? await Backend.upsert("chats", [row])
+        }
+    }
+
+    /// Brings down anything this phone has not seen. Newer wins on both
+    /// sides, compared by `updatedAt`, so signing in on a second device adds
+    /// its history rather than replacing it.
+    func pull() async {
+        guard AppSettings.syncsChats, await Backend.isSignedIn else { return }
+        guard let rows: [Row] = try? await Backend.select(
+            "chats", query: "select=*&order=updated_at.desc&limit=200"
+        ) else { return }
+
+        var merged = Dictionary(conversations.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for row in rows {
+            let incoming = Conversation(
+                id: row.id, title: row.title,
+                createdAt: row.created_at, updatedAt: row.updated_at, turns: row.turns
+            )
+            if let mine = merged[row.id], mine.updatedAt >= incoming.updatedAt { continue }
+            merged[row.id] = incoming
+        }
+
+        conversations = merged.values.sorted { $0.updatedAt > $1.updatedAt }
+        persist()
     }
 
     // MARK: - Disk

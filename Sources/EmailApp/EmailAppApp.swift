@@ -8,9 +8,12 @@ struct EmailAppApp: App {
     /// connected.
     @State private var user = UserStore()
     @State private var mail = MailStore()
-    /// Past conversations with Maily, on this device. Clears itself when
-    /// the mailbox is disconnected.
+    /// Past conversations with Maily. Kept on this device and mirrored to the
+    /// account, so they follow it to another phone. Clears itself, on both,
+    /// when the mailbox is disconnected.
     @State private var chats = ChatHistory()
+    /// What Maily has been told to remember about the person.
+    @State private var memory = AIMemory()
 
     var body: some Scene {
         WindowGroup {
@@ -18,6 +21,7 @@ struct EmailAppApp: App {
                 .environment(user)
                 .environment(mail)
                 .environment(chats)
+                .environment(memory)
                 // Google redirects back through the reversed-client-id URL
                 // scheme declared in Info.plist; the SDK completes the flow.
                 .onOpenURL { url in
@@ -32,6 +36,13 @@ struct EmailAppApp: App {
                         await mail.loadArchive()
                         await mail.restore()
                     }
+                    // Whatever this account has that this phone does not.
+                    // After the mail, because nothing on screen waits on it.
+                    Task {
+                        await chats.pull()
+                        await memory.pull()
+                    }
+                    Analytics.record(.appOpened, ["mailbox": .bool(mail.isConnected)])
                 }
         }
     }
