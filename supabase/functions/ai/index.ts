@@ -273,6 +273,59 @@ quotes around it.`;
   return json({ body: revised.trim(), model: DRAFT_MODEL });
 }
 
+// ------------------------------------------------------------------ search
+
+// Turns what somebody remembers about an email into a Gmail query.
+//
+// The model never sees the mailbox here. It sees the question, writes a
+// query, and Gmail answers it from its own index -- which reaches the whole
+// account rather than the three months on the phone, and costs one small
+// call rather than shipping mail anywhere.
+const SEARCH_SYSTEM = `You turn a description of an email into a Gmail search query.
+
+Return JSON only, no prose:
+{
+  "query": "the Gmail search query",
+  "terms": ["words", "to", "mark"],
+  "explanation": "one short sentence: what you searched for"
+}
+
+Operators available: from: to: cc: subject: has:attachment filename:
+after: before: older_than: newer_than: is:unread is:starred label:
+in:anywhere OR AND -  and parentheses. Dates are YYYY/MM/DD.
+
+Rules:
+- You are told today's date. Resolve "last spring", "in March", "a couple of
+  weeks back", "before the summer" against it. Never guess the year.
+- Prefer fewer operators. A query returning the right email and ten others
+  beats a precise one returning nothing. When in doubt, drop the date.
+- Never invent an email address. If they name a person, write from:thatname
+  and let Gmail match it.
+- Put quotes around a phrase only when the words must appear together.
+- "terms" are the plain words worth marking in the results: no operators, no
+  dates, no quotes. Two to five, and only ones likely to appear in the text.
+- "explanation" is for a person. "Mail from Sara about invoices since March."
+  Not a restatement of the query.
+- Never use dashes as punctuation in the explanation.`;
+
+async function search(body: Record<string, unknown>) {
+  const question = String(body.question ?? "").slice(0, 300);
+  if (!question) return json({ error: "Nothing to search for." }, 400);
+
+  const today = body.today ? `Today is ${String(body.today).slice(0, 60)}.\n` : "";
+
+  const raw = await openai(
+    CLASSIFY_MODEL,
+    [
+      { role: "system", content: SEARCH_SYSTEM },
+      { role: "user", content: `${today}They are looking for: ${question}` },
+    ],
+    true,
+  );
+
+  return json({ ...JSON.parse(raw), model: CLASSIFY_MODEL });
+}
+
 // --------------------------------------------------------------------- ask
 
 const ASK_SYSTEM = `You are Maily, the assistant inside a person's email app. You are
@@ -478,6 +531,8 @@ Deno.serve(async (request) => {
         return await refine(payload);
       case "revise":
         return await revise(payload);
+      case "search":
+        return await search(payload);
       case "ask":
         return await ask(payload);
       case "ask_stream":

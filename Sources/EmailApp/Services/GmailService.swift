@@ -51,12 +51,15 @@ enum GmailService {
     static let importWindow = "newer_than:3m"
 
     /// Recent inbox mail, newest first.
+    /// `label` is nil to search the whole account rather than one folder,
+    /// which is what a search box has to do: the message somebody is looking
+    /// for is as likely to be in Sent or Archive as in the inbox.
     static func fetchInbox(
         accessToken: String,
         limit: Int = 25,
         pageToken: String? = nil,
         query: String? = nil,
-        label: String = "INBOX"
+        label: String? = "INBOX"
     ) async throws -> Page {
         let (ids, next) = try await messageIDs(
             accessToken: accessToken,
@@ -90,13 +93,13 @@ enum GmailService {
         limit: Int,
         pageToken: String?,
         query searchQuery: String? = nil,
-        label: String = "INBOX"
+        label: String? = "INBOX"
     ) async throws -> ([String], String?) {
         var components = URLComponents(string: "\(base)/messages")!
         var query: [URLQueryItem] = [
             .init(name: "maxResults", value: String(limit)),
-            .init(name: "labelIds", value: label),
         ]
+        if let label { query.append(.init(name: "labelIds", value: label)) }
         if let pageToken { query.append(.init(name: "pageToken", value: pageToken)) }
         if let searchQuery { query.append(.init(name: "q", value: searchQuery)) }
         components.queryItems = query

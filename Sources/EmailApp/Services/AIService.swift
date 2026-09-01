@@ -138,6 +138,44 @@ enum AIService {
         let answer: String
     }
 
+    /// What an AI search decided to look for.
+    ///
+    /// The model does not read the mailbox here. It reads the *question* and
+    /// writes a Gmail query, which Gmail then answers from its own index over
+    /// the whole account. That is what makes this affordable: one small call,
+    /// no mail leaving the phone, and a search that reaches back further than
+    /// the three months this device holds.
+    struct SearchPlan: Decodable {
+        let query: String
+        let terms: [String]
+        let explanation: String
+
+        init(query: String, terms: [String], explanation: String) {
+            self.query = query
+            self.terms = terms
+            self.explanation = explanation
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            query = (try? container.decode(String.self, forKey: .query)) ?? ""
+            terms = (try? container.decode([String].self, forKey: .terms)) ?? []
+            explanation = (try? container.decode(String.self, forKey: .explanation)) ?? ""
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case query, terms, explanation
+        }
+    }
+
+    static func searchPlan(for question: String) async throws -> SearchPlan {
+        try await call([
+            "action": "search",
+            "question": String(question.prefix(300)),
+            "today": Self.todayLine,
+        ])
+    }
+
     /// Asks a question about the mailbox.
     ///
     /// `context` has already been chosen on the device, so only a handful of

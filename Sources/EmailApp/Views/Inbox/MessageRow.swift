@@ -13,6 +13,34 @@ struct MessageRow: View {
     let message: Message
     /// How many messages are in this conversation. 1 hides the count.
     var threadCount: Int = 1
+    /// Words to mark, when this row is a search result. Empty everywhere else,
+    /// which is the common case and costs nothing.
+    var highlight: [String] = []
+
+    /// For a search result, the piece of the body the match is actually in.
+    ///
+    /// The opening of an email is usually "Hi Abel, hope you are well", which
+    /// tells a searcher nothing about why this row is in front of them. When
+    /// a term appears in the body, the row shows the sentence it appears in
+    /// instead.
+    private var matchedPreview: String {
+        guard !highlight.isEmpty else { return message.preview }
+
+        let body = message.body
+        guard let hit = highlight.lazy.compactMap({ term in
+            body.range(of: term, options: [.caseInsensitive, .diacriticInsensitive])
+        }).first else { return message.preview }
+
+        let start = body.index(hit.lowerBound, offsetBy: -40, limitedBy: body.startIndex)
+            ?? body.startIndex
+        let end = body.index(hit.upperBound, offsetBy: 90, limitedBy: body.endIndex)
+            ?? body.endIndex
+
+        let snippet = body[start..<end]
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        return start > body.startIndex ? "…\(snippet)" : snippet
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -41,14 +69,14 @@ struct MessageRow: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text(message.subject)
+                Text(Highlight.mark(message.subject, terms: highlight))
                     .font(.subheadline)
                     .fontWeight(message.isRead ? .regular : .bold)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
 
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(message.preview)
+                    Text(Highlight.mark(matchedPreview, terms: highlight))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

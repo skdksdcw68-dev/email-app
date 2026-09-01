@@ -69,6 +69,14 @@ enum AppSettings {
         set { UserDefaults.standard.set(newValue, forKey: "settings.customInstructions") }
     }
 
+    /// Whether the "AI search costs more" notice has been shown. It is worth
+    /// saying once and never again: a warning on every search is a warning
+    /// nobody reads.
+    static var hasSeenAISearchNotice: Bool {
+        get { UserDefaults.standard.bool(forKey: "settings.aiSearchNotice") }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.aiSearchNotice") }
+    }
+
     // MARK: - Privacy
 
     /// Whether conversations with the assistant follow the account to another

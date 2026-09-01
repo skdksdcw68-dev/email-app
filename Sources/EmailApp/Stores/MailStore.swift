@@ -26,8 +26,37 @@ final class MailStore {
     /// person as a client showed up nowhere until something else moved.
     private(set) var preferencesVersion = 0
 
+    // MARK: - Search
+    //
+    // Written by `MailStore+Search`, which is where the reasoning lives.
+    // Stored here because an extension cannot hold state.
+
+    /// What Gmail returned for the last search, across the whole account.
+    var searchResults: [Message] = []
+    /// The words worth marking in those results.
+    var searchTerms: [String] = []
+    /// What an AI search decided to look for, in a sentence. Nil for a plain
+    /// search, which needs no explaining.
+    var searchExplanation: String?
+    var isSearchingRemotely = false
+    var searchError: String?
+
     func notePreferencesChanged() {
         preferencesVersion += 1
+    }
+
+    /// Adds messages this app did not have, leaving everything it holds
+    /// alone. Search needs it: Gmail's index reaches years further back than
+    /// the three month import window, and a result has to be openable.
+    ///
+    /// Lives here rather than beside the search code because `messages` is
+    /// `private(set)`, and that is worth keeping.
+    func absorb(_ found: [Message]) {
+        var known = Set(messages.compactMap(\.remoteID))
+        for message in found {
+            guard let remoteID = message.remoteID, known.insert(remoteID).inserted else { continue }
+            messages.append(message)
+        }
     }
 
     var isConnected: Bool { account != nil }

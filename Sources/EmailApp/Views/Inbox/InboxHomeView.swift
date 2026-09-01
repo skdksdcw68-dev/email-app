@@ -21,6 +21,10 @@ struct InboxHomeView: View {
     @State private var isComposing = false
     @State private var isSearching = false
     @State private var query = ""
+    @State private var searchMode: MailStore.SearchMode = .mail
+    /// Held until the notice is answered, so agreeing runs the search they
+    /// already asked for rather than making them type it again.
+    @State private var pendingAISearch: String?
 
     private var isBrowsing: Bool { mailbox == .inbox }
 
@@ -28,10 +32,26 @@ struct InboxHomeView: View {
     /// looking for a message rarely knows or cares where it landed.
     private var searchResults: [Message] {
         guard !query.isEmpty else { return [] }
-        return Mailbox.allCases
+
+        // What is already on the phone, matched as they type. Instant, and
+        // covers the three months most searches are actually about.
+        let local = Mailbox.allCases
             .filter { !$0.isSmart }
             .flatMap { mail.messages(in: $0, matching: query) }
+
+        // What Gmail found, which reaches the whole account. Merged rather
+        // than replacing: a local match Gmail's index has not caught up with
+        // should not vanish the moment the request returns.
+        var seen = Set<Message.ID>()
+        return (mail.searchResults + local)
+            .filter { seen.insert($0.id).inserted }
             .sorted { $0.date > $1.date }
+    }
+
+    /// Words to mark in the results: whatever the AI decided to look for,
+    /// or failing that, what was typed.
+    private var highlightTerms: [String] {
+        mail.searchTerms.isEmpty ? Highlight.terms(in: query) : mail.searchTerms
     }
 
     private var isSearchActive: Bool { !query.isEmpty }
@@ -48,12 +68,23 @@ struct InboxHomeView: View {
 
         return List {
             if isSearchActive {
+                searchHeader
+
                 ForEach(searchResults) { message in
                     ZStack {
                         NavigationLink(value: message.id) { EmptyView() }.opacity(0)
-                        MessageRow(message: message)
+                        MessageRow(message: message, highlight: highlightTerms)
                     }
                     .messageSwipeActions(for: message)
+                }
+
+                if searchResults.isEmpty && !mail.isSearchingRemotely {
+                    Text(searchMode == .ai
+                         ? "Nothing matched. Try describing it differently."
+                         : "Nothing here matches. Press search to look through all your mail.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .listRowSeparator(.hidden)
                 }
             } else {
                 if isBrowsing {
@@ -98,7 +129,32 @@ struct InboxHomeView: View {
             }
         }
         .listStyle(.plain)
-        .modifier(SearchWhenAsked(query: $query, isPresented: $isSearching, prompt: "Search all mail"))
+        .modifier(SearchWhenAsked(query: $query, isPresented: $isSearching, prompt: searchPrompt))
+        // Typing filters what is on the phone; pressing search asks Gmail.
+        // Running a network search on every keystroke would be a request per
+        // letter, and an AI call per letter.
+        .onSubmit(of: .search) { runSearch() }
+        .onChange(of: isSearching) { _, presented in
+            if !presented {
+                mail.clearSearch()
+                searchMode = .mail
+            }
+        }
+        .alert("AI search uses more of your allowance", isPresented: aiNoticeBinding) {
+            Button("Not now", role: .cancel) {
+                pendingAISearch = nil
+                searchMode = .mail
+            }
+            Button("Search") {
+                AppSettings.hasSeenAISearchNotice = true
+                if let text = pendingAISearch {
+                    pendingAISearch = nil
+                    Task { await mail.search(text, mode: .ai) }
+                }
+            }
+        } message: {
+            Text("Maily reads what you typed and writes a proper mail search from it, so you can look for \"that invoice from the landlord last spring\". It costs a request each time. Plain search is free and unlimited.")
+        }
         .refreshable { await mail.refresh() }
         .navigationTitle(isBrowsing ? "Maily" : mailbox.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -261,6 +317,88 @@ struct InboxHomeView: View {
                 description: Text("Messages in \(mailbox.title) appear here.")
             )
         }
+    }
+}
+
+// MARK: - Search
+
+extension InboxHomeView {
+
+    fileprivate var searchPrompt: String {
+        searchMode == .ai ? "Describe what you remember" : "Search all mail"
+    }
+
+    /// The alert is open when a search is waiting on it. Bound rather than
+    /// flagged, so dismissing by any route lands in one place.
+    fileprivate var aiNoticeBinding: Binding<Bool> {
+        Binding(
+            get: { pendingAISearch != nil },
+            set: { if !$0 { pendingAISearch = nil } }
+        )
+    }
+
+    fileprivate func runSearch() {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        Analytics.record(.searchUsed, [
+            "mode": .string(searchMode.rawValue),
+            "length": .int(text.count),
+        ])
+
+        guard searchMode == .ai else {
+            Task { await mail.search(text, mode: .mail) }
+            return
+        }
+        // Said once, the first time it would cost something.
+        guard AppSettings.hasSeenAISearchNotice else {
+            pendingAISearch = text
+            return
+        }
+        Task { await mail.search(text, mode: .ai) }
+    }
+
+    /// The mode picker, and whatever the last search has to say for itself.
+    @ViewBuilder
+    fileprivate var searchHeader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Text, not Label: a segmented control renders one or the other
+            // unpredictably, and a picker whose segments show only an icon on
+            // some builds is not a picker.
+            Picker("How to search", selection: $searchMode) {
+                ForEach(MailStore.SearchMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if mail.isSearchingRemotely {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(searchMode == .ai ? "Working out what to look for…" : "Searching all your mail…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let explanation = mail.searchExplanation, !explanation.isEmpty {
+                Label(explanation, systemImage: "sparkles")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if searchMode == .ai {
+                Text("Describe it however you remember it, then press search.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let error = mail.searchError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 4)
+        .listRowSeparator(.hidden)
     }
 }
 
