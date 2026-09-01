@@ -65,11 +65,11 @@ struct NotificationSettingsView: View {
             Section {
                 LabeledContent("Status") {
                     Text(push.isAuthorized ? "On" : "Off")
-                        .foregroundStyle(push.isAuthorized ? .green : .secondary)
+                        .foregroundStyle(push.isAuthorized ? Color.green : Color.secondary)
                 }
                 LabeledContent("This device") {
                     Text(push.token == nil ? "Not registered" : "Registered")
-                        .foregroundStyle(push.token == nil ? .secondary : .green)
+                        .foregroundStyle(push.token == nil ? Color.secondary : Color.green)
                 }
             } header: {
                 Text("New mail")
