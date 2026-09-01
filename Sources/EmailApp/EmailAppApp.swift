@@ -3,6 +3,8 @@ import GoogleSignIn
 
 @main
 struct EmailAppApp: App {
+    @Environment(\.scenePhase) private var scenePhase
+
     /// Onboarding state persists, so a returning user launches straight into
     /// the app after the splash. The mail store starts empty until an inbox is
     /// connected.
@@ -41,6 +43,10 @@ struct EmailAppApp: App {
                         // is even reached, then top it up.
                         await mail.loadArchive()
                         await mail.restore()
+                        // Where Gmail's log stands now, so the next catch-up
+                        // knows what "new" means. Cheap, and only ever set
+                        // once per connection.
+                        if mail.syncCursor == nil { await mail.rememberCursor() }
                     }
                     // Whatever this account has that this phone does not.
                     // After the mail, because nothing on screen waits on it.
@@ -50,6 +56,14 @@ struct EmailAppApp: App {
                         await searches.pull()
                     }
                     Analytics.record(.appOpened, ["mailbox": .bool(mail.isConnected)])
+                }
+                // Coming back to the app checks for new mail the cheap way:
+                // one request that usually answers "nothing", instead of
+                // listing the inbox and fetching twenty-five messages to
+                // find that out.
+                .onChange(of: scenePhase) { _, phase in
+                    guard phase == .active else { return }
+                    Task { await mail.catchUp() }
                 }
         }
     }

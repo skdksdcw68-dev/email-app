@@ -110,6 +110,83 @@ enum GmailService {
         return (messages.compactMap { $0["id"] as? String }, next)
     }
 
+    // MARK: - Catching up
+
+    /// What changed since a point in time, as Gmail records it.
+    struct Changes {
+        var added: [String] = []
+        var removed: [String] = []
+        /// Where to resume from next time.
+        var historyId: String?
+        /// Gmail no longer holds history that far back, so the only honest
+        /// answer is a full refresh. It keeps roughly a week.
+        var isExpired = false
+    }
+
+    /// Gmail's current position, to resume from later.
+    static func currentHistoryID(accessToken: String) async throws -> String? {
+        let json = try await get(URL(string: "\(base)/profile")!, accessToken: accessToken)
+        return json["historyId"] as? String
+    }
+
+    /// Everything that happened since `startHistoryId`.
+    ///
+    /// This is what makes new mail appear immediately instead of on the next
+    /// pull to refresh. Asking "is there anything new" costs one request and
+    /// usually answers "no"; the old way listed the inbox and fetched
+    /// twenty-five messages to find that out.
+    static func changes(since startHistoryId: String, accessToken: String) async throws -> Changes {
+        var components = URLComponents(string: "\(base)/history")!
+        components.queryItems = [
+            .init(name: "startHistoryId", value: startHistoryId),
+            .init(name: "historyTypes", value: "messageAdded"),
+            .init(name: "historyTypes", value: "messageDeleted"),
+            .init(name: "maxResults", value: "100"),
+        ]
+
+        let json: [String: Any]
+        do {
+            json = try await get(components.url!, accessToken: accessToken)
+        } catch ServiceError.http(let code, _) where code == 404 {
+            // The cursor is older than Gmail's window. Not an error, just a
+            // instruction to start over.
+            return Changes(isExpired: true)
+        }
+
+        var result = Changes(historyId: json["historyId"] as? String)
+        for entry in json["history"] as? [[String: Any]] ?? [] {
+            for added in entry["messagesAdded"] as? [[String: Any]] ?? [] {
+                if let message = added["message"] as? [String: Any],
+                   let id = message["id"] as? String {
+                    result.added.append(id)
+                }
+            }
+            for removed in entry["messagesDeleted"] as? [[String: Any]] ?? [] {
+                if let message = removed["message"] as? [String: Any],
+                   let id = message["id"] as? String {
+                    result.removed.append(id)
+                }
+            }
+        }
+        // The same message can be added and then deleted inside one window.
+        result.added = Array(Set(result.added).subtracting(result.removed))
+        return result
+    }
+
+    /// Full messages for ids that came out of a history response.
+    static func messages(ids: [String], accessToken: String) async throws -> [Message] {
+        guard !ids.isEmpty else { return [] }
+
+        var byID: [String: Message] = [:]
+        try await withThrowingTaskGroup(of: (String, Message?).self) { group in
+            for id in ids {
+                group.addTask { (id, try? await fetchMessage(id: id, accessToken: accessToken)) }
+            }
+            for try await (id, message) in group { byID[id] = message }
+        }
+        return ids.compactMap { byID[$0] }
+    }
+
     private static func fetchMessage(id: String, accessToken: String) async throws -> Message {
         let url = URL(string: "\(base)/messages/\(id)?format=full")!
         let json = try await get(url, accessToken: accessToken)

@@ -51,6 +51,13 @@ final class MailStore {
     ///
     /// Lives here rather than beside the search code because `messages` is
     /// `private(set)`, and that is worth keeping.
+    /// Drops messages Gmail says are gone. Deleted elsewhere means deleted
+    /// here; leaving them would make the app the only place they still exist.
+    func forget(remoteIDs: Set<String>) {
+        guard !remoteIDs.isEmpty else { return }
+        messages.removeAll { remoteIDs.contains($0.remoteID ?? "") }
+    }
+
     func absorb(_ found: [Message]) {
         var known = Set(messages.compactMap(\.remoteID))
         for message in found {
@@ -616,6 +623,9 @@ final class MailStore {
         MessageArchive.clear()
         UserDefaults.standard.removeObject(forKey: Self.readKey)
         UserDefaults.standard.removeObject(forKey: Self.repliedKey)
+        // The next mailbox starts its own history, and resuming from the
+        // old one would ask Gmail about somebody else's log.
+        syncCursor = nil
         hasImported = false
         importProgress = .idle
         connectionError = nil
