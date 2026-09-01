@@ -54,6 +54,14 @@ struct EmailAppApp: App {
                         // knows what "new" means. Cheap, and only ever set
                         // once per connection.
                         if mail.syncCursor == nil { await mail.rememberCursor() }
+
+                        // Asked here, after `restore()`, because there has to
+                        // be a mailbox before "let Maily notify you" means
+                        // anything. Asking at cold launch, before the account
+                        // is back, is a prompt about nothing.
+                        if mail.isConnected {
+                            await push.enable(topic: PushService.topic)
+                        }
                     }
                     // Whatever this account has that this phone does not.
                     // After the mail, because nothing on screen waits on it.
@@ -69,14 +77,14 @@ struct EmailAppApp: App {
                     PushDelegate.mail = mail
                     PushDelegate.push = push
 
-                    Task {
-                        await push.refreshAuthorization()
-                        // Gmail's watch lapses after seven days and then
-                        // stops silently, which is how an email app's
-                        // notifications die without anybody noticing.
-                        // Renewing every launch is free.
-                        if mail.isConnected { await push.startWatching(topic: PushService.topic) }
-                    }
+                    Task { await push.refreshAuthorization() }
+                }
+                // Connecting a mailbox later is the other way in. Without
+                // this, somebody who signs in on their second launch is never
+                // asked at all.
+                .onChange(of: mail.isConnected) { _, connected in
+                    guard connected else { return }
+                    Task { await push.enable(topic: PushService.topic) }
                 }
                 // Coming back to the app checks for new mail the cheap way:
                 // one request that usually answers "nothing", instead of

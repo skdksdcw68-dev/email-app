@@ -16,6 +16,9 @@ struct AppSettingsView: View {
                 NavigationLink { GmailAccountsView() } label: {
                     settingsRow("Accounts & Sync", "arrow.triangle.2.circlepath", "Mailbox, sync, permissions")
                 }
+                NavigationLink { NotificationSettingsView() } label: {
+                    settingsRow("Notifications", "bell", "New mail alerts and how they arrive")
+                }
                 NavigationLink { PrivacySettingsView() } label: {
                     settingsRow("Privacy & Security", "lock.shield", "What leaves your phone, and what to delete")
                 }
@@ -44,6 +47,77 @@ struct AppSettingsView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// Whether new mail can reach the lock screen, and what to do when it cannot.
+///
+/// This screen exists because the failure it reports is otherwise invisible.
+/// An app that has never asked for permission does not appear in iOS Settings
+/// at all, so "notifications are off" and "notifications were never requested"
+/// look identical from outside, and neither has a button anywhere.
+struct NotificationSettingsView: View {
+    @Environment(MailStore.self) private var mail
+    @Environment(PushService.self) private var push
+
+    var body: some View {
+        List {
+            Section {
+                LabeledContent("Status") {
+                    Text(push.isAuthorized ? "On" : "Off")
+                        .foregroundStyle(push.isAuthorized ? .green : .secondary)
+                }
+                LabeledContent("This device") {
+                    Text(push.token == nil ? "Not registered" : "Registered")
+                        .foregroundStyle(push.token == nil ? .secondary : .green)
+                }
+            } header: {
+                Text("New mail")
+            } footer: {
+                Text(push.isAuthorized
+                     ? "Maily is woken when mail arrives, reads it on this phone, and writes the notification here. The sender and subject never leave your device."
+                     : "Without this, new mail only appears when you open the app.")
+            }
+
+            if !push.isAuthorized {
+                Section {
+                    Button("Turn on notifications") {
+                        Task { await push.enable(topic: PushService.topic) }
+                    }
+                    Button("Open iOS Settings") {
+                        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                        UIApplication.shared.open(url)
+                    }
+                } footer: {
+                    // iOS shows the permission prompt once and once only. After
+                    // that the button above does nothing visible, and the only
+                    // way back is the Settings app.
+                    Text("If the first button does nothing, iOS has already asked once. Use Settings instead.")
+                }
+            }
+
+            if let error = push.lastError {
+                Section {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                } header: {
+                    Text("Last problem")
+                }
+            }
+
+            if !mail.isConnected {
+                Section {
+                    Label("Connect a mailbox first.", systemImage: "tray")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
+        .hidesTabBar()
+        .task { await push.refreshAuthorization() }
     }
 }
 

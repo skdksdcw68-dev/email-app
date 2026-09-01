@@ -52,6 +52,17 @@ final class PushService: NSObject {
         }
     }
 
+    /// Ask, then start Gmail publishing. The whole sequence, in the order it
+    /// has to happen.
+    ///
+    /// Watching starts even if they decline the alerts: a silent push still
+    /// wakes the app and brings the mail in, which is worth having on its own.
+    /// Only the banner needs permission.
+    func enable(topic: String) async {
+        await requestPermission()
+        await startWatching(topic: topic)
+    }
+
     func refreshAuthorization() async {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         isAuthorized = settings.authorizationStatus == .authorized
