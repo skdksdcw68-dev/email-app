@@ -67,14 +67,21 @@ final class PushService: NSObject {
         token = hex
         guard let gmailAddress, !gmailAddress.isEmpty else { return }
 
+        // Read on this side of the hop. Everything the upload needs is a
+        // plain value, so the detached task carries values rather than
+        // reaching back into an actor it is not on.
+        let address = gmailAddress.lowercased()
+        let environment = Self.environment
+        let bundle = Bundle.main.bundleIdentifier ?? ""
+
         Task.detached(priority: .background) {
             guard let userID = try? await Backend.userID() else { return }
             let row = DeviceRow(
                 token: hex,
                 user_id: userID,
-                gmail_address: gmailAddress.lowercased(),
-                environment: Self.environment,
-                bundle_id: Bundle.main.bundleIdentifier ?? "",
+                gmail_address: address,
+                environment: environment,
+                bundle_id: bundle,
                 updated_at: .now
             )
             try? await Backend.upsert("devices", [row])
@@ -94,7 +101,9 @@ final class PushService: NSObject {
     /// the App Store gets a production one. The server has to know which,
     /// because APNs has a different host for each and the wrong one fails as
     /// though the token were bad.
-    private static var environment: String {
+    /// Nonisolated: it is a compile-time constant, and anything that needs it
+    /// is on its way off the main actor by definition.
+    nonisolated private static var environment: String {
         #if DEBUG
         "sandbox"
         #else
