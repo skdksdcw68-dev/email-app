@@ -184,25 +184,6 @@ final class MailStoreTests: XCTestCase {
         XCTAssertEqual(store.unreadCount(of: .urgent, in: .inbox), 0)
     }
 
-    // MARK: - Local answers
-
-    func testReplyQuestionIsAnsweredLocally() {
-        // Level 1 of the decision ladder: the mailbox settles this itself,
-        // instantly and free, so it must never reach the model.
-        let answer = makeStore().localAnswer(for: "What do I need to reply to?")
-        XCTAssertNotNil(answer)
-        XCTAssertFalse(answer?.text.isEmpty ?? true)
-    }
-
-    func testOpenQuestionsGoToTheModel() {
-        // Anything with real nuance falls through to level 2.
-        XCTAssertNil(makeStore().localAnswer(for: "Summarise the contract negotiation"))
-    }
-
-    func testAnEmptyMailboxAnswersNothingLocally() {
-        XCTAssertNil(MailStore().localAnswer(for: "What do I need to reply to?"))
-    }
-
     // MARK: - Answering stops the nagging
 
     func testReplyingClearsTheNeedsReplyTag() {
@@ -217,42 +198,14 @@ final class MailStoreTests: XCTestCase {
         XCTAssertTrue(store.messages(in: .inbox, tag: .needsReply).isEmpty)
     }
 
-    func testReadMailIsPhrasedAsASuggestion() {
-        // The whole point: an email you have already seen and chosen not to
-        // answer must not be barked at you as a task.
+    func testWhatTheModelIsToldAboutReadingIsTrue() {
+        // The model decides the wording now, so what matters here is that it
+        // is told the truth about what has been read.
         let store = makeStore()
+        XCTAssertTrue(store.tagSummary.contains("Needs Reply 1 (1 unread)"), store.tagSummary)
+
         store.markRead(store.messages(in: .inbox)[0].id)
-
-        let answer = store.localAnswer(for: "What do I need to reply to?")
-        XCTAssertNotNil(answer)
-        XCTAssertTrue(answer?.text.contains("already read") ?? false, answer?.text ?? "no answer")
-    }
-
-    func testUnreadMailIsStatedPlainly() {
-        let answer = makeStore().localAnswer(for: "What do I need to reply to?")
-        XCTAssertTrue(answer?.text.contains("waiting on a reply") ?? false, answer?.text ?? "no answer")
-    }
-
-    // MARK: - Tag questions
-
-    func testAskingForATagListsThatPile() {
-        let answer = makeStore().localAnswer(for: "show me very urgent")
-        XCTAssertNotNil(answer)
-        XCTAssertTrue(answer?.text.contains("Very Urgent") ?? false, answer?.text ?? "no answer")
-        // Tiles and the messages themselves, not a sentence about a number.
-        XCTAssertEqual(answer?.blocks.count, 2)
-    }
-
-    func testAnEmptyTagSaysSoRatherThanGuessing() {
-        let answer = makeStore().localAnswer(for: "what is in promotions")
-        XCTAssertEqual(answer?.text, "Nothing is tagged Promotion right now.")
-    }
-
-    func testATagWordInAnOrdinaryQuestionIsNotATagRequest() {
-        // "What did Sara say about the meeting" is for the model, not the
-        // Meeting chip.
-        let store = makeStore()
-        XCTAssertNil(store.localAnswer(for: "What did Sara say about the meeting last week"))
+        XCTAssertTrue(store.tagSummary.contains("Needs Reply 1 (0 unread)"), store.tagSummary)
     }
 
     func testTagSummaryNamesEveryPileWithACount() {
@@ -273,5 +226,25 @@ final class MailStoreTests: XCTestCase {
     func testAQuestionAboutMailStillGetsMail() {
         XCTAssertFalse(makeStore().context(for: "What is urgent in my inbox?").isEmpty)
         XCTAssertFalse(makeStore().context(for: "anything about goodbye?").isEmpty)
+    }
+
+    func testAShortReplyInheritsWhatItIsReplyingTo() {
+        // "Yes" on its own retrieves nothing, so the model would answer an
+        // offer it had made with no mail in front of it.
+        let store = makeStore()
+        XCTAssertTrue(store.context(for: "yes").isEmpty)
+        XCTAssertFalse(
+            store.context(for: "yes", following: "One urgent email is sitting there. Want it?").isEmpty
+        )
+    }
+
+    func testALongQuestionDoesNotInheritTheLastAnswer() {
+        // Only short follow-ups borrow context. A real question stands alone,
+        // or every answer would drag the previous one's subject along.
+        XCTAssertTrue(
+            makeStore()
+                .context(for: "Write me a haiku about rain", following: "3 urgent emails are waiting")
+                .isEmpty
+        )
     }
 }

@@ -130,6 +130,24 @@ extension MailStore {
     }
 }
 
+extension MailStore {
+    /// The tag chips as one line, for the model.
+    ///
+    /// Costs about fifty tokens and answers a whole class of question the
+    /// assistant used to get wrong, because it could see a dozen emails but
+    /// not the shape of the inbox they came out of. This is data, not an
+    /// answer: what the model does with it is the model's business.
+    var tagSummary: String {
+        let counts = tagCounts(in: .inbox)
+        let parts = AITag.allCases.compactMap { tag -> String? in
+            let total = counts.total[tag] ?? 0
+            guard total > 0 else { return nil }
+            return "\(tag.title) \(total) (\(counts.unread[tag] ?? 0) unread)"
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
 extension Date {
     /// "Good morning" / "Good afternoon" / "Good evening".
     static var greeting: String {

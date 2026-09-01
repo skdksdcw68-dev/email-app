@@ -1,0 +1,131 @@
+import Foundation
+
+/// Structure the model asked for, rather than structure the app guessed at.
+///
+/// The keyword ladder that used to decide when an answer became tiles or a
+/// chart is gone. It intercepted questions it only half understood and
+/// returned a canned paragraph instead of an answer, which is worse than
+/// plain prose. The model decides now: it writes normally, and where a set
+/// of numbers reads better drawn than described, it fences them.
+///
+///     ```stats
+///     Very Urgent: 12
+///     Needs Reply: 8
+///     Unread: 30
+///     ```
+///
+///     ```chart
+///     Inbox by tag
+///     Very Urgent: 12
+///     Important: 30
+///     ```
+///
+/// Same contract as ```` ```email ````, and deliberately so: one way for the
+/// model to hand the app something richer than a paragraph.
+enum AnswerFences {
+
+    private static let kinds: Set<String> = ["stats", "chart"]
+
+    /// The prose with every block lifted out, and the blocks in the order
+    /// they appeared. A fence that has not finished streaming is held back
+    /// rather than shown half drawn.
+    static func extract(from text: String) -> (prose: String, blocks: [AnswerBlock]) {
+        var prose = ""
+        var blocks: [AnswerBlock] = []
+        var rest = Substring(text)
+
+        while let open = rest.range(of: "```") {
+            let head = String(rest[..<open.lowerBound])
+            let afterTicks = rest[open.upperBound...]
+
+            guard let newline = afterTicks.firstIndex(of: "\n") else {
+                // No line to name the block. Either a closing fence -- which
+                // belongs to whoever opened it, and must survive for the
+                // email parser to find -- or one of ours truncated mid-word
+                // by the stream, which should not be shown at all.
+                let tail = afterTicks.trimmingCharacters(in: .whitespaces).lowercased()
+                let ours = !tail.isEmpty && kinds.contains { $0.hasPrefix(tail) }
+                prose += ours ? head : head + "```" + String(afterTicks)
+                rest = ""
+                break
+            }
+
+            let kind = afterTicks[..<newline]
+                .trimmingCharacters(in: .whitespaces)
+                .lowercased()
+            guard kinds.contains(kind) else {
+                // Somebody else's fence -- ```email, or a code sample. Leave
+                // it exactly as it came.
+                prose += head + "```"
+                rest = afterTicks
+                continue
+            }
+
+            let bodyStart = afterTicks.index(after: newline)
+            guard let close = afterTicks[bodyStart...].range(of: "```") else {
+                // Still streaming. Show the prose so far and nothing of the
+                // half-written block.
+                prose += head
+                rest = ""
+                break
+            }
+
+            prose += head
+            if let block = parse(kind, String(afterTicks[bodyStart..<close.lowerBound])) {
+                blocks.append(block)
+            }
+            rest = afterTicks[close.upperBound...]
+        }
+
+        prose += rest
+        let tidied = prose
+            .replacingOccurrences(of: "\n\\s*\n(\\s*\n)+", with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (tidied, blocks)
+    }
+
+    // MARK: - Blocks
+
+    private static func parse(_ kind: String, _ body: String) -> AnswerBlock? {
+        let lines = body
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "*-\u{2022} \t")) }
+            .filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return nil }
+
+        switch kind {
+        case "stats":
+            // Three across is what the row fits. A fourth makes all of them
+            // too narrow to read, so the model's extras are dropped rather
+            // than crushed.
+            let stats = lines.compactMap(pair).prefix(3).map { Stat(label: $0.label, value: $0.value) }
+            return stats.isEmpty ? nil : .stats(Array(stats))
+
+        case "chart":
+            // The first line that is not a pair is the title.
+            var title = "Breakdown"
+            var rows = lines
+            if pair(lines[0]) == nil {
+                title = lines[0]
+                rows = Array(lines.dropFirst())
+            }
+            let points = rows.compactMap(pair).compactMap { row -> AnswerChart.Point? in
+                guard let value = Int(row.value.filter(\.isNumber)) else { return nil }
+                return AnswerChart.Point(label: row.label, value: value)
+            }
+            return points.isEmpty ? nil : .chart(AnswerChart(title: title, points: points))
+
+        default:
+            return nil
+        }
+    }
+
+    /// "Very Urgent: 12" -> ("Very Urgent", "12").
+    private static func pair(_ line: String) -> (label: String, value: String)? {
+        guard let colon = line.lastIndex(of: ":") else { return nil }
+        let label = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+        let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+        guard !label.isEmpty, !value.isEmpty else { return nil }
+        return (label, value)
+    }
+}

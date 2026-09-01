@@ -65,14 +65,6 @@ struct ChatTurnView: View {
                         ActionReceiptCard(receipt: receipt, onUndo: onUndo)
                     }
 
-                    if turn.isLocal {
-                        // The honest label for a free answer: this one never
-                        // left the phone and cost nothing.
-                        Label("Answered on device", systemImage: "bolt.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-
                     if !turn.sources.isEmpty {
                         SourceList(sources: turn.sources)
                     }

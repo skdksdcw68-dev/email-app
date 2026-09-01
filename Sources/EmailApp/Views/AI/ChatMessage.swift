@@ -27,9 +27,6 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     /// Sara" while a draft is being produced.
     var pendingLabel: String? = nil
     var failed = false
-    /// Answered on the device without touching the model -- instant and free.
-    /// Marked in the UI so the user can tell the two kinds apart.
-    var isLocal = false
     /// What an action actually did, once it has done it.
     var receipt: ChatReceipt? = nil
 
@@ -49,9 +46,6 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         ChatMessage(role: .assistant, text: text)
     }
 
-    static func local(_ answer: LocalAnswer) -> ChatMessage {
-        ChatMessage(role: .assistant, text: answer.text, blocks: answer.blocks, isLocal: true)
-    }
 
     static func did(_ receipt: ChatReceipt) -> ChatMessage {
         ChatMessage(role: .assistant, text: "", receipt: receipt)

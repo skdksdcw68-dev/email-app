@@ -31,16 +31,16 @@ final class ChatHistoryTests: XCTestCase {
     }
 
     func testStructuredAnswersSurviveTheRoundTrip() {
-        // A local answer is tiles and cards, not prose. They must come back
-        // as they were, or the history shows a caption above nothing.
+        // An answer can be tiles and cards, not only prose. They must come
+        // back as they were, or the history shows a caption above nothing.
         let stats = Stat(title: "Urgent", value: "3", symbol: "bolt.fill", tint: .red)
-        let answer = LocalAnswer(text: "Where things stand:", blocks: [.stats([stats])])
+        var answer = ChatMessage.say("Where things stand:")
+        answer.blocks = [.stats([stats])]
         let history = ChatHistory(fileURL: fileURL)
-        history.save(conversation("Urgent?", turns: [.user("Urgent?"), .local(answer)]))
+        history.save(conversation("Urgent?", turns: [.user("Urgent?"), answer]))
 
         let reloaded = ChatHistory(fileURL: fileURL)
         XCTAssertEqual(reloaded.conversations.first?.turns.last?.blocks, [.stats([stats])])
-        XCTAssertEqual(reloaded.conversations.first?.turns.last?.isLocal, true)
     }
 
     func testSavingAgainReplacesRatherThanDuplicates() {

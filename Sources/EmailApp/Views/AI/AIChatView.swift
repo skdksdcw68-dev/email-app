@@ -8,21 +8,22 @@ import UIKit
 /// but never sends anything without a tap. Conversations are kept: this
 /// screen opens fresh, or on a saved one by id, and saves itself as it goes.
 ///
-/// Every message goes down one ladder, on the device, before anything is
-/// spent:
+/// The model answers everything. There used to be a ladder of local rules
+/// above it -- canned greetings, a keyword table that turned "what needs a
+/// reply" into a template and "what did Sara say about the meeting" into the
+/// wrong list -- and it made the app feel stupid in exactly the moments
+/// somebody was asking for something specific. It is gone. What survives on
+/// the device is the two things that are not answers:
 ///
-///   1. Intent. "hi" is a greeting and gets a greeting, never a list of
-///      tagged mail. "send it" sends the waiting draft. "reply to Sara
-///      saying Thursday works" is an instruction, not a question.
-///   2. Action. A draft request is resolved against the mailbox: one clear
-///      match is written up as a card; several become a "which one?" with
-///      the candidates, and the next message picks from them; none becomes
-///      a question about who was meant.
-///   3. Local answer. What the mailbox can settle itself -- counts, who is
-///      waiting, what needs a reply -- is answered as structure, instantly.
-///   4. The model, with the conversation so far and a device-side retrieval
-///      digest, streaming prose with sources. If *it* writes an email, the
-///      email comes back in a block that becomes a card, never as prose.
+///   1. Actions, where guessing wrong costs something real: sending a draft
+///      that is waiting, discarding it, marking mail read.
+///   2. Retrieval, so a question arrives at the model with the dozen emails
+///      that bear on it and the shape of the inbox they came from. That is
+///      data, not a decision.
+///
+/// Structure survives too, but the model asks for it now: it fences tiles
+/// and charts the way it already fenced emails, and the app draws what it is
+/// handed rather than guessing which questions deserve a picture.
 ///
 /// Anything the model is doing can be stopped from the composer. Sending is
 /// the one thing the agent does to the world, and it does it only from the
@@ -50,9 +51,6 @@ struct AIChatView: View {
     @State private var offered: [Message] = []
     /// A draft request waiting on the answer to "which one?".
     @State private var pendingChoice: DraftRequest?
-    /// What "yes" means right now. Maily offers things -- "want the urgent
-    /// ones?" -- and an offer nobody can accept is just noise.
-    @State private var pendingOffer: String?
     /// The model call in flight, so the stop button has something to stop.
     @State private var work: Task<Void, Never>?
     @State private var editing: EditingDraft?
@@ -362,17 +360,8 @@ struct AIChatView: View {
         work?.cancel()
     }
 
-    private func ask(_ spoken: String) {
-        turns.append(.user(spoken))
-
-        // Maily offered something and they said yes. Without this, "yes"
-        // reaches the model as the word "yes" with no mail attached, and it
-        // cheerfully answers a question nobody asked.
-        var question = spoken
-        if let offer = pendingOffer, ChatIntentParser.isAffirmative(spoken) {
-            question = offer
-        }
-        pendingOffer = nil
+    private func ask(_ question: String) {
+        turns.append(.user(question))
 
         let pending = pendingDraftTurn
         let intent = ChatIntentParser.parse(question, hasPendingDraft: pending != nil)
@@ -415,11 +404,6 @@ struct AIChatView: View {
         }
 
         switch intent {
-        case .greeting(let kind):
-            let reply = greetingReply(kind)
-            pendingOffer = reply.offer
-            turns.append(.say(reply.text))
-
         case .sendPendingDraft:
             if let pending { Task { await sendDraft(in: pending) } }
 
@@ -436,11 +420,6 @@ struct AIChatView: View {
             markRead(request)
 
         case .question:
-            if let local = mail.localAnswer(for: question) {
-                offered = messages(in: local.blocks)
-                turns.append(.local(local))
-                return
-            }
             work = Task { await askModel(question) }
         }
     }
@@ -450,40 +429,6 @@ struct AIChatView: View {
         turns.last { $0.draft?.status == .ready }?.id
     }
 
-    /// A greeting that has looked at the inbox first.
-    ///
-    /// "Ask me about your mail" is what an assistant says when it has not
-    /// read anything. It costs nothing to count the piles before answering,
-    /// and the offer at the end is the whole difference between a tool that
-    /// waits and one that helps. Returns what to say, and what "yes" would
-    /// mean if they take the offer.
-    private func greetingReply(_ kind: ChatIntent.Greeting) -> (text: String, offer: String?) {
-        switch kind {
-        case .hello:
-            let counts = mail.counts
-            if counts.urgent > 0 && counts.needsReply > 0 {
-                return ("Hey. \(counts.urgent) urgent and \(counts.needsReply) still unanswered. Want the urgent ones?", "show me very urgent")
-            }
-            if counts.urgent > 0 {
-                return (counts.urgent == 1
-                    ? "Hey. One urgent email is sitting there. Want to see it?"
-                    : "Hey. \(counts.urgent) urgent emails are sitting there. Want to see them?", "show me very urgent")
-            }
-            if counts.needsReply > 0 {
-                return (counts.needsReply == 1
-                    ? "Hey. One email is still unanswered. Want to see it?"
-                    : "Hey. \(counts.needsReply) emails are still unanswered. Want to see them?", "show me needs reply")
-            }
-            if counts.new > 0 {
-                return ("Hey. Nothing urgent, \(counts.new) unread. What are we doing today?", nil)
-            }
-            return ("Hey. Inbox is clear. What are we doing today?", nil)
-        case .thanks:
-            return ("Any time.", nil)
-        case .acknowledgement:
-            return ("Here if you need me.", nil)
-        }
-    }
 
     // MARK: - Marking read
 
@@ -544,13 +489,6 @@ struct AIChatView: View {
         }
     }
 
-    private func messages(in blocks: [AnswerBlock]) -> [Message] {
-        blocks.flatMap { block -> [Message] in
-            if case .messages(let messages) = block { return messages }
-            return []
-        }
-    }
-
     // MARK: - The model
 
     @MainActor
@@ -569,10 +507,10 @@ struct AIChatView: View {
         defer { isWorking = false }
 
         // Empty when the question is not about mail at all -- "what can you
-        // do", "how does this work". That used to ship a dozen emails anyway,
-        // on the strength of a recency bonus, and captioned the answer with
-        // sources it had never read.
-        let context = mail.context(for: question)
+        // do", "how does this work". A short follow-up borrows the subject of
+        // whatever Maily said last, so "yes" still arrives with the mail it
+        // is agreeing to.
+        let context = mail.context(for: question, following: history.last(where: { $0.role == "assistant" })?.content)
         do {
             // Streamed, so the answer types itself out instead of landing
             // whole after a long silence.
@@ -580,6 +518,9 @@ struct AIChatView: View {
                 question: question,
                 context: context,
                 history: history,
+                // Fifty tokens, and it lets the model answer about piles it
+                // was not shown. Withheld only when nothing about this is
+                // about mail, which is what keeps an aside cheap.
                 inbox: context.isEmpty ? nil : mail.tagSummary,
                 signedInAs: user.account?.displayName,
                 tone: user.tonePreference
@@ -622,8 +563,14 @@ struct AIChatView: View {
             text = prose.isEmpty ? "Here's the email. Send it, or edit it first." : prose
         }
 
+        // Tiles and charts, where the model asked for them. The app no longer
+        // decides which questions deserve structure -- it only draws what it
+        // was handed.
+        let structured = AnswerFences.extract(from: text)
+
         withAnimation(.easeOut(duration: 0.25)) {
-            turns[index].text = text
+            turns[index].text = structured.prose
+            turns[index].blocks = structured.blocks
             turns[index].draft = emailDraft
             // A draft is its own evidence; the list of emails behind it is
             // noise next to a card that names the recipient.

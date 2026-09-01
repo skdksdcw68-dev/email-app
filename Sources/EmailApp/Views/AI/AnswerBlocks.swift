@@ -57,14 +57,35 @@ struct Stat: Equatable, Codable {
     let symbol: String
     let tint: Tint
 
-    /// A tile that looks like the chip the same tag draws in the inbox, so
-    /// "Very Urgent 12" in a chat answer and "Very Urgent 12" at the top of
-    /// the list are recognisably the same thing.
-    init(tag: AITag, count: Int) {
-        self.title = tag.title
-        self.value = "\(count)"
-        self.symbol = tag.systemImage
-        self.tint = tag.statTint
+    /// A tile from whatever the model called it.
+    ///
+    /// A label that names a tag gets that tag's own chip symbol and colour,
+    /// so "Very Urgent 12" in an answer and "Very Urgent 12" at the top of
+    /// the inbox are recognisably the same thing. Anything else falls back to
+    /// something neutral rather than being refused: the model chose to show a
+    /// number, and dropping it because the app did not recognise the word
+    /// would be the old mistake in a smaller costume.
+    init(label: String, value: String) {
+        self.title = label
+        self.value = value
+
+        if let tag = AITag.named(in: label.lowercased()) {
+            self.symbol = tag.systemImage
+            self.tint = tag.statTint
+            return
+        }
+        switch label.lowercased() {
+        case let text where text.contains("unread"):
+            (self.symbol, self.tint) = ("envelope.badge.fill", .blue)
+        case let text where text.contains("read"):
+            (self.symbol, self.tint) = ("envelope.open", .green)
+        case let text where text.contains("today") || text.contains("week"):
+            (self.symbol, self.tint) = ("calendar", .purple)
+        case let text where text.contains("sender") || text.contains("people"):
+            (self.symbol, self.tint) = ("person.2.fill", .indigo)
+        default:
+            (self.symbol, self.tint) = ("tray.full.fill", .indigo)
+        }
     }
 
     init(title: String, value: String, symbol: String, tint: Tint) {
@@ -105,10 +126,6 @@ struct AnswerChart: Equatable, Codable {
 }
 
 /// An answer the mailbox itself could give, without the model.
-struct LocalAnswer {
-    let text: String
-    let blocks: [AnswerBlock]
-}
 
 // MARK: - Rendering
 
@@ -282,9 +299,16 @@ struct AssistantProse: View {
     /// The text without any email block: everything before an open fence,
     /// or everything around a closed one.
     private var visible: (prose: String, isWritingEmail: Bool) {
-        guard let open = text.range(of: EmailBlock.opening) else { return (text, false) }
-        let before = String(text[..<open.lowerBound])
-        let afterOpen = text[open.upperBound...]
+        // Tiles and charts are drawn as blocks once the answer is complete,
+        // so their fences never belong in the prose -- not finished, and not
+        // half arrived either.
+        let withoutStructure = AnswerFences.extract(from: text).prose
+
+        guard let open = withoutStructure.range(of: EmailBlock.opening) else {
+            return (withoutStructure, false)
+        }
+        let before = String(withoutStructure[..<open.lowerBound])
+        let afterOpen = withoutStructure[open.upperBound...]
         if let close = afterOpen.range(of: EmailBlock.closing) {
             return (before + "\n" + String(afterOpen[close.upperBound...]), false)
         }

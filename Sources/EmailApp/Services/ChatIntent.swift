@@ -1,21 +1,20 @@
 import Foundation
 
-/// What the person meant, decided on the device before anything is spent.
+/// What the person meant, when meaning it changes what happens rather than
+/// only what is said.
 ///
-/// This is the top of the assistant's decision ladder. Saying "hi" must not
-/// come back as a list of tagged emails; "send it" while a draft is waiting
-/// must send it; "reply to Sara saying Thursday works" must produce a draft,
-/// not an answer. Only what is left over is a question for the mailbox or
-/// the model.
+/// Deliberately small. This used to catch greetings and route them to canned
+/// replies, and a keyword ladder underneath it answered whole classes of
+/// question from templates: both of them intercepted people who were asking
+/// for something else and handed back something adjacent. Everything that is
+/// merely a question now goes to the model, which is better at understanding
+/// than a word list ever was.
+///
+/// What is left is the three things that are *actions*, where guessing wrong
+/// costs something real: sending a draft that is waiting, discarding it, and
+/// marking mail read. Those cannot be left to a sentence coming back from a
+/// server, so they are decided here, on the device, before anything is spent.
 enum ChatIntent: Equatable {
-    enum Greeting: Equatable {
-        case hello
-        case thanks
-        case acknowledgement
-    }
-
-    /// "hi", "thanks", "ok". Answered warmly, with no email in it.
-    case greeting(Greeting)
     /// "send it", "yes", "go ahead" while a draft is waiting.
     case sendPendingDraft
     /// "no", "cancel", "don't send" while a draft is waiting.
@@ -63,7 +62,6 @@ enum ChatIntentParser {
             if sendPhrases.contains(text) { return .sendPendingDraft }
             if discardPhrases.contains(text) { return .discardPendingDraft }
         }
-        if let greeting = greeting(in: text) { return .greeting(greeting) }
         // Before drafting: "mark it as read" opens with no command verb, but
         // "mark the reply from Sara as read" would otherwise trip the reply
         // verb and start writing an email nobody asked for.
@@ -95,23 +93,6 @@ enum ChatIntentParser {
         )
     }
 
-    /// "yes", "go on", "show me" -- an acceptance of something just offered.
-    ///
-    /// Separate from `sendPhrases`, which answers a waiting draft and means
-    /// something irreversible. This one only means "do the thing you just
-    /// suggested", so it can afford to be generous.
-    static func isAffirmative(_ raw: String) -> Bool {
-        let text = normalize(raw)
-        return affirmatives.contains(text)
-    }
-
-    private static let affirmatives: Set<String> = [
-        "yes", "yeah", "yep", "yup", "ya", "sure", "ok", "okay", "k",
-        "yes please", "please", "please do", "go on", "go ahead", "do it",
-        "show me", "show them", "show me them", "let's see", "lets see",
-        "sounds good", "why not", "alright", "all right", "of course", "definitely",
-    ]
-
     /// A bare answer to "which one?" -- "Drobe", "the second one", "the one
     /// from Sara" -- read as the words that pick, plus any ordinal.
     static func selection(_ raw: String) -> (hints: [String], ordinal: Int?) {
@@ -130,58 +111,6 @@ enum ChatIntentParser {
         var trimmed = Substring(lowered)
         while let last = trimmed.last, ".!?,;:".contains(last) { trimmed.removeLast() }
         return trimmed.split(separator: " ").joined(separator: " ")
-    }
-
-    // MARK: - Greetings
-
-    private static let hellos: [String] = [
-        "hi", "hello", "hey", "yo", "hiya", "howdy", "sup", "whats up", "what's up",
-        "good morning", "good afternoon", "good evening", "morning", "evening",
-        "how are you", "how are you doing", "how's it going", "hows it going",
-        "you there", "are you there", "hey there", "hi there", "hello there",
-    ]
-
-    private static let thanks: [String] = [
-        "thanks", "thank you", "thx", "ty", "cheers", "thanks a lot",
-        "thank you so much", "appreciate it", "nice one", "thanks man",
-    ]
-
-    private static let acknowledgements: [String] = [
-        "ok", "okay", "cool", "nice", "great", "perfect", "got it", "alright",
-        "k", "sounds good", "fine", "good", "sweet", "awesome",
-    ]
-
-    /// Words that can follow a greeting without changing what it is.
-    private static let fillers: Set<String> = [
-        "maily", "there", "man", "bro", "dude", "mate", "friend", "buddy",
-        "again", "please", "so", "much", "a", "lot", "you", "too",
-    ]
-
-    private static func greeting(in text: String) -> ChatIntent.Greeting? {
-        // A real question is never this short and this empty.
-        guard text.count <= 32 else { return nil }
-        if let exact = exactGreeting(text) { return exact }
-
-        let groups: [([String], ChatIntent.Greeting)] = [
-            (hellos, .hello), (thanks, .thanks), (acknowledgements, .acknowledgement),
-        ]
-        for (phrases, kind) in groups {
-            for phrase in phrases where text.hasPrefix(phrase + " ") {
-                let rest = String(text.dropFirst(phrase.count + 1))
-                let words = rest.split(separator: " ").map(String.init)
-                if exactGreeting(rest) != nil || words.allSatisfy(fillers.contains) {
-                    return kind
-                }
-            }
-        }
-        return nil
-    }
-
-    private static func exactGreeting(_ text: String) -> ChatIntent.Greeting? {
-        if hellos.contains(text) { return .hello }
-        if thanks.contains(text) { return .thanks }
-        if acknowledgements.contains(text) { return .acknowledgement }
-        return nil
     }
 
     // MARK: - A waiting draft

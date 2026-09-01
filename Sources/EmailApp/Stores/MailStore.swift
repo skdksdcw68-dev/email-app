@@ -363,9 +363,17 @@ final class MailStore {
     /// Twelve, not twenty. Every one of these costs tokens on every question,
     /// and past the first handful the model is reading noise: the answers that
     /// needed the twentieth-best match did not exist.
-    func context(for question: String, limit: Int = 12) -> [Message] {
+    /// `following` is what Maily said last. A question is often not a whole
+    /// question: "yes", "the second one", "what about her". Retrieving on the
+    /// bare words of those finds nothing, and the model then answers a
+    /// question nobody asked with no mail in front of it. Short replies
+    /// inherit the subject of what they are replying to.
+    func context(for question: String, following: String? = nil, limit: Int = 12) -> [Message] {
+        let isFollowUp = question.split(separator: " ").count <= 4
+        let query = isFollowUp && following != nil ? "\(question) \(following!)" : question
+
         let words = Set(
-            question.lowercased()
+            query.lowercased()
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
                 .filter { $0.count > 3 && !Self.stopWords.contains($0) }
         )
@@ -397,7 +405,7 @@ final class MailStore {
         // recency bonus alone would still hand over a dozen emails, so every
         // aside cost as much as a real question and came back captioned with
         // sources it never read. Send none.
-        if !scored.contains(where: { $0.keyword > 0 }) && !mentionsMail(question) {
+        if !scored.contains(where: { $0.keyword > 0 }) && !mentionsMail(query) {
             return []
         }
 

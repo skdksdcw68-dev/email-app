@@ -1,30 +1,18 @@
 import XCTest
 @testable import EmailApp
 
-/// The top of the assistant's decision ladder. Each of these is a case that
-/// used to go wrong: "hi" answered with a list of tagged mail, "send it"
-/// treated as a question, a request to reply treated as a question about
-/// replying.
+/// What is left after the canned answers were removed: only the cases where
+/// misreading a sentence performs an action, or fails to.
 final class ChatIntentTests: XCTestCase {
 
-    // MARK: - Greetings
+    // MARK: - Small talk is not an action
 
-    func testAGreetingIsAGreeting() {
-        XCTAssertEqual(ChatIntentParser.parse("hi", hasPendingDraft: false), .greeting(.hello))
-        XCTAssertEqual(ChatIntentParser.parse("Hi there!", hasPendingDraft: false), .greeting(.hello))
-    }
-
-    func testAGreetingWithFillerIsStillAGreeting() {
-        XCTAssertEqual(ChatIntentParser.parse("Hey Maily!", hasPendingDraft: false), .greeting(.hello))
-        XCTAssertEqual(ChatIntentParser.parse("thanks a lot", hasPendingDraft: false), .greeting(.thanks))
-        XCTAssertEqual(ChatIntentParser.parse("ok", hasPendingDraft: false), .greeting(.acknowledgement))
-    }
-
-    func testAGreetingFollowedByARealQuestionIsNotAGreeting() {
-        XCTAssertEqual(
-            ChatIntentParser.parse("hey what needs a reply", hasPendingDraft: false),
-            .question
-        )
+    func testGreetingsAreQuestionsNow() {
+        // No canned reply, no local table. Everything that is only words
+        // goes to the model, which is better at words.
+        for phrase in ["hi", "Hey Maily!", "thanks a lot", "ok", "what can you do"] {
+            XCTAssertEqual(ChatIntentParser.parse(phrase, hasPendingDraft: false), .question, phrase)
+        }
     }
 
     // MARK: - A waiting draft
@@ -155,16 +143,4 @@ final class ChatIntentTests: XCTestCase {
         )
     }
 
-    // MARK: - Saying yes to an offer
-
-    func testAcceptancesAreRecognised() {
-        for word in ["yes", "yeah", "sure", "go on", "show me", "ok"] {
-            XCTAssertTrue(ChatIntentParser.isAffirmative(word), word)
-        }
-    }
-
-    func testAQuestionIsNotAnAcceptance() {
-        XCTAssertFalse(ChatIntentParser.isAffirmative("what is urgent"))
-        XCTAssertFalse(ChatIntentParser.isAffirmative("no"))
-    }
 }
