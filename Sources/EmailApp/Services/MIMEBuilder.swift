@@ -11,6 +11,32 @@ import Foundation
 /// exhaustively. The one thing that must not be wrong is the encoding.
 enum MIMEBuilder {
 
+    /// A file going out with a message.
+    ///
+    /// The bytes are held whole, because the message is built whole: Gmail's
+    /// send endpoint takes one encoded string and there is nowhere to stream
+    /// into. That is the reason for `attachmentLimit` below.
+    struct Attached: Equatable {
+        var filename: String
+        var mimeType: String
+        var data: Data
+
+        var size: Int { data.count }
+    }
+
+    /// The most that may go out with one message.
+    ///
+    /// Gmail's `messages.send` takes the whole email as a JSON field, which
+    /// is what lets a reply carry `threadId` and land in its conversation.
+    /// The cost is a request-body ceiling, and base64 inflates everything by
+    /// a third on the way. Four megabytes of files is what fits under it with
+    /// room for the message itself.
+    ///
+    /// Raising this means the resumable upload endpoint, which takes the MIME
+    /// as raw bytes and has no room for `threadId`, so replies would stop
+    /// threading. Not worth it until somebody actually asks.
+    static let attachmentLimit = 4 * 1024 * 1024
+
     struct Envelope {
         var from: String
         var to: String
@@ -26,6 +52,9 @@ enum MIMEBuilder {
         /// in the chain threads on these.
         var inReplyTo: String?
         var references: String?
+        /// Files going with it. Empty is the common case and produces exactly
+        /// the message it always did.
+        var attachments: [Attached] = []
     }
 
     /// The complete message, base64url encoded and ready for `raw`.
@@ -34,7 +63,16 @@ enum MIMEBuilder {
     }
 
     /// The message itself, before encoding. Exposed for tests.
-    static func message(_ envelope: Envelope, boundary: String = UUID().uuidString) -> String {
+    ///
+    /// `alternativeBoundary` is only used when there are attachments *and*
+    /// HTML, where the text has to be an alternative pair nested inside the
+    /// mixed part. Two boundaries, because a part cannot use its parent's:
+    /// the parser would end the outer part at the first inner delimiter.
+    static func message(
+        _ envelope: Envelope,
+        boundary: String = UUID().uuidString,
+        alternativeBoundary: String = UUID().uuidString
+    ) -> String {
         var lines: [String] = [
             "From: \(envelope.from)",
             "To: \(envelope.to)",
@@ -53,25 +91,68 @@ enum MIMEBuilder {
 
         lines.append("MIME-Version: 1.0")
 
-        if let html = envelope.html, !html.isEmpty {
-            lines.append("Content-Type: multipart/alternative; boundary=\"\(boundary)\"")
+        if envelope.attachments.isEmpty {
+            lines.append(contentsOf: bodySection(envelope, boundary: boundary))
+        } else {
+            lines.append("Content-Type: multipart/mixed; boundary=\"\(boundary)\"")
             lines.append("")
             lines.append("--\(boundary)")
-            lines.append(contentsOf: partHeaders(type: "text/plain"))
-            lines.append(base64Body(envelope.plainText))
-            lines.append("--\(boundary)")
-            lines.append(contentsOf: partHeaders(type: "text/html"))
-            lines.append(base64Body(html))
-            // The closing delimiter takes a trailing "--". Without it the last
-            // part is unterminated and some clients drop it.
+            lines.append(contentsOf: bodySection(envelope, boundary: alternativeBoundary))
+            for file in envelope.attachments {
+                lines.append("--\(boundary)")
+                lines.append(contentsOf: attachmentPart(file))
+            }
             lines.append("--\(boundary)--")
-        } else {
-            lines.append(contentsOf: partHeaders(type: "text/plain"))
-            lines.append(base64Body(envelope.plainText))
         }
 
         // RFC 2822 is CRLF, not LF. Gmail tolerates LF; other hops do not.
         return lines.joined(separator: "\r\n")
+    }
+
+    /// What the person wrote: one plain part, or a plain and an HTML one
+    /// wrapped in a multipart/alternative.
+    private static func bodySection(_ envelope: Envelope, boundary: String) -> [String] {
+        guard let html = envelope.html, !html.isEmpty else {
+            return partHeaders(type: "text/plain") + [base64Body(envelope.plainText)]
+        }
+
+        var lines = [
+            "Content-Type: multipart/alternative; boundary=\"\(boundary)\"",
+            "",
+            "--\(boundary)",
+        ]
+        lines.append(contentsOf: partHeaders(type: "text/plain"))
+        lines.append(base64Body(envelope.plainText))
+        lines.append("--\(boundary)")
+        lines.append(contentsOf: partHeaders(type: "text/html"))
+        lines.append(base64Body(html))
+        // The closing delimiter takes a trailing "--". Without it the last
+        // part is unterminated and some clients drop it.
+        lines.append("--\(boundary)--")
+        return lines
+    }
+
+    private static func attachmentPart(_ file: Attached) -> [String] {
+        let name = encodedFilename(file.filename)
+        let type = file.mimeType.isEmpty ? "application/octet-stream" : file.mimeType
+        return [
+            "Content-Type: \(type); name=\"\(name)\"",
+            "Content-Disposition: attachment; filename=\"\(name)\"",
+            "Content-Transfer-Encoding: base64",
+            "",
+            wrap(file.data.base64EncodedString(), at: 76).joined(separator: "\r\n"),
+        ]
+    }
+
+    /// A filename lands inside a quoted header value, so a quote in it would
+    /// end the value early and everything after would be read as more
+    /// parameters. Newlines would be worse: a new header entirely.
+    static func encodedFilename(_ raw: String) -> String {
+        let cleaned = raw
+            .replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: "\\", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return encodedHeader(cleaned.isEmpty ? "attachment" : cleaned)
     }
 
     private static func partHeaders(type: String) -> [String] {

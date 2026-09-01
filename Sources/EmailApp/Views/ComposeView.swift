@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// Compose and reply.
 ///
@@ -37,6 +38,21 @@ struct ComposeView: View {
     @State private var showsCcBcc = false
     @State private var isConfirmingCancel = false
     @State private var isWriting = false
+    @State private var isPickingFiles = false
+    @State private var attached: [AttachedFile] = []
+
+    /// A file waiting to go out. Identifiable so a chip can be removed by id
+    /// rather than by index, which shifts the moment one is taken off.
+    private struct AttachedFile: Identifiable, Equatable {
+        let id = UUID()
+        let filename: String
+        let mimeType: String
+        let data: Data
+
+        var outgoing: MIMEBuilder.Attached {
+            MIMEBuilder.Attached(filename: filename, mimeType: mimeType, data: data)
+        }
+    }
     /// What was actually said, kept so the AI version can be undone. Dictation
     /// is always shaped by the model, because a raw transcript is not an
     /// email -- but "what I said" has to remain reachable in one tap.
@@ -71,8 +87,15 @@ struct ComposeView: View {
                 subjectRow
                 divider
                 bodyEditor
+                attachedRow
                 bottomBar
             }
+            .fileImporter(
+                isPresented: $isPickingFiles,
+                allowedContentTypes: [.item],
+                allowsMultipleSelection: true,
+                onCompletion: take
+            )
             .dismissesKeyboardOnBackgroundTap()
             .navigationTitle(replyingTo == nil ? "New Message" : "Reply")
             .navigationBarTitleDisplayMode(.inline)
@@ -198,6 +221,7 @@ struct ComposeView: View {
                 cc: showsCcBcc && !cc.isEmpty ? cc : nil,
                 body: messageBody,
                 html: richText.hasFormatting ? richText.htmlBody() : nil,
+                attachments: attached.map { $0.outgoing },
                 replyingTo: replyingTo
             )
             // Answered, so it stops asking to be answered.
@@ -221,6 +245,7 @@ struct ComposeView: View {
                 cc: showsCcBcc && !cc.isEmpty ? cc : nil,
                 body: messageBody,
                 html: richText.hasFormatting ? richText.htmlBody() : nil,
+                attachments: attached.map { $0.outgoing },
                 replyingTo: replyingTo
             )
             dismiss()
@@ -417,21 +442,117 @@ struct ComposeView: View {
 
     private var attachButton: some View {
         Button {
-            // Attachments need a picker and an upload path; neither exists
-            // yet, so this stays visibly unavailable rather than looking
-            // live and doing nothing.
+            dismissKeyboard()
+            isPickingFiles = true
         } label: {
-            Image(systemName: "paperclip")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
-                .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "paperclip")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(attached.isEmpty ? Color.secondary : Color.accentColor)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
+
+                if !attached.isEmpty {
+                    Text("\(attached.count)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 16, minHeight: 16)
+                        .background(Circle().fill(Color.accentColor))
+                }
+            }
         }
         .buttonStyle(.plain)
-        .disabled(true)
         .frame(width: isExpanded ? 0 : 44)
         .opacity(isExpanded ? 0 : 1)
         .clipped()
+        .accessibilityLabel(attached.isEmpty ? "Attach files" : "\(attached.count) attached")
+    }
+
+    /// What is going with the message, and the way to take one back off.
+    @ViewBuilder
+    private var attachedRow: some View {
+        if !attached.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(attached) { file in
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(file.filename)
+                                .font(.caption)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Button {
+                                attached.removeAll { $0.id == file.id }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Remove \(file.filename)")
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(Color(uiColor: .secondarySystemFill)))
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .frame(height: 42)
+
+            if attachedBytes > 0 {
+                Text(attachmentFootnote)
+                    .font(.caption2)
+                    .foregroundStyle(attachedBytes > MIMEBuilder.attachmentLimit ? .red : .secondary)
+                    .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    private var attachedBytes: Int {
+        attached.reduce(0) { $0 + $1.data.count }
+    }
+
+    private var attachmentFootnote: String {
+        let total = ByteCountFormatter.string(fromByteCount: Int64(attachedBytes), countStyle: .file)
+        let limit = ByteCountFormatter.string(
+            fromByteCount: Int64(MIMEBuilder.attachmentLimit), countStyle: .file
+        )
+        return attachedBytes > MIMEBuilder.attachmentLimit
+            ? "\(total) attached. That is over the \(limit) limit, so remove one before sending."
+            : "\(total) of \(limit)"
+    }
+
+    /// Reads what the picker returned into memory.
+    ///
+    /// A file from the Files app arrives as a security-scoped URL that has to
+    /// be opened before it can be read and closed after, or the read fails
+    /// with a permissions error that looks like a missing file.
+    private func take(_ result: Result<[URL], Error>) {
+        switch result {
+        case .failure(let error):
+            sendError = error.localizedDescription
+        case .success(let urls):
+            for url in urls {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+
+                guard let data = try? Data(contentsOf: url) else {
+                    sendError = "Could not read \(url.lastPathComponent)."
+                    continue
+                }
+                attached.append(
+                    AttachedFile(
+                        filename: url.lastPathComponent,
+                        mimeType: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
+                            ?? "application/octet-stream",
+                        data: data
+                    )
+                )
+            }
+        }
     }
 
     /// Opens the writer: pick a style, add an instruction, read what it wrote,

@@ -774,9 +774,11 @@ final class MailStore {
         cc: String? = nil,
         body: String,
         html: String? = nil,
+        attachments: [MIMEBuilder.Attached] = [],
         replyingTo original: Message? = nil
     ) async throws {
         guard let account else { throw SendError.notConnected }
+        try checkSize(of: attachments)
 
         let token = try await AuthService.currentGmailAccessToken()
         let envelope = MIMEBuilder.Envelope(
@@ -787,7 +789,8 @@ final class MailStore {
             plainText: body,
             html: html,
             inReplyTo: original?.messageIDHeader,
-            references: original?.messageIDHeader
+            references: original?.messageIDHeader,
+            attachments: attachments
         )
 
         let sent = try await GmailService.send(
@@ -808,7 +811,17 @@ final class MailStore {
         )
         local.remoteID = sent.id
         local.threadID = sent.threadID
+        local.hasAttachment = !attachments.isEmpty
         messages.append(local)
+    }
+
+    /// Refuses before anything is uploaded, so nobody watches a progress
+    /// spinner for a minute to be told no at the end.
+    private func checkSize(of attachments: [MIMEBuilder.Attached]) throws {
+        let total = attachments.reduce(0) { $0 + $1.size }
+        guard total <= MIMEBuilder.attachmentLimit else {
+            throw SendError.attachmentsTooLarge(MIMEBuilder.attachmentLimit)
+        }
     }
 
     /// Writes a real Gmail draft, so it is there in Gmail on every device and
@@ -819,9 +832,11 @@ final class MailStore {
         cc: String? = nil,
         body: String,
         html: String? = nil,
+        attachments: [MIMEBuilder.Attached] = [],
         replyingTo original: Message? = nil
     ) async throws {
         guard let account else { throw SendError.notConnected }
+        try checkSize(of: attachments)
 
         let token = try await AuthService.currentGmailAccessToken()
         let envelope = MIMEBuilder.Envelope(
@@ -832,7 +847,8 @@ final class MailStore {
             plainText: body,
             html: html,
             inReplyTo: original?.messageIDHeader,
-            references: original?.messageIDHeader
+            references: original?.messageIDHeader,
+            attachments: attachments
         )
 
         let id = try await GmailService.createDraft(
@@ -856,10 +872,16 @@ final class MailStore {
 
     enum SendError: LocalizedError {
         case notConnected
+        case attachmentsTooLarge(Int)
 
         var errorDescription: String? {
             switch self {
-            case .notConnected: "Connect a Gmail account before sending."
+            case .notConnected:
+                "Connect a Gmail account before sending."
+            case .attachmentsTooLarge(let limit):
+                // Said with the number in it, because "too large" without one
+                // leaves somebody removing files at random.
+                "The files add up to more than \(ByteCountFormatter.string(fromByteCount: Int64(limit), countStyle: .file)). Remove one, or send it as a link."
             }
         }
     }
