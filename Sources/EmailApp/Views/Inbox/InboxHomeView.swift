@@ -140,6 +140,15 @@ struct InboxHomeView: View {
                 searchMode = .mail
             }
         }
+        // Editing the query makes the last set of results stale. Leaving them
+        // under a changed search, still captioned with what the *old* one
+        // looked for, is the kind of thing that makes people distrust a
+        // search box entirely.
+        .onChange(of: query) { _, _ in
+            if !mail.searchResults.isEmpty || mail.searchExplanation != nil {
+                mail.clearSearch()
+            }
+        }
         .alert("AI search uses more of your allowance", isPresented: aiNoticeBinding) {
             Button("Not now", role: .cancel) {
                 pendingAISearch = nil
