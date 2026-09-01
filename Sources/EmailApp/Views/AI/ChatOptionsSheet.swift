@@ -19,13 +19,31 @@ enum ChatOption: Hashable {
 /// A real sheet rather than a card floating over the composer. The sheet is
 /// the platform's own control, so it comes with the drag handle, the corner
 /// radius and the spring for free, and it gets out of the way the same way
-/// every other sheet does.
+/// every other sheet does. It is exactly as tall as its content: the detent
+/// is measured, not guessed, so there is no dead space under the last row.
 struct ChatOptionsSheet: View {
     let onPick: (ChatOption) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var contentHeight: CGFloat = 400
 
     var body: some View {
+        VStack(spacing: 0) {
+            content
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: SheetHeightKey.self, value: proxy.size.height)
+                    }
+                }
+            Spacer(minLength: 0)
+        }
+        .onPreferenceChange(SheetHeightKey.self) { contentHeight = $0 }
+        .presentationDetents([.height(contentHeight)])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(30)
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Options")
@@ -71,12 +89,9 @@ struct ChatOptionsSheet: View {
             }
             .padding(.horizontal, 8)
             .padding(.top, 10)
-
-            Spacer(minLength: 0)
+            // Just enough under the last row to clear the home indicator.
+            .padding(.bottom, 12)
         }
-        .presentationDetents([.height(470)])
-        .presentationDragIndicator(.visible)
-        .presentationCornerRadius(30)
     }
 
     private func pick(_ option: ChatOption) {
@@ -140,6 +155,13 @@ struct ChatOptionsSheet: View {
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(PressButtonStyle())
+    }
+}
+
+private struct SheetHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 400
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

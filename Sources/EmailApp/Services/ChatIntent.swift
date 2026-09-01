@@ -52,6 +52,13 @@ enum ChatIntentParser {
         return .question
     }
 
+    /// A bare answer to "which one?" -- "Drobe", "the second one", "the one
+    /// from Sara" -- read as the words that pick, plus any ordinal.
+    static func selection(_ raw: String) -> (hints: [String], ordinal: Int?) {
+        let text = normalize(raw)
+        return (hints(in: text), ordinal(in: text))
+    }
+
     // MARK: - Normalising
 
     /// Lowercased, trimmed, trailing punctuation gone, spaces collapsed.
@@ -164,6 +171,13 @@ enum ChatIntentParser {
         ("compose a new email to", true), ("compose an email to", true), ("compose", true),
         ("send a reply to", false), ("send a reply", false), ("send a new email to", true),
         ("send an email to", true), ("send a message to", true), ("send a mail to", true),
+        // "Send me an email for App Store Connect": the person wants one
+        // written, not sent to themselves.
+        ("send me an email", true), ("send me a mail", true), ("send me a message", true),
+        ("write me an email", true), ("write me a mail", true), ("draft me an email", true),
+        ("make an email", true), ("create an email", true), ("write an email", true),
+        ("write a mail", true), ("send an email", true), ("write email to", true),
+        ("send email to", true), ("draft email to", true),
         ("email", true), ("message", true), ("tell", false), ("let", false),
     ]
 

@@ -14,8 +14,14 @@ extension MailStore {
     /// treat "more than one" as real ambiguity.
     ///
     /// `offered` is what Maily just showed the person, so "the first one"
-    /// and "reply to it" have something to refer to.
-    func draftCandidates(for request: DraftRequest, offered: [Message]) -> [Message] {
+    /// and "reply to it" have something to refer to. `within` narrows the
+    /// search to a given set -- the answer to "which one?" is chosen from
+    /// the ones that were offered, not from the whole inbox again.
+    func draftCandidates(
+        for request: DraftRequest,
+        offered: [Message],
+        within pool: [Message]? = nil
+    ) -> [Message] {
         if let ordinal = request.ordinal, !offered.isEmpty {
             if ordinal < 0, let newest = offered.max(by: { $0.date < $1.date }) { return [newest] }
             if ordinal >= 1, ordinal <= offered.count { return [offered[ordinal - 1]] }
@@ -27,7 +33,7 @@ extension MailStore {
         let mine = account?.email.lowercased()
         var scored: [(message: Message, score: Int)] = []
 
-        for message in messages(in: .inbox) {
+        for message in pool ?? messages(in: .inbox) {
             if let mine, message.sender.address.lowercased() == mine { continue }
 
             let name = message.sender.name.lowercased()

@@ -15,48 +15,36 @@ struct PeopleView: View {
     @State private var isSearching = false
     @State private var query = ""
 
-    private var people: [Person] {
-        mail.people
-            .filter { showsServices || $0.category.isPerson }
-            .filter { category == nil || $0.category == category }
-    }
-
-    private var important: [Person] { people.filter { $0.isImportant } }
-    private var waiting: [Person] { people.filter { !$0.isImportant && $0.awaitingReply > 0 } }
-    private var everyoneElse: [Person] { people.filter { !$0.isImportant && $0.awaitingReply == 0 } }
-
-    /// Only offer a filter for categories that actually have somebody in them.
-    private var availableCategories: [PersonCategory] {
-        let present = Set(mail.people.filter { showsServices || $0.category.isPerson }.map(\.category))
-        return PersonCategory.allCases.filter(present.contains)
-    }
-
-    /// By name, address or company, across everyone -- services included,
-    /// because a search is somebody looking for something specific.
-    private var searchResults: [Person] {
-        guard !query.isEmpty else { return [] }
-        return mail.people.filter {
+    var body: some View {
+        // Assembling people walks every message. Once per render -- the
+        // earlier version did it five times, once per derived list.
+        let everyone = mail.people
+        let visible = everyone.filter { showsServices || $0.category.isPerson }
+        let people = visible.filter { category == nil || $0.category == category }
+        let important = people.filter { $0.isImportant }
+        let waiting = people.filter { !$0.isImportant && $0.awaitingReply > 0 }
+        let everyoneElse = people.filter { !$0.isImportant && $0.awaitingReply == 0 }
+        // Only offer a filter for categories that actually have somebody.
+        let present = Set(visible.map(\.category))
+        let availableCategories = PersonCategory.allCases.filter(present.contains)
+        // By name, address or company, across everyone -- services included,
+        // because a search is somebody looking for something specific.
+        let searchResults = query.isEmpty ? [] : everyone.filter {
             $0.contact.name.localizedCaseInsensitiveContains(query)
                 || $0.contact.address.localizedCaseInsensitiveContains(query)
                 || ($0.organization ?? "").localizedCaseInsensitiveContains(query)
         }
-    }
 
-    var body: some View {
-        NavigationStack {
+        return NavigationStack {
             List {
                 if !query.isEmpty {
                     Section {
                         ForEach(searchResults) { row($0) }
                     }
                 } else {
-                    // The chips ride inside the list rather than in a bar
-                    // pinned above it: a safe-area inset up there kept the
-                    // large "People" title permanently collapsed, which made
-                    // this tab the odd one out beside AI and You.
                     if availableCategories.count > 1 {
                         Section {
-                            categoryBar
+                            categoryBar(availableCategories)
                                 .listRowInsets(EdgeInsets())
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
@@ -93,6 +81,9 @@ struct PeopleView: View {
             .modifier(SearchWhenAsked(query: $query, isPresented: $isSearching, prompt: "Search people"))
             .keyboardDismissable()
             .navigationTitle("People")
+            // Inline, so the title shares its line with the buttons instead
+            // of sitting a row below them.
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
@@ -100,12 +91,14 @@ struct PeopleView: View {
                     } label: {
                         Image(systemName: "magnifyingglass")
                     }
+                    .accessibilityLabel("Search")
 
                     Menu {
                         Toggle("Show services", isOn: $showsServices)
                     } label: {
                         Image(systemName: "ellipsis")
                     }
+                    .accessibilityLabel("More options")
                 }
             }
             .navigationDestination(for: Person.ID.self) { PersonDetailView(address: $0) }
@@ -124,7 +117,7 @@ struct PeopleView: View {
         NavigationLink(value: person.id) { PersonRow(person: person) }
     }
 
-    private var categoryBar: some View {
+    private func categoryBar(_ availableCategories: [PersonCategory]) -> some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 categoryChip(nil, title: "All", symbol: "person.2.fill")

@@ -13,27 +13,33 @@ import UIKit
 /// keyboard's frame, so the bar rides the keyboard's own animation curve and
 /// follows an interactive drag frame for frame.
 ///
-/// Two rules, both learned from footage:
+/// Three rules, all learned the hard way:
 ///
 /// 1. The host is sized to the bar and only its *bottom* is constrained, so
-///    the keyboard animates the host's position. The first version pinned
-///    the top to the screen too, which made the keyboard animate the host's
-///    height instead -- and SwiftUI content inside a UIKit view lays out at
-///    the final size immediately, so the capsule teleported ~290pt in 42ms
-///    while an invisible container animated. Position animates the layer,
-///    and everything in it comes along.
+///    the keyboard animates the host's position. Pinning the top as well
+///    made the keyboard animate the host's height -- and SwiftUI content
+///    inside a UIKit view lays out at the final size immediately, so the
+///    capsule teleported ~290pt in 42ms while an invisible container
+///    animated. Position animates the layer, and everything in it comes along.
 ///
 /// 2. Nothing here runs its own animation. The guide's constraints update
 ///    inside the keyboard's animation block and UIKit lays out there; the
 ///    one constant we change (the 12pt/8pt gap) is set in the notification
-///    and picked up by that same pass. A second animation block, even with
-///    the keyboard's own duration and curve, is a second authority.
-struct KeyboardAttachedBar<Bar: View>: UIViewControllerRepresentable {
+///    and picked up by that same pass.
+///
+/// 3. The hosted view is rebuilt only when `inputs` change. SwiftUI calls
+///    `updateUIViewController` on every re-render of the owner -- which,
+///    while an answer streams, is dozens of times a second -- and rebuilding
+///    a UIKit-hosted view each time was most of the lag on this screen.
+struct KeyboardAttachedBar<Bar: View, Inputs: Equatable>: UIViewControllerRepresentable {
     @Binding var height: CGFloat
+    /// Everything the bar's content depends on.
+    let inputs: Inputs
     let bar: Bar
 
-    init(height: Binding<CGFloat>, @ViewBuilder bar: () -> Bar) {
+    init(height: Binding<CGFloat>, inputs: Inputs, @ViewBuilder bar: () -> Bar) {
         _height = height
+        self.inputs = inputs
         self.bar = bar()
     }
 
@@ -42,11 +48,6 @@ struct KeyboardAttachedBar<Bar: View>: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: KeyboardBarController, context: Context) {
-        controller.hosting.rootView = AnyView(
-            BarHost(bar: bar) { [weak controller] measured in
-                controller?.report(height: measured)
-            }
-        )
         controller.onHeightChange = { measured in
             // Off the current update, so a layout pass never writes SwiftUI
             // state while SwiftUI is still evaluating a body.
@@ -54,6 +55,14 @@ struct KeyboardAttachedBar<Bar: View>: UIViewControllerRepresentable {
                 if abs(height - measured) > 0.5 { height = measured }
             }
         }
+
+        if let last = controller.lastInputs as? Inputs, last == inputs { return }
+        controller.lastInputs = inputs
+        controller.hosting.rootView = AnyView(
+            BarHost(bar: bar) { [weak controller] measured in
+                controller?.report(height: measured)
+            }
+        )
     }
 }
 
@@ -61,6 +70,8 @@ struct KeyboardAttachedBar<Bar: View>: UIViewControllerRepresentable {
 final class KeyboardBarController: UIViewController {
     let hosting = UIHostingController(rootView: AnyView(EmptyView()))
     var onHeightChange: ((CGFloat) -> Void)?
+    /// What the hosted view was last built from. See rule 3 above.
+    var lastInputs: Any?
 
     /// Measured from ChatGPT: about 12pt above the keyboard when it is up,
     /// resting closer to the home indicator when it is down.

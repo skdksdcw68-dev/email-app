@@ -523,6 +523,27 @@ final class MailStore {
         messages(in: mailbox, tag: tag, unreadOnly: true).count
     }
 
+    /// Every tag's total and unread count in one pass over the mailbox.
+    ///
+    /// The filter bar needs both for all ten tags, and asking `count(of:)`
+    /// and `unreadCount(of:)` per tag sorted the whole mailbox twenty times
+    /// on every render. One sort, one walk.
+    struct TagCounts {
+        var total: [AITag: Int] = [:]
+        var unread: [AITag: Int] = [:]
+    }
+
+    func tagCounts(in mailbox: Mailbox) -> TagCounts {
+        var counts = TagCounts()
+        for message in messages(in: mailbox) {
+            for tag in message.tags {
+                counts.total[tag, default: 0] += 1
+                if !message.isRead { counts.unread[tag, default: 0] += 1 }
+            }
+        }
+        return counts
+    }
+
     /// Only the tags that actually appear in this mailbox, so the filter bar
     /// never offers a chip that would empty the list.
     func availableTags(in mailbox: Mailbox) -> [AITag] {

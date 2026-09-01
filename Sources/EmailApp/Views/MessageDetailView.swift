@@ -96,16 +96,11 @@ struct MessageDetailView: View {
                 Label("Delete", systemImage: "trash")
             }
         } label: {
+            // A plain glyph. The bar draws its own container around toolbar
+            // items; a hand-drawn circle inside that read as two shapes in
+            // two colours next to the system's back button.
             Image(systemName: "ellipsis")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(.tint)
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
-                .contentShape(Circle())
         }
-        // Without .plain the toolbar renders its own button background behind
-        // this one, and the circle reads as two stacked shapes.
-        .buttonStyle(.plain)
         .accessibilityLabel("More options")
     }
 

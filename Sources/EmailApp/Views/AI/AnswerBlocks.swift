@@ -10,6 +10,7 @@ import Charts
 //     than "there are three urgent emails".
 //   - Emails land as tappable cards that open the message.
 //   - Comparisons land as a bar chart.
+//   - An email the model writes lands as a draft card, never as prose.
 
 /// A structured piece of an answer. Local answers are built from these; the
 /// model's answers stay prose plus sources.
@@ -183,6 +184,10 @@ struct AnswerChartView: View {
 /// slab of subheadline. Handles the markdown the model actually produces --
 /// headings, bullets, numbered lists, bold and italics inline -- and nothing
 /// speculative beyond that.
+///
+/// An email block is never shown as text. While it is still streaming in,
+/// the prose stops at the fence and a "Writing the email" line stands in;
+/// once complete, `AIChatView` lifts it out into a draft card.
 struct AssistantProse: View {
     let text: String
 
@@ -202,9 +207,24 @@ struct AssistantProse: View {
         case bullet(String)
         case numbered(Int, String)
         case paragraph(String)
+        /// An email block is arriving; the prose pauses here.
+        case writingEmail
+    }
+
+    /// The text without any email block: everything before an open fence,
+    /// or everything around a closed one.
+    private var visible: (prose: String, isWritingEmail: Bool) {
+        guard let open = text.range(of: EmailBlock.opening) else { return (text, false) }
+        let before = String(text[..<open.lowerBound])
+        let afterOpen = text[open.upperBound...]
+        if let close = afterOpen.range(of: EmailBlock.closing) {
+            return (before + "\n" + String(afterOpen[close.upperBound...]), false)
+        }
+        return (before, true)
     }
 
     private var pieces: [Piece] {
+        let (prose, isWritingEmail) = visible
         var result: [Piece] = []
         var paragraph: [String] = []
 
@@ -214,7 +234,7 @@ struct AssistantProse: View {
             paragraph = []
         }
 
-        for rawLine in text.components(separatedBy: "\n") {
+        for rawLine in prose.components(separatedBy: "\n") {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.isEmpty { flush(); continue }
 
@@ -233,6 +253,8 @@ struct AssistantProse: View {
             }
         }
         flush()
+
+        if isWritingEmail { result.append(.writingEmail) }
         return result
     }
 
@@ -285,6 +307,14 @@ struct AssistantProse: View {
             inline(string)
                 .font(.callout)
                 .lineSpacing(3)
+
+        case .writingEmail:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Writing the email…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

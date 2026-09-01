@@ -66,6 +66,22 @@ final class ChatIntentTests: XCTestCase {
         )
     }
 
+    func testSendMeAnEmailForSomethingIsANewEmail() {
+        // The phrasing that slipped through to the model and came back as
+        // prose with no Send button.
+        XCTAssertEqual(
+            ChatIntentParser.parse("Send me an email for appstore connect", hasPendingDraft: false),
+            .draft(DraftRequest(instruction: nil, hints: ["appstore", "connect"], ordinal: nil, isNewEmail: true))
+        )
+    }
+
+    func testAnAnswerToWhichOneIsReadAsASelection() {
+        XCTAssertEqual(ChatIntentParser.selection("Drobe").hints, ["drobe"])
+        XCTAssertEqual(ChatIntentParser.selection("the second one").ordinal, 2)
+        XCTAssertTrue(ChatIntentParser.selection("the latest").hints.isEmpty)
+        XCTAssertEqual(ChatIntentParser.selection("the latest").ordinal, -1)
+    }
+
     func testOrdinalsReferToWhatWasOffered() {
         XCTAssertEqual(
             ChatIntentParser.parse("reply to the first one", hasPendingDraft: false),

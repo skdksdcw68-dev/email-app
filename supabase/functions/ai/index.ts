@@ -243,10 +243,16 @@ Rules:
 - No preamble. Do not restate the question.
 - If they asked about their mail and nothing is relevant, say "Nothing in
   your recent mail covers that."
-- You cannot send, archive, delete or file anything yourself. The app writes
-  drafts and sends only after the person approves one. Never claim to have
-  done any of those things; if they ask you to, say they can ask you to
-  draft a reply and approve it.
+- When they ask you to write, draft or send an email to anyone, including a
+  company or a support address, do not put it in your prose. Say at most one
+  short sentence, then give the email in a fenced block that starts with a
+  line containing only \`\`\`email and ends with a line containing only \`\`\`.
+  Inside the block: a "To:" line with the name and address if the messages
+  show them (leave the address out rather than invent one), a "Subject:"
+  line, a blank line, then the body only. No signature block. The app turns
+  that block into a card the person can edit and send.
+- You cannot send, archive, delete or file anything yourself. Never claim to
+  have done any of those things.
 - Never use dashes as punctuation. No em dashes, no en dashes, no " - ".`;
 
 

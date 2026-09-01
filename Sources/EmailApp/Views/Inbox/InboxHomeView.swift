@@ -7,11 +7,12 @@ import UIKit
 /// no card, no hairline, the way Mail's category filters sit. Below them the
 /// red "needs your attention" row, then the mail.
 ///
-/// The bar is three controls in two groups, the way the current assistants
-/// lay theirs out: one circular button on the left that switches mailbox,
-/// and a capsule on the right holding search and compose. Search is a
-/// button, not a field: the field only exists once it is asked for, drops
-/// in from the top, and is gone again when cancelled.
+/// The bar is three controls in two groups: a mailbox switcher on the left,
+/// search and compose together on the right. They are plain toolbar items
+/// on purpose -- the system draws the container, so they look exactly like
+/// every other bar in the app. Search is a button, not a field: the field
+/// only exists once it is asked for, drops in from the top, and is gone
+/// again when cancelled.
 struct InboxHomeView: View {
     @Environment(MailStore.self) private var mail
 
@@ -22,9 +23,6 @@ struct InboxHomeView: View {
     @State private var query = ""
 
     private var isBrowsing: Bool { mailbox == .inbox }
-    private var messages: [Message] { mail.messages(in: mailbox, tag: tag) }
-    private var attention: [Message] { mail.needsAttention(limit: .max) }
-    private var availableTags: [AITag] { mail.availableTags(in: mailbox) }
 
     /// Searching covers every folder, not just the current one -- someone
     /// looking for a message rarely knows or cares where it landed.
@@ -39,7 +37,16 @@ struct InboxHomeView: View {
     private var isSearchActive: Bool { !query.isEmpty }
 
     var body: some View {
-        List {
+        // Each of these sorts the mailbox. Once per render, not once per
+        // row: computing the list again inside every row's onAppear was a
+        // sort of two thousand messages on every scroll step.
+        let messages = mail.messages(in: mailbox, tag: tag)
+        let lastID = messages.last?.id
+        let attention = mail.needsAttention(limit: .max)
+        let counts = mail.tagCounts(in: mailbox)
+        let availableTags = AITag.allCases.filter { (counts.total[$0] ?? 0) > 0 }
+
+        return List {
             if isSearchActive {
                 ForEach(searchResults) { message in
                     ZStack {
@@ -50,7 +57,7 @@ struct InboxHomeView: View {
                 }
             } else {
                 if isBrowsing {
-                    summaryCard
+                    summaryCard(attention: attention)
                 }
 
                 if mail.isLoadingFirstPage {
@@ -77,7 +84,7 @@ struct InboxHomeView: View {
                     .messageSwipeActions(for: message)
                     .onAppear {
                         // The end of the list is the trigger for the next page.
-                        if message.id == messages.last?.id {
+                        if message.id == lastID {
                             Task { await mail.loadMore() }
                         }
                     }
@@ -99,7 +106,7 @@ struct InboxHomeView: View {
             if isBrowsing && !availableTags.isEmpty && !isSearching {
                 TagFilterBar(
                     tags: availableTags,
-                    count: { mail.unreadCount(of: $0, in: mailbox) },
+                    count: { counts.unread[$0] ?? 0 },
                     selection: $tag
                 )
             }
@@ -120,8 +127,38 @@ struct InboxHomeView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) { mailboxButton }
-            ToolbarItem(placement: .topBarTrailing) { actionCluster }
+            ToolbarItem(placement: .topBarLeading) {
+                // The glyph is where you are; the menu behind it is where
+                // you can go. The bare hamburger said nothing about either.
+                Menu {
+                    Picker("Mailbox", selection: $mailbox) {
+                        ForEach(Mailbox.allCases) { box in
+                            Label(box.title, systemImage: box.systemImage).tag(box)
+                        }
+                    }
+                } label: {
+                    Image(systemName: mailbox.systemImage)
+                }
+                .accessibilityLabel("Mailbox: \(mailbox.title)")
+            }
+
+            // One group, so the system draws them in one capsule -- the same
+            // capsule the People tab's search and menu share.
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    isSearching = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .accessibilityLabel("Search")
+
+                Button {
+                    isComposing = true
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .accessibilityLabel("Compose")
+            }
         }
         .onChange(of: mailbox) { _, newValue in
             if let tag, mail.count(of: tag, in: newValue) == 0 { self.tag = nil }
@@ -129,65 +166,10 @@ struct InboxHomeView: View {
         .sheet(isPresented: $isComposing) { ComposeView() }
     }
 
-    // MARK: - The bar
-
-    /// One circle showing where you are; the menu behind it is where you can
-    /// go. The bare hamburger it replaces said nothing about either.
-    private var mailboxButton: some View {
-        Menu {
-            Picker("Mailbox", selection: $mailbox) {
-                ForEach(Mailbox.allCases) { box in
-                    Label(box.title, systemImage: box.systemImage).tag(box)
-                }
-            }
-        } label: {
-            Image(systemName: mailbox.systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.primary)
-                .frame(width: 36, height: 36)
-                .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
-                .contentShape(Circle())
-        }
-        // Without .plain the toolbar renders its own button background behind
-        // this one, and the circle reads as two stacked shapes.
-        .buttonStyle(.plain)
-        .accessibilityLabel("Mailbox: \(mailbox.title)")
-    }
-
-    /// Search and compose together in one capsule, the way ChatGPT and
-    /// Perplexity group their bar actions. Compose lives here now instead of
-    /// floating over the mail.
-    private var actionCluster: some View {
-        HStack(spacing: 0) {
-            Button {
-                isSearching = true
-            } label: {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 42, height: 36)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Search")
-
-            Button {
-                isComposing = true
-            } label: {
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 42, height: 36)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Compose")
-        }
-        .foregroundStyle(.primary)
-        .background(Capsule().fill(Color(uiColor: .secondarySystemFill)))
-        .buttonStyle(PressButtonStyle())
-    }
-
     // MARK: - The one card
 
     @ViewBuilder
-    private var summaryCard: some View {
+    private func summaryCard(attention: [Message]) -> some View {
         Section {
             if let error = mail.connectionError {
                 HStack(alignment: .top, spacing: 10) {
@@ -221,10 +203,13 @@ struct InboxHomeView: View {
                             .frame(width: 26)
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(attentionTitle)
+                            Text(attention.count == 1
+                                 ? "1 email needs your attention"
+                                 : "\(attention.count) emails need your attention")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.primary)
-                            Text(attentionDetail)
+                            Text(attention.prefix(2).map(\.sender.name).joined(separator: ", ")
+                                 + (attention.count > 2 ? " and others" : ""))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -259,17 +244,6 @@ struct InboxHomeView: View {
                 .transition(.opacity)
             }
         }
-    }
-
-    private var attentionTitle: String {
-        attention.count == 1
-            ? "1 email needs your attention"
-            : "\(attention.count) emails need your attention"
-    }
-
-    private var attentionDetail: String {
-        attention.prefix(2).map(\.sender.name).joined(separator: ", ")
-            + (attention.count > 2 ? " and others" : "")
     }
 
     @ViewBuilder

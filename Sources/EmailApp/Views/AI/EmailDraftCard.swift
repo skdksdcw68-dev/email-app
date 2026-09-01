@@ -6,8 +6,9 @@ import UIKit
 /// header with the actions in it, the envelope fields, the body, and one
 /// footer line that says where the send stands.
 ///
-/// Send is the only way anything leaves. Edit lets the person fix the text
-/// first; Discard drops it. Once it has gone the card locks and says so.
+/// Send is the only way anything leaves. Edit lets the person fix the text,
+/// the subject or the address first; Discard drops it. Once it has gone the
+/// card locks and says so.
 struct EmailDraftCard: View {
     @Binding var draft: ChatDraft
     let onSend: () -> Void
@@ -16,6 +17,14 @@ struct EmailDraftCard: View {
     @State private var isEditing = false
 
     private var isLocked: Bool { draft.status != .ready }
+
+    private var hasAddress: Bool {
+        !draft.to.address.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var canSend: Bool {
+        hasAddress && !draft.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     private var recipient: String {
         draft.to.name.isEmpty || draft.to.name.contains("@") ? draft.to.address : draft.to.name
@@ -28,7 +37,7 @@ struct EmailDraftCard: View {
                 .padding(.top, 14)
                 .padding(.bottom, 12)
 
-            field("To", recipient)
+            recipientRow
             hairline
             subjectRow
             hairline
@@ -51,6 +60,11 @@ struct EmailDraftCard: View {
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.75), value: draft.status)
         .animation(.easeOut(duration: 0.15), value: isEditing)
+        .onAppear {
+            // An email with nowhere to go opens straight into editing, so the
+            // missing address is the first thing the person sees.
+            if !hasAddress && draft.status == .ready { isEditing = true }
+        }
     }
 
     // MARK: - Pieces
@@ -79,6 +93,8 @@ struct EmailDraftCard: View {
                         .background(Circle().fill(Color.accentColor))
                 }
                 .buttonStyle(PressButtonStyle())
+                .disabled(!canSend)
+                .opacity(canSend ? 1 : 0.4)
                 .accessibilityLabel("Send")
 
             case .sending:
@@ -120,14 +136,27 @@ struct EmailDraftCard: View {
         .accessibilityLabel(label)
     }
 
-    private func field(_ label: String, _ value: String) -> some View {
+    private var recipientRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(label)
+            Text("To")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Text(value)
-                .font(.subheadline)
-                .lineLimit(1)
+
+            if isEditing && !isLocked {
+                TextField("Email address", text: $draft.to.address)
+                    .font(.subheadline)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } else if hasAddress {
+                Text(recipient)
+                    .font(.subheadline)
+                    .lineLimit(1)
+            } else {
+                Text("Add a recipient")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
@@ -179,7 +208,7 @@ struct EmailDraftCard: View {
 
                 Spacer(minLength: 0)
 
-                Text("Nothing is sent until you tap send.")
+                Text(hasAddress ? "Nothing is sent until you tap send." : "Needs an address before it can go.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
