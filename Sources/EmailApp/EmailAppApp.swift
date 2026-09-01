@@ -8,12 +8,16 @@ struct EmailAppApp: App {
     /// connected.
     @State private var user = UserStore()
     @State private var mail = MailStore()
+    /// Past conversations with Maily, on this device. Clears itself when
+    /// the mailbox is disconnected.
+    @State private var chats = ChatHistory()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(user)
                 .environment(mail)
+                .environment(chats)
                 // Google redirects back through the reversed-client-id URL
                 // scheme declared in Info.plist; the SDK completes the flow.
                 .onOpenURL { url in

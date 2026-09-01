@@ -5,7 +5,8 @@ import UIKit
 ///
 /// Empty, it is Perplexity's page: the name and nothing else. In use, it is
 /// a conversation with an agent that can read the mailbox and write email,
-/// but never sends anything without a tap.
+/// but never sends anything without a tap. Conversations are kept: this
+/// screen opens fresh, or on a saved one by id, and saves itself as it goes.
 ///
 /// Every message goes down one ladder, on the device, before anything is
 /// spent:
@@ -27,18 +28,21 @@ import UIKit
 /// the one thing the agent does to the world, and it does it only from the
 /// card, only on Send, and reports exactly what happened.
 struct AIChatView: View {
+    /// A saved conversation to pick up, or nil for a new one.
+    var conversationID: UUID? = nil
+
     @Environment(MailStore.self) private var mail
     @Environment(UserStore.self) private var user
+    @Environment(ChatHistory.self) private var history
 
     @State private var turns: [ChatMessage] = []
     @State private var draft = ""
     @State private var isWorking = false
     @State private var showsOptions = false
+    @State private var showsHistory = false
     /// Reported by the attached bar: its own height, so the conversation
-    /// leaves room for it, and how much of the screen it and the keyboard
-    /// take from the bottom, so the empty page can centre above them.
+    /// leaves room for it and the empty page centres above it.
     @State private var barHeight: CGFloat = 54
-    @State private var barTop: CGFloat = 62
     @State private var composerReset = 0
     @State private var composerFocus = 0
     /// Emails Maily just put in front of the person, so "the first one" and
@@ -49,6 +53,8 @@ struct AIChatView: View {
     /// The model call in flight, so the stop button has something to stop.
     @State private var work: Task<Void, Never>?
     @State private var editing: EditingDraft?
+    /// The saved conversation this screen is writing to, once it has one.
+    @State private var currentID: UUID?
 
     private struct EditingDraft: Identifiable {
         let id: ChatMessage.ID
@@ -105,15 +111,13 @@ struct AIChatView: View {
             }
             .background {
                 if showsWordmark {
-                    // Centred in whatever is left above the bar and the
-                    // keyboard, which is where Perplexity puts theirs. The
-                    // measurement comes from UIKit, which knows where the bar
-                    // actually is; SwiftUI's own keyboard geometry is what
-                    // put this behind the capsule last time.
+                    // Centred in what is left above the bar and the keyboard,
+                    // which is where Perplexity puts theirs. SwiftUI already
+                    // moves this layer up for the keyboard on its own; only
+                    // the bar's height is added here. Adding the keyboard's
+                    // height as well pushed the name to the top of the screen.
                     MailyWordmark()
-                        .padding(.bottom, barTop)
-                        .ignoresSafeArea(.keyboard)
-                        .animation(.easeOut(duration: 0.25), value: barTop)
+                        .padding(.bottom, barHeight + KeyboardBarController.keyboardGap)
                         .transition(.opacity)
                 }
             }
@@ -144,7 +148,7 @@ struct AIChatView: View {
                 scrollToEnd(proxy, animation: .easeOut(duration: 0.18))
             }
             .overlay {
-                KeyboardAttachedBar(height: $barHeight, bottom: $barTop, inputs: composerInputs) {
+                KeyboardAttachedBar(height: $barHeight, inputs: composerInputs) {
                     ChatComposer(
                         text: $draft,
                         showsOptions: $showsOptions,
@@ -157,7 +161,7 @@ struct AIChatView: View {
                 }
                 // Full-bleed on purpose: if SwiftUI shrank this for the
                 // keyboard, the bar would be back to following SwiftUI's
-                // layout instead of UIKit's guide.
+                // layout instead of UIKit's positioning.
                 .ignoresSafeArea()
             }
         }
@@ -174,10 +178,25 @@ struct AIChatView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button(role: .destructive) {
-                        clearConversation()
+                    Button {
+                        startNewChat()
                     } label: {
-                        Label("Clear conversation", systemImage: "trash")
+                        Label("New chat", systemImage: "plus.bubble")
+                    }
+                    .disabled(turns.isEmpty)
+
+                    Button {
+                        showsHistory = true
+                    } label: {
+                        Label("History", systemImage: "clock.arrow.circlepath")
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        deleteCurrentChat()
+                    } label: {
+                        Label("Delete this chat", systemImage: "trash")
                     }
                     .disabled(turns.isEmpty)
                 } label: {
@@ -189,12 +208,35 @@ struct AIChatView: View {
         .sheet(isPresented: $showsOptions) {
             ChatOptionsSheet(onPick: handle)
         }
+        .sheet(isPresented: $showsHistory) {
+            NavigationStack {
+                ChatHistoryView { conversation in
+                    open(conversation)
+                    showsHistory = false
+                }
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Done") { showsHistory = false }
+                    }
+                }
+            }
+        }
         .fullScreenCover(item: $editing) { item in
             if let binding = draftBinding(for: item.id) {
                 DraftEditorView(draft: binding, tone: user.tonePreference) {
                     Task { await sendDraft(in: item.id) }
                 }
             }
+        }
+        .task { restoreConversationIfNeeded() }
+        // Saved whenever the conversation settles: local answers, greetings,
+        // sends, and each model answer once it has finished streaming. Not
+        // per token -- that is `isWorking` below.
+        .onChange(of: turns) { _, _ in
+            if !isWorking { persistConversation() }
+        }
+        .onChange(of: isWorking) { _, working in
+            if !working { persistConversation() }
         }
     }
 
@@ -207,15 +249,6 @@ struct AIChatView: View {
         }
     }
 
-    private func clearConversation() {
-        work?.cancel()
-        withAnimation {
-            turns = []
-            offered = []
-            pendingChoice = nil
-        }
-    }
-
     private func handle(_ option: ChatOption) {
         switch option {
         case .needsReply: ask("What do I need to reply to?")
@@ -223,7 +256,7 @@ struct AIChatView: View {
         case .urgent:     ask("What is urgent right now?")
         case .summary:    ask("Summarise my important emails")
         case .deadlines:  ask("Any deadlines this week?")
-        case .clear:      clearConversation()
+        case .newChat:    startNewChat()
         case .write:
             // Start the sentence and hand over the cursor.
             draft = "Write an email to "
@@ -240,6 +273,69 @@ struct AIChatView: View {
             get: { turns[index].draft ?? ChatDraft(to: Contact(name: "", address: ""), subject: "", body: "") },
             set: { turns[index].draft = $0 }
         )
+    }
+
+    // MARK: - History
+
+    /// Opened on a saved conversation: bring it back, once.
+    private func restoreConversationIfNeeded() {
+        guard turns.isEmpty, currentID == nil,
+              let conversationID,
+              let conversation = history.conversation(conversationID)
+        else { return }
+        open(conversation)
+    }
+
+    private func open(_ conversation: Conversation) {
+        work?.cancel()
+        turns = conversation.turns.map { turn in
+            var turn = turn
+            turn.isPending = false
+            // A send that was mid-flight when the app closed never finished.
+            if turn.draft?.status == .sending { turn.draft?.status = .ready }
+            return turn
+        }
+        currentID = conversation.id
+        offered = []
+        pendingChoice = nil
+    }
+
+    /// Writes what is on screen to history, minus anything still pending.
+    private func persistConversation() {
+        let settled = turns.filter { !$0.isPending }
+        guard !settled.isEmpty else { return }
+
+        let now = Date.now
+        if let currentID, var existing = history.conversation(currentID) {
+            existing.turns = settled
+            existing.updatedAt = now
+            history.save(existing)
+        } else {
+            let conversation = Conversation(
+                title: Conversation.title(for: settled),
+                createdAt: now,
+                updatedAt: now,
+                turns: settled
+            )
+            currentID = conversation.id
+            history.save(conversation)
+        }
+    }
+
+    /// Starts fresh. The conversation on screen is already in History.
+    private func startNewChat() {
+        work?.cancel()
+        withAnimation {
+            turns = []
+            offered = []
+            pendingChoice = nil
+        }
+        currentID = nil
+    }
+
+    private func deleteCurrentChat() {
+        if let currentID { history.delete(currentID) }
+        startNewChat()
     }
 
     // MARK: - Asking
@@ -633,4 +729,5 @@ struct AIChatView: View {
     }
     .environment(MailStore.connected())
     .environment(UserStore(defaults: .previews, startAt: .finished))
+    .environment(ChatHistory(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-chats.json")))
 }

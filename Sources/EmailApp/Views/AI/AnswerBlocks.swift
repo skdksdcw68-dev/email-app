@@ -16,7 +16,7 @@ import Charts
 
 /// A structured piece of an answer. Local answers are built from these; the
 /// model's answers stay prose plus sources.
-enum AnswerBlock: Equatable, Identifiable {
+enum AnswerBlock: Equatable, Identifiable, Codable {
     case stats([Stat])
     case messages([Message])
     case chart(AnswerChart)
@@ -30,15 +30,31 @@ enum AnswerBlock: Equatable, Identifiable {
     }
 }
 
-struct Stat: Equatable {
+struct Stat: Equatable, Codable {
+    /// A named system colour rather than a `Color`, so a stat survives a
+    /// round trip through the history file.
+    enum Tint: String, Codable {
+        case red, orange, green, blue, indigo
+
+        var color: Color {
+            switch self {
+            case .red:    Color(uiColor: .systemRed)
+            case .orange: Color(uiColor: .systemOrange)
+            case .green:  Color(uiColor: .systemGreen)
+            case .blue:   Color(uiColor: .systemBlue)
+            case .indigo: Color(uiColor: .systemIndigo)
+            }
+        }
+    }
+
     let title: String
     let value: String
     let symbol: String
-    let color: Color
+    let tint: Tint
 }
 
-struct AnswerChart: Equatable {
-    struct Point: Equatable, Identifiable {
+struct AnswerChart: Equatable, Codable {
+    struct Point: Equatable, Identifiable, Codable {
         let label: String
         let value: Int
         var id: String { label }
@@ -78,7 +94,7 @@ struct StatTileRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Image(systemName: stat.symbol)
                         .font(.footnote)
-                        .foregroundStyle(stat.color)
+                        .foregroundStyle(stat.tint.color)
                     Text(stat.value)
                         .font(.system(.title3, design: .rounded).weight(.bold).monospacedDigit())
                     Text(stat.title)

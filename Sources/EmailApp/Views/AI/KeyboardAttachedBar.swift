@@ -35,23 +35,15 @@ import UIKit
 /// 3. The hosted view is rebuilt only when `inputs` change, not on every
 ///    streamed token.
 ///
-/// Two measurements come back out: `height`, the bar's own height, so the
-/// content behind it can leave room; and `bottom`, how much of the screen
-/// the bar and the keyboard together take from the bottom.
+/// `height` comes back out -- the bar's own height -- so the content behind
+/// it can leave room and the empty page can centre above it.
 struct KeyboardAttachedBar<Bar: View, Inputs: Equatable>: UIViewControllerRepresentable {
     @Binding var height: CGFloat
-    @Binding var bottom: CGFloat
     let inputs: Inputs
     let bar: Bar
 
-    init(
-        height: Binding<CGFloat>,
-        bottom: Binding<CGFloat>,
-        inputs: Inputs,
-        @ViewBuilder bar: () -> Bar
-    ) {
+    init(height: Binding<CGFloat>, inputs: Inputs, @ViewBuilder bar: () -> Bar) {
         _height = height
-        _bottom = bottom
         self.inputs = inputs
         self.bar = bar()
     }
@@ -66,11 +58,6 @@ struct KeyboardAttachedBar<Bar: View, Inputs: Equatable>: UIViewControllerRepres
         controller.onHeightChange = { measured in
             DispatchQueue.main.async {
                 if abs(height - measured) > 0.5 { height = measured }
-            }
-        }
-        controller.onBottomChange = { measured in
-            DispatchQueue.main.async {
-                if abs(bottom - measured) > 0.5 { bottom = measured }
             }
         }
 
@@ -89,7 +76,6 @@ struct KeyboardAttachedBar<Bar: View, Inputs: Equatable>: UIViewControllerRepres
 final class KeyboardBarController: UIViewController {
     let hosting = UIHostingController(rootView: AnyView(EmptyView()))
     var onHeightChange: ((CGFloat) -> Void)?
-    var onBottomChange: ((CGFloat) -> Void)?
     var lastInputs: Any?
 
     /// Measured from ChatGPT: about 12pt above the keyboard when it is up,
@@ -103,7 +89,6 @@ final class KeyboardBarController: UIViewController {
     private var keyboardFrame: CGRect?
     private var observers: [NSObjectProtocol] = []
     private var barHeight: CGFloat = 0
-    private var lastBottom: CGFloat = 0
 
     override func loadView() {
         view = PassthroughView()
@@ -169,13 +154,6 @@ final class KeyboardBarController: UIViewController {
         super.viewDidLayoutSubviews()
         // Our own frame or safe area changed: re-place without animating.
         if updateOffset() { view.setNeedsLayout() }
-
-        // How far up the screen the bar's top edge sits -- keyboard included
-        // when it is up -- for whoever wants to centre in the space above.
-        let occupied = view.bounds.maxY - hosting.view.frame.minY
-        guard occupied > 0, abs(occupied - lastBottom) > 0.5 else { return }
-        lastBottom = occupied
-        onBottomChange?(occupied)
     }
 
     /// SwiftUI measured the bar. The host follows, so the bar is never

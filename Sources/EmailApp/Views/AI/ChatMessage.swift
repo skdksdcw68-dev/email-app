@@ -2,17 +2,16 @@ import Foundation
 
 /// One turn in the AI conversation.
 ///
-/// Kept in memory for the session rather than persisted. A chat about "what
-/// needs my attention today" is worthless tomorrow, and storing every answer
-/// would mean storing a running summary of somebody's mail on disk for no
-/// benefit.
-struct ChatMessage: Identifiable, Equatable {
-    enum Role: Equatable {
+/// Codable, because conversations are now kept: `ChatHistory` writes them
+/// to disk on this phone and brings them back. The transient parts --
+/// pending and its label -- ride along but are never saved mid-flight.
+struct ChatMessage: Identifiable, Equatable, Codable {
+    enum Role: String, Equatable, Codable {
         case user
         case assistant
     }
 
-    let id = UUID()
+    var id = UUID()
     let role: Role
     var text: String
     /// The structured parts of an answer -- stat tiles, message cards, a
@@ -58,15 +57,15 @@ struct ChatMessage: Identifiable, Equatable {
 /// Nothing about this is sent until the person taps the button on its card;
 /// that is the whole contract of the agent. The status then tells the story
 /// on the card itself: going, gone, or exactly what went wrong.
-struct ChatDraft: Identifiable, Equatable {
-    enum Status: Equatable {
+struct ChatDraft: Identifiable, Equatable, Codable {
+    enum Status: Equatable, Codable {
         case ready
         case sending
         case sent
         case failed(String)
     }
 
-    let id = UUID()
+    var id = UUID()
     var to: Contact
     /// Extra recipients, comma-separated, as typed in the editor.
     var cc = ""

@@ -9,7 +9,7 @@ enum ChatOption: Hashable {
     case write
     case summary
     case deadlines
-    case clear
+    case newChat
 }
 
 /// The plus button's sheet, in Perplexity's shape: a title with an X, a row
@@ -84,8 +84,8 @@ struct ChatOptionsSheet: View {
                     title: "Summarise my mail", subtitle: "What matters, in three lines")
                 row(.deadlines, symbol: "calendar",
                     title: "Deadlines this week", subtitle: "Dates and commitments in your mail")
-                row(.clear, symbol: "trash",
-                    title: "Clear conversation", subtitle: nil, isDestructive: true)
+                row(.newChat, symbol: "plus.bubble",
+                    title: "New chat", subtitle: "This one is kept in History")
             }
             .padding(.horizontal, 8)
             .padding(.top, 10)
@@ -125,8 +125,7 @@ struct ChatOptionsSheet: View {
         _ option: ChatOption,
         symbol: String,
         title: String,
-        subtitle: String?,
-        isDestructive: Bool = false
+        subtitle: String?
     ) -> some View {
         Button {
             pick(option)
@@ -134,13 +133,13 @@ struct ChatOptionsSheet: View {
             HStack(alignment: .center, spacing: 14) {
                 Image(systemName: symbol)
                     .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(isDestructive ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(.secondary)
                     .frame(width: 30)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.body.weight(.medium))
-                        .foregroundStyle(isDestructive ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
+                        .foregroundStyle(.primary)
                     if let subtitle {
                         Text(subtitle)
                             .font(.footnote)

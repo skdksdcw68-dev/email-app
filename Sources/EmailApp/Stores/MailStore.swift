@@ -482,6 +482,9 @@ final class MailStore {
     }
 
     func disconnect() {
+        // Anything else holding mail content on disk (chat history) clears
+        // itself on this.
+        NotificationCenter.default.post(name: .mailboxDisconnected, object: nil)
         account = nil
         messages = []
         MessageArchive.clear()

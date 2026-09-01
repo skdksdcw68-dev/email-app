@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 /// The assistant's decision ladder. Every question lands on exactly one rung:
 ///
@@ -68,12 +67,9 @@ extension MailStore {
         if any("urgent", "attention", "on fire") {
             let counts = self.counts
             let stats = [
-                Stat(title: "Urgent", value: "\(counts.urgent)",
-                     symbol: "bolt.fill", color: Color(uiColor: .systemRed)),
-                Stat(title: "Need reply", value: "\(counts.needsReply)",
-                     symbol: "arrowshape.turn.up.left.fill", color: Color(uiColor: .systemBlue)),
-                Stat(title: "Unread", value: "\(counts.new)",
-                     symbol: "envelope.badge.fill", color: Color(uiColor: .systemOrange)),
+                Stat(title: "Urgent", value: "\(counts.urgent)", symbol: "bolt.fill", tint: .red),
+                Stat(title: "Need reply", value: "\(counts.needsReply)", symbol: "arrowshape.turn.up.left.fill", tint: .blue),
+                Stat(title: "Unread", value: "\(counts.new)", symbol: "envelope.badge.fill", tint: .orange),
             ]
             let attention = needsAttention(limit: 6)
             var blocks: [AnswerBlock] = [.stats(stats)]
@@ -85,12 +81,9 @@ extension MailStore {
         if any("how many", "unread", "how much mail") {
             let counts = self.counts
             let stats = [
-                Stat(title: "Unread", value: "\(counts.new)",
-                     symbol: "envelope.badge.fill", color: Color(uiColor: .systemBlue)),
-                Stat(title: "Need reply", value: "\(counts.needsReply)",
-                     symbol: "arrowshape.turn.up.left.fill", color: Color(uiColor: .systemIndigo)),
-                Stat(title: "Urgent", value: "\(counts.urgent)",
-                     symbol: "bolt.fill", color: Color(uiColor: .systemRed)),
+                Stat(title: "Unread", value: "\(counts.new)", symbol: "envelope.badge.fill", tint: .blue),
+                Stat(title: "Need reply", value: "\(counts.needsReply)", symbol: "arrowshape.turn.up.left.fill", tint: .indigo),
+                Stat(title: "Urgent", value: "\(counts.urgent)", symbol: "bolt.fill", tint: .red),
             ]
             return LocalAnswer(text: "Where your inbox stands right now:", blocks: [.stats(stats)])
         }
