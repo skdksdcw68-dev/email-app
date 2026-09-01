@@ -202,4 +202,76 @@ final class MailStoreTests: XCTestCase {
     func testAnEmptyMailboxAnswersNothingLocally() {
         XCTAssertNil(MailStore().localAnswer(for: "What do I need to reply to?"))
     }
+
+    // MARK: - Answering stops the nagging
+
+    func testReplyingClearsTheNeedsReplyTag() {
+        let store = makeStore()
+        let id = store.messages(in: .inbox)[0].id
+        XCTAssertTrue(store.message(id)?.tags.contains(.needsReply) ?? false)
+
+        store.markReplied(id)
+
+        XCTAssertFalse(store.message(id)?.tags.contains(.needsReply) ?? true)
+        XCTAssertTrue(store.message(id)?.isRead ?? false)
+        XCTAssertTrue(store.messages(in: .inbox, tag: .needsReply).isEmpty)
+    }
+
+    func testReadMailIsPhrasedAsASuggestion() {
+        // The whole point: an email you have already seen and chosen not to
+        // answer must not be barked at you as a task.
+        let store = makeStore()
+        store.markRead(store.messages(in: .inbox)[0].id)
+
+        let answer = store.localAnswer(for: "What do I need to reply to?")
+        XCTAssertNotNil(answer)
+        XCTAssertTrue(answer?.text.contains("already read") ?? false, answer?.text ?? "no answer")
+    }
+
+    func testUnreadMailIsStatedPlainly() {
+        let answer = makeStore().localAnswer(for: "What do I need to reply to?")
+        XCTAssertTrue(answer?.text.contains("waiting on a reply") ?? false, answer?.text ?? "no answer")
+    }
+
+    // MARK: - Tag questions
+
+    func testAskingForATagListsThatPile() {
+        let answer = makeStore().localAnswer(for: "show me very urgent")
+        XCTAssertNotNil(answer)
+        XCTAssertTrue(answer?.text.contains("Very Urgent") ?? false, answer?.text ?? "no answer")
+        // Tiles and the messages themselves, not a sentence about a number.
+        XCTAssertEqual(answer?.blocks.count, 2)
+    }
+
+    func testAnEmptyTagSaysSoRatherThanGuessing() {
+        let answer = makeStore().localAnswer(for: "what is in promotions")
+        XCTAssertEqual(answer?.text, "Nothing is tagged Promotion right now.")
+    }
+
+    func testATagWordInAnOrdinaryQuestionIsNotATagRequest() {
+        // "What did Sara say about the meeting" is for the model, not the
+        // Meeting chip.
+        let store = makeStore()
+        XCTAssertNil(store.localAnswer(for: "What did Sara say about the meeting last week"))
+    }
+
+    func testTagSummaryNamesEveryPileWithACount() {
+        let summary = makeStore().tagSummary
+        XCTAssertTrue(summary.contains("Very Urgent 1"), summary)
+        XCTAssertTrue(summary.contains("No Reply Needed 1"), summary)
+    }
+
+    // MARK: - What the model is sent
+
+    func testAQuestionAboutNothingSendsNoMailAtAll() {
+        // This is the token leak: a recency bonus handed over a dozen emails
+        // for a question that had nothing to do with any of them.
+        XCTAssertTrue(makeStore().context(for: "What can you do?").isEmpty)
+        XCTAssertTrue(makeStore().context(for: "Write me a haiku about rain").isEmpty)
+    }
+
+    func testAQuestionAboutMailStillGetsMail() {
+        XCTAssertFalse(makeStore().context(for: "What is urgent in my inbox?").isEmpty)
+        XCTAssertFalse(makeStore().context(for: "anything about goodbye?").isEmpty)
+    }
 }

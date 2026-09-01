@@ -200,6 +200,8 @@ struct ComposeView: View {
                 html: richText.hasFormatting ? richText.htmlBody() : nil,
                 replyingTo: replyingTo
             )
+            // Answered, so it stops asking to be answered.
+            if let replyingTo { store.markReplied(replyingTo.id) }
             dismiss()
         } catch {
             sendError = error.localizedDescription

@@ -11,6 +11,7 @@ struct ChatTurnView: View {
     let onSendDraft: () -> Void
     let onEditDraft: () -> Void
     let onDiscardDraft: () -> Void
+    var onUndo: () -> Void = {}
 
     var body: some View {
         switch turn.role {
@@ -60,6 +61,10 @@ struct ChatTurnView: View {
                         )
                     }
 
+                    if let receipt = turn.receipt {
+                        ActionReceiptCard(receipt: receipt, onUndo: onUndo)
+                    }
+
                     if turn.isLocal {
                         // The honest label for a free answer: this one never
                         // left the phone and cost nothing.
@@ -75,6 +80,58 @@ struct ChatTurnView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+/// What an action did, and how to take it back.
+///
+/// The draft card set the pattern: an action the assistant performs shows
+/// itself, states its result, and admits its limits. Marking read is the
+/// first one that is not an email, so the caveat lives here -- it happened
+/// inside Maily, and Gmail elsewhere is unchanged.
+struct ActionReceiptCard: View {
+    let receipt: ChatReceipt
+    let onUndo: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: receipt.isUndone ? "arrow.uturn.backward" : receipt.symbol)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(receipt.isUndone ? Color.secondary : Color.accentColor)
+                .frame(width: 28, height: 28)
+                .background {
+                    Circle().fill(
+                        (receipt.isUndone ? Color.secondary : Color.accentColor).opacity(0.12)
+                    )
+                }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(receipt.isUndone ? "Put back the way it was." : receipt.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(receipt.isUndone ? .secondary : .primary)
+                if let detail = receipt.detail, !receipt.isUndone {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            if !receipt.undo.isEmpty && !receipt.isUndone {
+                Button("Undo", action: onUndo)
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemBackground))
+        }
+        .animation(.snappy(duration: 0.25), value: receipt.isUndone)
     }
 }
 

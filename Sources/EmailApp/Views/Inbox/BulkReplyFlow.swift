@@ -384,7 +384,7 @@ struct BulkReplyFlow: View {
                 drafts[index].isSent = true
                 drafts[index].failure = nil
             }
-            store.markRead(draft.message.id)
+            store.markReplied(draft.message.id)
             sentCount += 1
         } catch {
             withAnimation(.easeInOut(duration: 0.2)) {

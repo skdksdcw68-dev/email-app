@@ -360,24 +360,28 @@ final class MailStore {
     /// hold -- so a question costs roughly what classifying one email costs,
     /// rather than what reading the mailbox costs. Only these few go over the
     /// wire, and only their headers and opening lines.
-    func context(for question: String, limit: Int = 20) -> [Message] {
+    /// Twelve, not twenty. Every one of these costs tokens on every question,
+    /// and past the first handful the model is reading noise: the answers that
+    /// needed the twentieth-best match did not exist.
+    func context(for question: String, limit: Int = 12) -> [Message] {
         let words = Set(
             question.lowercased()
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
                 .filter { $0.count > 3 && !Self.stopWords.contains($0) }
         )
 
-        let scored = messages.map { message -> (Message, Int) in
-            var score = 0
+        let scored = messages.map { message -> (message: Message, keyword: Int, total: Int) in
+            var keyword = 0
 
             if !words.isEmpty {
                 let haystack = "\(message.subject) \(message.sender.name) \(message.body.prefix(400))".lowercased()
-                score += words.filter(haystack.contains).count * 10
+                keyword = words.filter(haystack.contains).count * 10
             }
 
             // Recency and priority break ties, and carry the whole thing for a
             // vague question like "what needs my attention" that matches no
             // keywords at all.
+            var score = keyword
             let days = Calendar.current.dateComponents([.day], from: message.date, to: .now).day ?? 99
             score += max(0, 14 - days)
             if message.tags.contains(.urgent) { score += 12 }
@@ -385,15 +389,52 @@ final class MailStore {
             if message.tags.contains(.needsReply) { score += 6 }
             if message.tags.contains(.noReplyNeeded) { score -= 8 }
 
-            return (message, score)
+            return (message, keyword, score)
+        }
+
+        // Nothing matched a word, and nothing in the question is about mail:
+        // "what can you do", "how does this work", "write me a haiku". The
+        // recency bonus alone would still hand over a dozen emails, so every
+        // aside cost as much as a real question and came back captioned with
+        // sources it never read. Send none.
+        if !scored.contains(where: { $0.keyword > 0 }) && !mentionsMail(question) {
+            return []
         }
 
         return scored
-            .filter { $0.1 > 0 }
-            .sorted { $0.1 > $1.1 }
+            .filter { $0.total > 0 }
+            .sorted { $0.total > $1.total }
             .prefix(limit)
-            .map(\.0)
+            .map(\.message)
     }
+
+    /// Whether the question is about the mailbox at all. Deliberately broad:
+    /// handing over context that is not needed wastes tokens, but withholding
+    /// it from a real question gives a wrong answer, so this errs towards yes.
+    private func mentionsMail(_ question: String) -> Bool {
+        let q = question.lowercased()
+        if Self.mailNouns.contains(where: q.contains) { return true }
+        if AITag.allCases.contains(where: { q.contains($0.title.lowercased()) }) { return true }
+        // A sender's name is a question about mail even with no other clue:
+        // "anything from Sara?". Matched on whole words, so a name does not
+        // turn up inside an unrelated one.
+        let spoken = Set(q.components(separatedBy: CharacterSet.alphanumerics.inverted))
+        return messages.contains { message in
+            let name = message.sender.name.lowercased()
+            if name.count >= 3 && q.contains(name) { return true }
+            guard let first = name.split(separator: " ").first, first.count >= 3 else { return false }
+            return spoken.contains(String(first))
+        }
+    }
+
+    private static let mailNouns: [String] = [
+        "email", "e-mail", "mail", "inbox", "message", "sender", "unread",
+        "read", "reply", "replies", "replied", "respond", "answer", "waiting",
+        "follow up", "follow-up", "thread", "subject", "attachment", "invoice",
+        "meeting", "deadline", "urgent", "important", "newsletter", "promotion",
+        "spam", "starred", "flagged", "tag", "tags", "today", "this week",
+        "yesterday", "from ", "sent me", "wrote", "anything new",
+    ]
 
     private static let stopWords: Set<String> = [
         "what", "which", "there", "their", "about", "should", "would", "could",
@@ -455,6 +496,11 @@ final class MailStore {
     /// The model owns priority; the rules keep everything they can see that it
     /// cannot -- starred, unread, bulk headers.
     private func apply(_ classification: AIService.Classification, to id: Message.ID) {
+        // A refresh re-classifies, and the model would happily decide again
+        // that an answered email needs answering. What the person did here
+        // outranks what the model thinks.
+        let answered = message(id).map { hasReplied(to: $0) } ?? false
+
         update(id) { message in
             message.aiSummary = classification.summary
 
@@ -463,7 +509,7 @@ final class MailStore {
                 message.tags.insert(tag)
             }
 
-            if classification.needsReply {
+            if classification.needsReply && !answered {
                 message.tags.insert(.needsReply)
             } else {
                 message.tags.remove(.needsReply)
@@ -489,6 +535,7 @@ final class MailStore {
         messages = []
         MessageArchive.clear()
         UserDefaults.standard.removeObject(forKey: Self.readKey)
+        UserDefaults.standard.removeObject(forKey: Self.repliedKey)
         hasImported = false
         importProgress = .idle
         connectionError = nil
@@ -581,6 +628,37 @@ final class MailStore {
         set { UserDefaults.standard.set(Array(newValue), forKey: Self.readKey) }
     }
 
+    /// Messages answered inside Maily.
+    ///
+    /// `needsReply` was written once, when the model first read a message,
+    /// and nothing ever took it off again. So an email stayed "Needs Reply"
+    /// after the reply had gone: the chip count never came down, and the
+    /// assistant kept asking for something already done. This is the same
+    /// trick as `readKey` -- remember it here, because Gmail cannot be told.
+    private static let repliedKey = "mail.repliedLocally"
+
+    private var locallyReplied: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: Self.repliedKey) ?? []) }
+        set { UserDefaults.standard.set(Array(newValue), forKey: Self.repliedKey) }
+    }
+
+    /// The reply has gone, so this no longer needs one. Answering something
+    /// also means you read it.
+    func markReplied(_ id: Message.ID) {
+        if let remoteID = message(id)?.remoteID {
+            locallyReplied.insert(remoteID)
+        }
+        markRead(id)
+        update(id) { $0.tags.remove(.needsReply) }
+    }
+
+    /// True when this was answered from here, whatever a later
+    /// classification pass decides.
+    func hasReplied(to message: Message) -> Bool {
+        guard let remoteID = message.remoteID else { return false }
+        return locallyReplied.contains(remoteID)
+    }
+
     func markRead(_ id: Message.ID, _ isRead: Bool = true) {
         if let remoteID = message(id)?.remoteID {
             var read = locallyRead
@@ -590,14 +668,30 @@ final class MailStore {
         update(id) { $0.isRead = isRead }
     }
 
-    /// Applies what the user has read here on top of what Gmail reported.
+    /// Marks a batch read in one pass, and hands back only the ones it
+    /// actually changed -- which is what "undo" needs, and what stops the
+    /// assistant claiming it read twelve when eleven were read already.
+    @discardableResult
+    func markRead(_ ids: [Message.ID], _ isRead: Bool = true) -> [Message.ID] {
+        let changed = ids.filter { id in
+            guard let message = message(id) else { return false }
+            return message.isRead != isRead
+        }
+        for id in changed { markRead(id, isRead) }
+        return changed
+    }
+
+    /// Applies what the user has read and answered here on top of what Gmail
+    /// reported. Gmail sends UNREAD back on every refresh and the classifier
+    /// re-asserts `needsReply`, so without this both would undo themselves.
     private func applyLocalReadState() {
         let read = locallyRead
-        guard !read.isEmpty else { return }
+        let replied = locallyReplied
+        guard !read.isEmpty || !replied.isEmpty else { return }
         for index in messages.indices {
-            if let remoteID = messages[index].remoteID, read.contains(remoteID) {
-                messages[index].isRead = true
-            }
+            guard let remoteID = messages[index].remoteID else { continue }
+            if read.contains(remoteID) { messages[index].isRead = true }
+            if replied.contains(remoteID) { messages[index].tags.remove(.needsReply) }
         }
     }
 

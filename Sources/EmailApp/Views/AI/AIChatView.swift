@@ -50,6 +50,9 @@ struct AIChatView: View {
     @State private var offered: [Message] = []
     /// A draft request waiting on the answer to "which one?".
     @State private var pendingChoice: DraftRequest?
+    /// What "yes" means right now. Maily offers things -- "want the urgent
+    /// ones?" -- and an offer nobody can accept is just noise.
+    @State private var pendingOffer: String?
     /// The model call in flight, so the stop button has something to stop.
     @State private var work: Task<Void, Never>?
     @State private var editing: EditingDraft?
@@ -95,7 +98,8 @@ struct AIChatView: View {
                                 dismissKeyboard()
                                 editing = EditingDraft(id: turn.id)
                             },
-                            onDiscardDraft: { discardDraft(in: turn.id) }
+                            onDiscardDraft: { discardDraft(in: turn.id) },
+                            onUndo: { undo(in: turn.id) }
                         )
                         .id(turn.id)
                         .transition(.asymmetric(
@@ -106,7 +110,10 @@ struct AIChatView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
-                .padding(.bottom, 8)
+                // Air between the last answer and the capsule. At 8 the two
+                // read as one block; the answer wants to end before the input
+                // begins.
+                .padding(.bottom, 24)
                 .animation(.spring(response: 0.38, dampingFraction: 0.82), value: turns.count)
             }
             .background {
@@ -355,8 +362,17 @@ struct AIChatView: View {
         work?.cancel()
     }
 
-    private func ask(_ question: String) {
-        turns.append(.user(question))
+    private func ask(_ spoken: String) {
+        turns.append(.user(spoken))
+
+        // Maily offered something and they said yes. Without this, "yes"
+        // reaches the model as the word "yes" with no mail attached, and it
+        // cheerfully answers a question nobody asked.
+        var question = spoken
+        if let offer = pendingOffer, ChatIntentParser.isAffirmative(spoken) {
+            question = offer
+        }
+        pendingOffer = nil
 
         let pending = pendingDraftTurn
         let intent = ChatIntentParser.parse(question, hasPendingDraft: pending != nil)
@@ -400,7 +416,9 @@ struct AIChatView: View {
 
         switch intent {
         case .greeting(let kind):
-            turns.append(.say(greetingReply(kind)))
+            let reply = greetingReply(kind)
+            pendingOffer = reply.offer
+            turns.append(.say(reply.text))
 
         case .sendPendingDraft:
             if let pending { Task { await sendDraft(in: pending) } }
@@ -413,6 +431,9 @@ struct AIChatView: View {
 
         case .draft(let request):
             work = Task { await produceDraft(for: request) }
+
+        case .markRead(let request):
+            markRead(request)
 
         case .question:
             if let local = mail.localAnswer(for: question) {
@@ -429,14 +450,97 @@ struct AIChatView: View {
         turns.last { $0.draft?.status == .ready }?.id
     }
 
-    private func greetingReply(_ kind: ChatIntent.Greeting) -> String {
+    /// A greeting that has looked at the inbox first.
+    ///
+    /// "Ask me about your mail" is what an assistant says when it has not
+    /// read anything. It costs nothing to count the piles before answering,
+    /// and the offer at the end is the whole difference between a tool that
+    /// waits and one that helps. Returns what to say, and what "yes" would
+    /// mean if they take the offer.
+    private func greetingReply(_ kind: ChatIntent.Greeting) -> (text: String, offer: String?) {
         switch kind {
         case .hello:
-            return "Hey. Ask me about your mail, or tell me who to reply to."
+            let counts = mail.counts
+            if counts.urgent > 0 && counts.needsReply > 0 {
+                return ("Hey. \(counts.urgent) urgent and \(counts.needsReply) still unanswered. Want the urgent ones?", "show me very urgent")
+            }
+            if counts.urgent > 0 {
+                return (counts.urgent == 1
+                    ? "Hey. One urgent email is sitting there. Want to see it?"
+                    : "Hey. \(counts.urgent) urgent emails are sitting there. Want to see them?", "show me very urgent")
+            }
+            if counts.needsReply > 0 {
+                return (counts.needsReply == 1
+                    ? "Hey. One email is still unanswered. Want to see it?"
+                    : "Hey. \(counts.needsReply) emails are still unanswered. Want to see them?", "show me needs reply")
+            }
+            if counts.new > 0 {
+                return ("Hey. Nothing urgent, \(counts.new) unread. What are we doing today?", nil)
+            }
+            return ("Hey. Inbox is clear. What are we doing today?", nil)
         case .thanks:
-            return "Any time."
+            return ("Any time.", nil)
         case .acknowledgement:
-            return "Here if you need me."
+            return ("Here if you need me.", nil)
+        }
+    }
+
+    // MARK: - Marking read
+
+    /// The one thing Maily can change about a message, so it is worth doing
+    /// well: say exactly how many, say where it applies, and offer it back.
+    private func markRead(_ request: MarkReadRequest) {
+        let targets: [Message]
+        let pile: String
+
+        if request.isEverything {
+            targets = mail.messages(in: .inbox).filter { !$0.isRead }
+            pile = "everything"
+        } else if let tag = request.tag {
+            targets = mail.messages(in: .inbox, tag: tag).filter { !$0.isRead }
+            pile = tag.title
+        } else if !offered.isEmpty {
+            // Nothing named: they mean whatever was just on screen.
+            targets = offered.filter { !$0.isRead }
+            pile = "those"
+        } else {
+            turns.append(.say("Which ones? Name a tag, say \"all\", or ask me to list something first."))
+            return
+        }
+
+        guard !targets.isEmpty else {
+            turns.append(.say(
+                request.isEverything
+                    ? "Everything in your inbox is already read."
+                    : "Nothing unread in \(pile)."
+            ))
+            return
+        }
+
+        let changed = mail.markRead(targets.map(\.id))
+        let title = changed.count == 1
+            ? "Marked 1 email as read"
+            : "Marked \(changed.count) emails as read"
+
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+            turns.append(.did(ChatReceipt(
+                symbol: "envelope.open",
+                title: title,
+                // Said once, on the card, rather than in every answer after.
+                detail: "Inside Maily only. Gmail elsewhere still shows them unread.",
+                undo: changed
+            )))
+        }
+    }
+
+    private func undo(in turnID: ChatMessage.ID) {
+        guard let index = turns.firstIndex(where: { $0.id == turnID }),
+              let receipt = turns[index].receipt, !receipt.isUndone
+        else { return }
+
+        mail.markRead(receipt.undo, false)
+        withAnimation(.snappy(duration: 0.25)) {
+            turns[index].receipt?.isUndone = true
         }
     }
 
@@ -464,11 +568,22 @@ struct AIChatView: View {
         isWorking = true
         defer { isWorking = false }
 
+        // Empty when the question is not about mail at all -- "what can you
+        // do", "how does this work". That used to ship a dozen emails anyway,
+        // on the strength of a recency bonus, and captioned the answer with
+        // sources it had never read.
         let context = mail.context(for: question)
         do {
             // Streamed, so the answer types itself out instead of landing
             // whole after a long silence.
-            try await AIService.askStreaming(question: question, context: context, history: history) { fragment in
+            try await AIService.askStreaming(
+                question: question,
+                context: context,
+                history: history,
+                inbox: context.isEmpty ? nil : mail.tagSummary,
+                signedInAs: user.account?.displayName,
+                tone: user.tonePreference
+            ) { fragment in
                 appendDelta(pendingID, fragment)
             }
             finish(pendingID, sources: context)
@@ -686,7 +801,7 @@ struct AIChatView: View {
                 body: pending.body,
                 replyingTo: pending.replyingTo
             )
-            if let original = pending.replyingTo { mail.markRead(original.id) }
+            if let original = pending.replyingTo { mail.markReplied(original.id) }
 
             withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                 turns[index].draft?.status = .sent

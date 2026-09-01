@@ -186,36 +186,60 @@ enum AIService {
     /// `history` is the conversation so far, oldest first, so a follow-up
     /// like "and the second one?" has something to refer to. A deployment of
     /// the function that predates it simply ignores the field.
+    ///
+    /// `inbox` is the tag chips as one line -- "Very Urgent 12, Important 30"
+    /// -- so the model can answer about a pile it was not sent. Nil when the
+    /// question has nothing to do with mail, which is also what makes that
+    /// case cheap: no digest, no inbox line, no sources.
+    ///
+    /// `signedInAs` and `tone` are who is asking and how they like to be
+    /// written to. Both were known on the device all along and never sent.
     @MainActor
     static func askStreaming(
         question: String,
         context: [Message],
         history: [(role: String, content: String)] = [],
+        inbox: String? = nil,
+        signedInAs: String? = nil,
+        tone: String? = nil,
         onDelta: @MainActor (String) -> Void
     ) async throws {
+        // 300, not 400. Twelve messages at 400 characters is most of what a
+        // question costs, and the opening 300 carries the point of an email.
         let digest = context.map { message in
             [
                 "from": "\(message.sender.name) <\(message.sender.address)>",
                 "date": message.fullDate,
                 "subject": message.subject,
-                "body": String(message.body.prefix(400)),
+                "body": String(message.body.prefix(300)),
+                // Whether they have seen it. This is what stops the model
+                // telling somebody to reply to an email they read on Monday
+                // and decided about already.
+                "read": message.isRead ? "yes" : "no",
+                "tags": message.tags.map(\.title).sorted().joined(separator: ", "),
             ]
         }
         let prior = history.map { ["role": $0.role, "content": $0.content] }
+
+        var payload: [String: Any] = [
+            "action": "ask_stream",
+            "question": question,
+            "messages": digest,
+            "history": prior,
+            // The model has never known what day it is, so "urgent today",
+            // "this week" and "before Friday" were all guesses.
+            "today": Self.todayLine,
+        ]
+        if let inbox, !inbox.isEmpty { payload["inbox"] = inbox }
+        if let signedInAs, !signedInAs.isEmpty { payload["user"] = signedInAs }
+        if let tone, !tone.isEmpty { payload["tone"] = tone }
 
         var request = URLRequest(url: SupabaseConfig.url.appending(path: "functions/v1/ai"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(await bearer())", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(
-            withJSONObject: [
-                "action": "ask_stream",
-                "question": question,
-                "messages": digest,
-                "history": prior,
-            ] as [String: Any]
-        )
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
         request.timeoutInterval = 60
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -246,6 +270,14 @@ enum AIService {
 
             onDelta(fragment)
         }
+    }
+
+    /// "Monday, 1 September 2026" -- the device's own date, in the device's
+    /// own locale.
+    private static var todayLine: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, d MMMM yyyy"
+        return formatter.string(from: .now)
     }
 
     // MARK: - Transport

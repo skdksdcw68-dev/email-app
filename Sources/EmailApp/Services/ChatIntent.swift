@@ -22,8 +22,24 @@ enum ChatIntent: Equatable {
     case discardPendingDraft
     /// "reply to Sara saying Thursday works", "write an email to Tom".
     case draft(DraftRequest)
+    /// "mark these as read", "mark the newsletters read".
+    case markRead(MarkReadRequest)
     /// Everything else: a question about the mailbox.
     case question
+}
+
+/// Which mail to mark read.
+///
+/// The only thing Maily can change about a message without `gmail.modify`,
+/// and the one the person asks for most: having read something in the app,
+/// they do not want to be told about it again.
+struct MarkReadRequest: Equatable {
+    /// A named pile: "mark the newsletters as read".
+    let tag: AITag?
+    /// "mark everything as read".
+    let isEverything: Bool
+    /// Nothing named at all, so it means whatever was just listed.
+    var isImplicit: Bool { tag == nil && !isEverything }
 }
 
 struct DraftRequest: Equatable {
@@ -48,9 +64,53 @@ enum ChatIntentParser {
             if discardPhrases.contains(text) { return .discardPendingDraft }
         }
         if let greeting = greeting(in: text) { return .greeting(greeting) }
+        // Before drafting: "mark it as read" opens with no command verb, but
+        // "mark the reply from Sara as read" would otherwise trip the reply
+        // verb and start writing an email nobody asked for.
+        if let request = markReadRequest(in: text) { return .markRead(request) }
         if let request = draftRequest(in: text) { return .draft(request) }
         return .question
     }
+
+    // MARK: - Marking read
+
+    /// "mark them as read", "mark the newsletters read", "mark all read".
+    ///
+    /// Deliberately narrow. Everything here says the word "mark", because
+    /// "read the newsletters" means something else entirely and guessing
+    /// wrong changes the person's inbox.
+    private static func markReadRequest(in text: String) -> MarkReadRequest? {
+        guard text.contains("mark") else { return nil }
+        guard text.contains("read") || text.contains("seen") else { return nil }
+        // "mark it as unread" is the opposite request, and not one anybody
+        // has asked for out loud yet.
+        guard !text.contains("unread") else { return nil }
+
+        let everything = ["all", "everything", "every one", "the whole", "inbox"]
+            .contains { text.contains($0) }
+
+        return MarkReadRequest(
+            tag: AITag.named(in: text),
+            isEverything: everything
+        )
+    }
+
+    /// "yes", "go on", "show me" -- an acceptance of something just offered.
+    ///
+    /// Separate from `sendPhrases`, which answers a waiting draft and means
+    /// something irreversible. This one only means "do the thing you just
+    /// suggested", so it can afford to be generous.
+    static func isAffirmative(_ raw: String) -> Bool {
+        let text = normalize(raw)
+        return affirmatives.contains(text)
+    }
+
+    private static let affirmatives: Set<String> = [
+        "yes", "yeah", "yep", "yup", "ya", "sure", "ok", "okay", "k",
+        "yes please", "please", "please do", "go on", "go ahead", "do it",
+        "show me", "show them", "show me them", "let's see", "lets see",
+        "sounds good", "why not", "alright", "all right", "of course", "definitely",
+    ]
 
     /// A bare answer to "which one?" -- "Drobe", "the second one", "the one
     /// from Sara" -- read as the words that pick, plus any ordinal.

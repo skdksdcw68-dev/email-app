@@ -30,6 +30,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     /// Answered on the device without touching the model -- instant and free.
     /// Marked in the UI so the user can tell the two kinds apart.
     var isLocal = false
+    /// What an action actually did, once it has done it.
+    var receipt: ChatReceipt? = nil
 
     static func user(_ text: String) -> ChatMessage {
         ChatMessage(role: .user, text: text)
@@ -50,6 +52,26 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     static func local(_ answer: LocalAnswer) -> ChatMessage {
         ChatMessage(role: .assistant, text: answer.text, blocks: answer.blocks, isLocal: true)
     }
+
+    static func did(_ receipt: ChatReceipt) -> ChatMessage {
+        ChatMessage(role: .assistant, text: "", receipt: receipt)
+    }
+}
+
+/// What an action did, shown as a card in the conversation.
+///
+/// The draft card already worked this way -- it appears, it shows itself
+/// going, it says whether it landed -- and everything else the assistant
+/// does deserves the same. An action with no visible result is one the
+/// person has to go and verify by hand, which is worse than not having it.
+struct ChatReceipt: Equatable, Codable {
+    var symbol: String
+    var title: String
+    /// The caveat, when there is one. Marking read is local to Maily.
+    var detail: String?
+    /// What to put back if they tap Undo. Empty means there is no undo.
+    var undo: [Message.ID] = []
+    var isUndone = false
 }
 
 /// An email the assistant wrote, waiting in the conversation for Send.

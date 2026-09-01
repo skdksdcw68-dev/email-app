@@ -104,4 +104,67 @@ final class ChatIntentTests: XCTestCase {
             .question
         )
     }
+
+    // MARK: - Marking read
+
+    func testMarkingANamedPileAsRead() {
+        XCTAssertEqual(
+            ChatIntentParser.parse("Mark the newsletters as read", hasPendingDraft: false),
+            .markRead(MarkReadRequest(tag: .newsletter, isEverything: false))
+        )
+    }
+
+    func testMarkingEverythingAsRead() {
+        XCTAssertEqual(
+            ChatIntentParser.parse("mark everything as read", hasPendingDraft: false),
+            .markRead(MarkReadRequest(tag: nil, isEverything: true))
+        )
+    }
+
+    func testMarkingWhatWasJustListed() {
+        let intent = ChatIntentParser.parse("mark them as read", hasPendingDraft: false)
+        XCTAssertEqual(intent, .markRead(MarkReadRequest(tag: nil, isEverything: false)))
+        if case .markRead(let request) = intent {
+            XCTAssertTrue(request.isImplicit)
+        }
+    }
+
+    /// "Mark the reply from Sara as read" must not trip the reply verb and
+    /// start writing an email nobody asked for.
+    func testMarkingReadBeatsTheReplyVerb() {
+        let intent = ChatIntentParser.parse("mark the reply from Sara as read", hasPendingDraft: false)
+        guard case .markRead = intent else {
+            return XCTFail("Expected a mark-read request, got \(intent)")
+        }
+    }
+
+    func testMarkingUnreadIsNotSilentlyTreatedAsRead() {
+        // The opposite request. Doing the wrong one of these is worse than
+        // doing neither.
+        XCTAssertNotEqual(
+            ChatIntentParser.parse("mark it as unread", hasPendingDraft: false),
+            .markRead(MarkReadRequest(tag: nil, isEverything: false))
+        )
+    }
+
+    func testReadingIsNotMarkingRead() {
+        // "Read me the newsletters" is a request for their contents.
+        XCTAssertEqual(
+            ChatIntentParser.parse("read me the newsletters", hasPendingDraft: false),
+            .question
+        )
+    }
+
+    // MARK: - Saying yes to an offer
+
+    func testAcceptancesAreRecognised() {
+        for word in ["yes", "yeah", "sure", "go on", "show me", "ok"] {
+            XCTAssertTrue(ChatIntentParser.isAffirmative(word), word)
+        }
+    }
+
+    func testAQuestionIsNotAnAcceptance() {
+        XCTAssertFalse(ChatIntentParser.isAffirmative("what is urgent"))
+        XCTAssertFalse(ChatIntentParser.isAffirmative("no"))
+    }
 }

@@ -34,15 +34,20 @@ struct Stat: Equatable, Codable {
     /// A named system colour rather than a `Color`, so a stat survives a
     /// round trip through the history file.
     enum Tint: String, Codable {
-        case red, orange, green, blue, indigo
+        case red, orange, yellow, green, blue, indigo, purple, teal, pink, brown
 
         var color: Color {
             switch self {
             case .red:    Color(uiColor: .systemRed)
             case .orange: Color(uiColor: .systemOrange)
+            case .yellow: Color(uiColor: .systemYellow)
             case .green:  Color(uiColor: .systemGreen)
             case .blue:   Color(uiColor: .systemBlue)
             case .indigo: Color(uiColor: .systemIndigo)
+            case .purple: Color(uiColor: .systemPurple)
+            case .teal:   Color(uiColor: .systemTeal)
+            case .pink:   Color(uiColor: .systemPink)
+            case .brown:  Color(uiColor: .systemBrown)
             }
         }
     }
@@ -51,6 +56,41 @@ struct Stat: Equatable, Codable {
     let value: String
     let symbol: String
     let tint: Tint
+
+    /// A tile that looks like the chip the same tag draws in the inbox, so
+    /// "Very Urgent 12" in a chat answer and "Very Urgent 12" at the top of
+    /// the list are recognisably the same thing.
+    init(tag: AITag, count: Int) {
+        self.title = tag.title
+        self.value = "\(count)"
+        self.symbol = tag.systemImage
+        self.tint = tag.statTint
+    }
+
+    init(title: String, value: String, symbol: String, tint: Tint) {
+        self.title = title
+        self.value = value
+        self.symbol = symbol
+        self.tint = tint
+    }
+}
+
+extension AITag {
+    /// The tag's inbox colour, as a name a stat can be stored under.
+    var statTint: Stat.Tint {
+        switch self {
+        case .urgent:        .red
+        case .veryImportant: .orange
+        case .important:     .yellow
+        case .needsReply:    .blue
+        case .noReplyNeeded: .green
+        case .meeting:       .purple
+        case .finance:       .teal
+        case .security:      .indigo
+        case .newsletter:    .brown
+        case .promotion:     .pink
+        }
+    }
 }
 
 struct AnswerChart: Equatable, Codable {

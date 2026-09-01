@@ -294,6 +294,18 @@ Rules:
 - No preamble. Do not restate the question.
 - If they asked about their mail and nothing is relevant, say "Nothing in
   your recent mail covers that."
+- You are told today's date. Use it for "today", "this week", "overdue",
+  "before Friday". Never guess what day it is.
+- You may be given the shape of their inbox as tag counts. Those counts
+  cover the whole inbox, including mail you were not shown, so you can
+  answer "how many are in Important" straight from them.
+- Every message says whether they have read it. Do not chase somebody about
+  mail they have already read: if it is read, offer once, gently, as a
+  suggestion ("worth a reply when you get a minute"), and drop it. Unread
+  mail may be stated plainly. Nobody wants to be nagged by their own inbox.
+- When you are told the question is not about their mail, do not mention
+  email at all. Answer in a sentence or two, then offer one concrete thing
+  you could do next, like drafting a reply or going through what is urgent.
 - When they ask you to write, draft or send an email to anyone, including a
   company or a support address, do not put it in your prose. Say at most one
   short sentence, then give the email in a fenced block that starts with a
@@ -360,14 +372,33 @@ function askMessages(question: string, body: Record<string, unknown>) {
         `From: ${message.from ?? ""}`,
         `Date: ${message.date ?? ""}`,
         `Subject: ${message.subject ?? ""}`,
+        `Read: ${message.read ?? "unknown"}`,
+        message.tags ? `Tags: ${message.tags}` : "",
         `${(message.body ?? "").slice(0, 400)}`,
-      ].join("\n")
+      ].filter(Boolean).join("\n")
     )
     .join("\n\n");
 
+  // What the app knows and the model never did: the date, who is asking,
+  // how they like to be written to, and the shape of the whole inbox rather
+  // than only the dozen messages that came with the question.
+  const facts: string[] = [];
+  if (body.today) facts.push(`Today is ${String(body.today).slice(0, 60)}.`);
+  if (body.user) facts.push(`You are talking to ${String(body.user).slice(0, 80)}.`);
+  if (body.tone) facts.push(`They like replies ${String(body.tone).slice(0, 120)}.`);
+  if (body.inbox) facts.push(`Their whole inbox by tag: ${String(body.inbox).slice(0, 400)}.`);
+  const preamble = facts.length ? `${facts.join("\n")}\n\n` : "";
+
+  // No digest and no inbox line means the app decided this has nothing to do
+  // with their mail. Saying "nothing in your recent mail covers that" to
+  // "what can you do?" is the wrong answer to the wrong question.
+  const aboutMail = digest.length > 0 || Boolean(body.inbox);
+
   const content = digest
-    ? `Question: ${question}\n\nTheir messages:\n\n${digest}`
-    : `Question: ${question}\n\nThey have no matching messages.`;
+    ? `${preamble}Question: ${question}\n\nTheir messages:\n\n${digest}`
+    : aboutMail
+    ? `${preamble}Question: ${question}\n\nThey have no matching messages.`
+    : `${preamble}This is not a question about their mail.\n\nQuestion: ${question}`;
 
   // The conversation so far, so follow-ups resolve. Only the two roles the
   // model expects, capped in count and length: the app sends what is on

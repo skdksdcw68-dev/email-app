@@ -99,6 +99,35 @@ enum AITag: String, CaseIterable, Identifiable, Codable {
     /// one of these is assigned per message.
     static let kinds: [AITag] = [.meeting, .finance, .security, .newsletter, .promotion]
 
+    /// What people call these tags out loud, longest first so "very
+    /// important" is never swallowed by "important".
+    ///
+    /// One table, because two places need it: the assistant answering "what
+    /// is in Important", and the assistant being told "mark the newsletters
+    /// as read". Two copies would drift.
+    static let spokenNames: [(name: String, tag: AITag)] = {
+        var pairs: [(name: String, tag: AITag)] = [
+            ("very urgent", .urgent), ("very important", .veryImportant),
+            ("no reply needed", .noReplyNeeded), ("needs a reply", .needsReply),
+            ("need a reply", .needsReply), ("needs reply", .needsReply),
+            ("need reply", .needsReply), ("unanswered", .needsReply),
+            ("newsletters", .newsletter), ("promotions", .promotion),
+            ("meetings", .meeting), ("financial", .finance),
+            ("urgent", .urgent), ("important", .important),
+            ("replies", .needsReply), ("reply", .needsReply),
+            ("meeting", .meeting), ("finance", .finance),
+            ("security", .security), ("newsletter", .newsletter),
+            ("promotion", .promotion), ("promo", .promotion),
+        ]
+        pairs.sort { $0.name.count > $1.name.count }
+        return pairs
+    }()
+
+    /// The tag named somewhere in a lowercased phrase, if any.
+    static func named(in text: String) -> AITag? {
+        spokenNames.first { text.contains($0.name) }?.tag
+    }
+
     /// Maps the model's category vocabulary onto ours. Anything unrecognised
     /// -- including the model's "other" -- means no kind tag, which is the
     /// right outcome for ordinary person-to-person mail.
