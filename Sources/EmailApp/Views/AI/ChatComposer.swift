@@ -4,12 +4,11 @@ import UIKit
 /// The chat input, in ChatGPT's shape and with ChatGPT's motion.
 ///
 /// A single-row capsule, 48pt at rest: plus on the left, the field in the
-/// middle, send on the right, all on one line. It does not become a panel
-/// when focused -- focusing changes nothing about its shape. Typing is what
-/// changes it: the capsule widens from 34pt side margins to 12pt as soon as
-/// there is text, and grows upward line by line with the buttons pinned to
-/// the bottom edge. The earlier two-row panel had the expanded state as its
-/// resting state, which is why it never read as the real thing.
+/// middle, send on the right, all on one line. It never becomes a panel.
+/// Focus widens it from 34pt side margins to 12pt, in step with the keyboard
+/// rising; a new line grows it upward with the buttons pinned to the bottom
+/// edge. The earlier two-row panel had the expanded state as its resting
+/// state, which is why it never read as the real thing.
 ///
 /// Positioning is not this view's job. `KeyboardAttachedBar` pins it to the
 /// keyboard through UIKit's layout guide; nothing here animates position.
@@ -52,6 +51,12 @@ struct ChatComposer: View {
 
     private var canSend: Bool { hasRequest && !isWorking }
 
+    /// Wide as soon as the field is focused, not only once there is text.
+    /// Measured off ChatGPT: it widens *during* the keyboard's rise, so the
+    /// two read as one gesture; waiting for the first character made ours a
+    /// separate, later event.
+    private var isExpanded: Bool { isFocused || hasRequest }
+
     var body: some View {
         VStack(spacing: 10) {
             if showsActions {
@@ -60,13 +65,13 @@ struct ChatComposer: View {
             }
 
             capsule
-                // Narrow while empty, full width once there is something in
-                // it. Measured off ChatGPT: ~360pt empty, ~404pt typing.
-                .padding(.horizontal, hasRequest ? 12 : 34)
+                // Narrow at rest, full width in use. Measured off ChatGPT:
+                // ~360pt idle, ~404pt focused or typing.
+                .padding(.horizontal, isExpanded ? 12 : 34)
         }
         .padding(.top, 6)
         .animation(.spring(response: 0.32, dampingFraction: 0.78), value: showsActions)
-        .animation(.easeOut(duration: 0.22), value: hasRequest)
+        .animation(.easeOut(duration: 0.22), value: isExpanded)
         .sensoryFeedback(.impact(weight: .light), trigger: showsActions)
         .sensoryFeedback(.impact(weight: .medium), trigger: isWorking)
     }
@@ -107,6 +112,11 @@ struct ChatComposer: View {
         }
         .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
         .animation(.easeOut(duration: 0.15), value: isFocused)
+        // A new line grows the capsule smoothly instead of snapping it a
+        // line taller. Keyed to the text because that is the only thing that
+        // changes the line count; on an ordinary keystroke nothing moves, so
+        // nothing animates.
+        .animation(.easeOut(duration: 0.18), value: text)
     }
 
     /// The same button closes what it opened, so there is never a second,

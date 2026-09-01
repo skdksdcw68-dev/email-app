@@ -11,13 +11,23 @@ import UIKit
 /// recording, the gap to the keyboard drifted from 8pt to 40pt mid-dismissal
 /// before settling. A layout guide is a constraint straight onto the
 /// keyboard's frame, so the bar rides the keyboard's own animation curve and
-/// follows an interactive drag frame for frame, with nothing of ours
-/// animating on top.
+/// follows an interactive drag frame for frame.
 ///
-/// The hosted SwiftUI view fills the screen above the keyboard and puts the
-/// bar at its bottom; everything outside the bar's band passes touches
-/// through to whatever is underneath. `height` reports the bar's size so the
-/// content behind it can leave room.
+/// Two rules, both learned from footage:
+///
+/// 1. The host is sized to the bar and only its *bottom* is constrained, so
+///    the keyboard animates the host's position. The first version pinned
+///    the top to the screen too, which made the keyboard animate the host's
+///    height instead -- and SwiftUI content inside a UIKit view lays out at
+///    the final size immediately, so the capsule teleported ~290pt in 42ms
+///    while an invisible container animated. Position animates the layer,
+///    and everything in it comes along.
+///
+/// 2. Nothing here runs its own animation. The guide's constraints update
+///    inside the keyboard's animation block and UIKit lays out there; the
+///    one constant we change (the 12pt/8pt gap) is set in the notification
+///    and picked up by that same pass. A second animation block, even with
+///    the keyboard's own duration and curve, is a second authority.
 struct KeyboardAttachedBar<Bar: View>: UIViewControllerRepresentable {
     @Binding var height: CGFloat
     let bar: Bar
@@ -73,6 +83,12 @@ final class KeyboardBarController: UIViewController {
         // The guide already places the bar above the keyboard. Letting the
         // hosting controller also avoid it would inset the bar twice.
         hosting.safeAreaRegions = .container
+        // The host is exactly as tall as the bar, from SwiftUI's own
+        // measurement. This is what makes the keyboard move the host rather
+        // than resize it.
+        hosting.sizingOptions = .intrinsicContentSize
+        hosting.view.setContentCompressionResistancePriority(.required, for: .vertical)
+        hosting.view.setContentHuggingPriority(.required, for: .vertical)
 
         addChild(hosting)
         view.addSubview(hosting.view)
@@ -86,7 +102,6 @@ final class KeyboardBarController: UIViewController {
         )
         self.gap = gap
         NSLayoutConstraint.activate([
-            hosting.view.topAnchor.constraint(equalTo: view.topAnchor),
             hosting.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             hosting.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             gap,
@@ -94,12 +109,12 @@ final class KeyboardBarController: UIViewController {
         hosting.didMove(toParent: self)
 
         (view as? PassthroughView)?.interactiveBand = { [weak self] in
-            self?.barBand ?? .zero
+            self?.hosting.view.frame ?? .zero
         }
 
-        // The only thing we animate ourselves is the 8pt/12pt gap, and it
-        // runs inside the keyboard's own duration and curve so the two are
-        // one motion rather than a bar chasing a keyboard.
+        // Only the gap constant changes here. No animation block: the
+        // keyboard's own layout pass, which runs inside its animation, picks
+        // the new constant up along with the guide's new position.
         observer = NotificationCenter.default.addObserver(
             forName: UIResponder.keyboardWillChangeFrameNotification,
             object: nil,
@@ -111,12 +126,6 @@ final class KeyboardBarController: UIViewController {
 
     deinit {
         if let observer { NotificationCenter.default.removeObserver(observer) }
-    }
-
-    /// Where the bar actually is: the bottom `barHeight` points of the host.
-    private var barBand: CGRect {
-        let frame = hosting.view.frame
-        return CGRect(x: frame.minX, y: frame.maxY - barHeight, width: frame.width, height: barHeight)
     }
 
     func report(height: CGFloat) {
@@ -135,17 +144,8 @@ final class KeyboardBarController: UIViewController {
         let target = visible ? -Self.keyboardGap : -Self.restingGap
         guard gap.constant != target else { return }
 
-        let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
-        let curve = note.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int ?? 7
-
         gap.constant = target
-        UIView.animate(
-            withDuration: duration,
-            delay: 0,
-            options: UIView.AnimationOptions(rawValue: UInt(curve << 16))
-        ) {
-            self.view.layoutIfNeeded()
-        }
+        view.setNeedsLayout()
     }
 }
 
@@ -161,7 +161,12 @@ private final class PassthroughView: UIView {
     }
 }
 
-/// Puts the bar at the bottom of the host and reports how tall it is.
+/// The bar, bottom-aligned inside the host, reporting how tall it is.
+///
+/// Bottom-aligned on purpose: when the bar grows a line, SwiftUI animates
+/// the growth while the host has already taken its final height. Anchoring
+/// the bar to the bottom of that space is what keeps the buttons on the
+/// bottom edge and sends the growth upward, the way the real thing does.
 private struct BarHost<Bar: View>: View {
     let bar: Bar
     let onHeight: (CGFloat) -> Void
