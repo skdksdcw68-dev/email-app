@@ -163,10 +163,15 @@ enum AIService {
     /// produces, so the answer appears as it is written rather than arriving
     /// whole after ten seconds of nothing. That wait is the difference between
     /// an app that looks fast and one that looks stuck.
+    ///
+    /// `history` is the conversation so far, oldest first, so a follow-up
+    /// like "and the second one?" has something to refer to. A deployment of
+    /// the function that predates it simply ignores the field.
     @MainActor
     static func askStreaming(
         question: String,
         context: [Message],
+        history: [(role: String, content: String)] = [],
         onDelta: @MainActor (String) -> Void
     ) async throws {
         let digest = context.map { message in
@@ -177,6 +182,7 @@ enum AIService {
                 "body": String(message.body.prefix(400)),
             ]
         }
+        let prior = history.map { ["role": $0.role, "content": $0.content] }
 
         var request = URLRequest(url: SupabaseConfig.url.appending(path: "functions/v1/ai"))
         request.httpMethod = "POST"
@@ -184,7 +190,12 @@ enum AIService {
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(await bearer())", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(
-            withJSONObject: ["action": "ask_stream", "question": question, "messages": digest]
+            withJSONObject: [
+                "action": "ask_stream",
+                "question": question,
+                "messages": digest,
+                "history": prior,
+            ] as [String: Any]
         )
         request.timeoutInterval = 60
 

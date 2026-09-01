@@ -90,7 +90,7 @@ struct PeopleView: View {
                     }
                 }
             }
-            .searchable(text: $query, isPresented: $isSearching, prompt: "Search people")
+            .modifier(SearchWhenAsked(query: $query, isPresented: $isSearching, prompt: "Search people"))
             .keyboardDismissable()
             .navigationTitle("People")
             .toolbar {

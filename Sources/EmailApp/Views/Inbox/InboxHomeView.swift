@@ -7,9 +7,11 @@ import UIKit
 /// no card, no hairline, the way Mail's category filters sit. Below them the
 /// red "needs your attention" row, then the mail.
 ///
-/// Search lives in the navigation bar itself: tapping the magnifier expands a
-/// field from the top of the screen, the way the stock apps do it, instead of
-/// presenting a separate sheet from the bottom.
+/// The bar is three controls in two groups, the way the current assistants
+/// lay theirs out: one circular button on the left that switches mailbox,
+/// and a capsule on the right holding search and compose. Search is a
+/// button, not a field: the field only exists once it is asked for, drops
+/// in from the top, and is gone again when cancelled.
 struct InboxHomeView: View {
     @Environment(MailStore.self) private var mail
 
@@ -89,7 +91,7 @@ struct InboxHomeView: View {
             }
         }
         .listStyle(.plain)
-        .searchable(text: $query, isPresented: $isSearching, prompt: "Search all mail")
+        .modifier(SearchWhenAsked(query: $query, isPresented: $isSearching, prompt: "Search all mail"))
         .refreshable { await mail.refresh() }
         .navigationTitle(isBrowsing ? "Maily" : mailbox.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -101,9 +103,6 @@ struct InboxHomeView: View {
                     selection: $tag
                 )
             }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if !isSearching { composeButton }
         }
         .overlay {
             if isSearchActive && searchResults.isEmpty {
@@ -121,30 +120,68 @@ struct InboxHomeView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    Picker("Mailbox", selection: $mailbox) {
-                        ForEach(Mailbox.allCases) { box in
-                            Label(box.title, systemImage: box.systemImage).tag(box)
-                        }
-                    }
-                } label: {
-                    Label("Mailboxes", systemImage: "line.3.horizontal")
-                }
-            }
-
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isSearching = true
-                } label: {
-                    Label("Search", systemImage: "magnifyingglass")
-                }
-            }
+            ToolbarItem(placement: .topBarLeading) { mailboxButton }
+            ToolbarItem(placement: .topBarTrailing) { actionCluster }
         }
         .onChange(of: mailbox) { _, newValue in
             if let tag, mail.count(of: tag, in: newValue) == 0 { self.tag = nil }
         }
         .sheet(isPresented: $isComposing) { ComposeView() }
+    }
+
+    // MARK: - The bar
+
+    /// One circle showing where you are; the menu behind it is where you can
+    /// go. The bare hamburger it replaces said nothing about either.
+    private var mailboxButton: some View {
+        Menu {
+            Picker("Mailbox", selection: $mailbox) {
+                ForEach(Mailbox.allCases) { box in
+                    Label(box.title, systemImage: box.systemImage).tag(box)
+                }
+            }
+        } label: {
+            Image(systemName: mailbox.systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
+                .contentShape(Circle())
+        }
+        // Without .plain the toolbar renders its own button background behind
+        // this one, and the circle reads as two stacked shapes.
+        .buttonStyle(.plain)
+        .accessibilityLabel("Mailbox: \(mailbox.title)")
+    }
+
+    /// Search and compose together in one capsule, the way ChatGPT and
+    /// Perplexity group their bar actions. Compose lives here now instead of
+    /// floating over the mail.
+    private var actionCluster: some View {
+        HStack(spacing: 0) {
+            Button {
+                isSearching = true
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 42, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Search")
+
+            Button {
+                isComposing = true
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 42, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Compose")
+        }
+        .foregroundStyle(.primary)
+        .background(Capsule().fill(Color(uiColor: .secondarySystemFill)))
+        .buttonStyle(PressButtonStyle())
     }
 
     // MARK: - The one card
@@ -235,23 +272,6 @@ struct InboxHomeView: View {
             + (attention.count > 2 ? " and others" : "")
     }
 
-    private var composeButton: some View {
-        Button {
-            isComposing = true
-        } label: {
-            Image(systemName: "square.and.pencil")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 54, height: 54)
-                .background(Circle().fill(Color.accentColor))
-                .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
-        }
-        .buttonStyle(.plain)
-        .padding(.trailing, 20)
-        .padding(.bottom, 20)
-        .accessibilityLabel("Compose")
-    }
-
     @ViewBuilder
     private var emptyState: some View {
         if let tag {
@@ -266,6 +286,32 @@ struct InboxHomeView: View {
                 systemImage: mailbox.systemImage,
                 description: Text("Messages in \(mailbox.title) appear here.")
             )
+        }
+    }
+}
+
+/// A search field that exists only while it is wanted.
+///
+/// `searchable` on its own parks a field under the title permanently, which
+/// spends a row of every screen on something reached for occasionally. Here
+/// the modifier is applied only while `isPresented` is true: the button adds
+/// it (open and focused, dropping in from the top), Cancel removes it, and
+/// the query is cleared on the way out so the list is itself again.
+struct SearchWhenAsked: ViewModifier {
+    @Binding var query: String
+    @Binding var isPresented: Bool
+    let prompt: String
+
+    func body(content: Content) -> some View {
+        Group {
+            if isPresented {
+                content.searchable(text: $query, isPresented: $isPresented, prompt: prompt)
+            } else {
+                content
+            }
+        }
+        .onChange(of: isPresented) { _, presented in
+            if !presented { query = "" }
         }
     }
 }

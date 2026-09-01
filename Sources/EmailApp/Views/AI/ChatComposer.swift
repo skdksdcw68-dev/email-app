@@ -12,38 +12,24 @@ import UIKit
 ///
 /// Positioning is not this view's job. `KeyboardAttachedBar` pins it to the
 /// keyboard through UIKit's layout guide; nothing here animates position.
+/// The plus button is not this view's menu either: it asks the owner to
+/// present the options sheet, which is a real sheet.
 struct ChatComposer: View {
     @Binding var text: String
-    @Binding var showsActions: Bool
+    @Binding var showsOptions: Bool
     let isWorking: Bool
+    /// Bumped by the owner after a send. The field is rebuilt under a new
+    /// identity, which is the one reliable way to make a vertical TextField
+    /// drop back to one line -- clearing its text while it was three lines
+    /// tall left it three lines tall, with the placeholder sitting in the
+    /// space the question used to take.
+    let resetToken: Int
+    /// Bumped by the owner to put the cursor in the field, since focus has
+    /// to live on this side of the UIKit hosting boundary.
+    let focusToken: Int
     let onSend: () -> Void
-    let onAction: (Action) -> Void
 
-    /// Owned here rather than passed in: focus has to live on the same side
-    /// of the UIKit hosting boundary as the field it drives.
     @FocusState private var isFocused: Bool
-
-    enum Action: CaseIterable {
-        case whatNeedsReply
-        case whoIsWaiting
-        case findSomething
-
-        var title: String {
-            switch self {
-            case .whatNeedsReply: "What needs a reply"
-            case .whoIsWaiting:   "Who is waiting on me"
-            case .findSomething:  "Find something"
-            }
-        }
-
-        var symbol: String {
-            switch self {
-            case .whatNeedsReply: "arrowshape.turn.up.left"
-            case .whoIsWaiting:   "clock.arrow.circlepath"
-            case .findSomething:  "magnifyingglass"
-            }
-        }
-    }
 
     private var hasRequest: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -58,22 +44,17 @@ struct ChatComposer: View {
     private var isExpanded: Bool { isFocused || hasRequest }
 
     var body: some View {
-        VStack(spacing: 10) {
-            if showsActions {
-                actionMenu
-                    .padding(.horizontal, 12)
+        capsule
+            // Narrow at rest, full width in use. Measured off ChatGPT:
+            // ~360pt idle, ~404pt focused or typing.
+            .padding(.horizontal, isExpanded ? 12 : 34)
+            .padding(.top, 6)
+            .animation(.easeOut(duration: 0.22), value: isExpanded)
+            .sensoryFeedback(.impact(weight: .light), trigger: showsOptions)
+            .sensoryFeedback(.impact(weight: .medium), trigger: isWorking)
+            .onChange(of: focusToken) { _, _ in
+                isFocused = true
             }
-
-            capsule
-                // Narrow at rest, full width in use. Measured off ChatGPT:
-                // ~360pt idle, ~404pt focused or typing.
-                .padding(.horizontal, isExpanded ? 12 : 34)
-        }
-        .padding(.top, 6)
-        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: showsActions)
-        .animation(.easeOut(duration: 0.22), value: isExpanded)
-        .sensoryFeedback(.impact(weight: .light), trigger: showsActions)
-        .sensoryFeedback(.impact(weight: .medium), trigger: isWorking)
     }
 
     // MARK: - The capsule
@@ -91,6 +72,7 @@ struct ChatComposer: View {
                 .focused($isFocused)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 7)
+                .id(resetToken)
 
             sendButton
         }
@@ -119,20 +101,19 @@ struct ChatComposer: View {
         .animation(.easeOut(duration: 0.18), value: text)
     }
 
-    /// The same button closes what it opened, so there is never a second,
-    /// differently placed way out of the menu.
     private var plusButton: some View {
         Button {
-            showsActions.toggle()
+            isFocused = false
+            showsOptions = true
         } label: {
-            Image(systemName: showsActions ? "xmark" : "plus")
-                .font(.system(size: showsActions ? 17 : 20, weight: .regular))
+            Image(systemName: "plus")
+                .font(.system(size: 20, weight: .regular))
                 .foregroundStyle(.primary)
                 .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressButtonStyle())
-        .accessibilityLabel(showsActions ? "Close menu" : "More")
+        .accessibilityLabel("Options")
     }
 
     private var sendButton: some View {
@@ -155,51 +136,6 @@ struct ChatComposer: View {
         // keystroke at the edge of an empty field; a spring there wobbles.
         .animation(.easeOut(duration: 0.15), value: canSend)
         .accessibilityLabel("Send")
-    }
-
-    // MARK: - The plus menu
-
-    private var actionMenu: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(Action.allCases.enumerated()), id: \.offset) { index, action in
-                Button {
-                    showsActions = false
-                    if action == .findSomething {
-                        // Focus is ours to give, so this one never leaves.
-                        isFocused = true
-                    } else {
-                        onAction(action)
-                    }
-                } label: {
-                    HStack(spacing: 14) {
-                        Image(systemName: action.symbol)
-                            .font(.body)
-                            .frame(width: 26)
-                        Text(action.title)
-                            .font(.subheadline)
-                        Spacer(minLength: 0)
-                    }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 15)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(PressButtonStyle())
-
-                if index < Action.allCases.count - 1 {
-                    Divider().padding(.leading, 60)
-                }
-            }
-        }
-        .background {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(.regularMaterial)
-        }
-        .shadow(color: .black.opacity(0.08), radius: 10, y: 3)
-        .transition(.asymmetric(
-            insertion: .move(edge: .bottom).combined(with: .opacity),
-            removal: .opacity
-        ))
     }
 }
 

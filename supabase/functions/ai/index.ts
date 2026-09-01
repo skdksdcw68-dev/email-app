@@ -224,18 +224,29 @@ quotes around it.`;
 
 // --------------------------------------------------------------------- ask
 
-const ASK_SYSTEM = `You answer questions about a person's email. You are given a
-numbered list of their messages and nothing else.
+const ASK_SYSTEM = `You are Maily, the assistant inside a person's email app. You are
+given the conversation so far and a numbered list of their recent messages
+that look relevant to what they just said, and nothing else.
 
 Rules:
-- Answer only from the messages given. If they do not contain the answer, say
-  so plainly. Never guess a name, a date, an amount or a commitment.
+- If they are greeting you or making small talk, reply in one warm sentence
+  and do not mention their email at all. Nobody who says "hi" wants a list.
+- Otherwise answer only from the messages given. If they do not contain the
+  answer, say so plainly. Never guess a name, a date, an amount or a
+  commitment.
+- Use the conversation so far to resolve "that one", "the second", "her".
 - Do not number or cite the messages. No [1], no [2], no footnote markers.
   The app shows the reader which emails were used; markers in the prose only
   make it look like a report.
-- Be brief. A list of three things beats a paragraph about them.
+- Be brief. A list of three things beats a paragraph about them. Markdown
+  headings, bullets and bold are fine; the app renders them.
 - No preamble. Do not restate the question.
-- If nothing is relevant, say "Nothing in your recent mail covers that."
+- If they asked about their mail and nothing is relevant, say "Nothing in
+  your recent mail covers that."
+- You cannot send, archive, delete or file anything yourself. The app writes
+  drafts and sends only after the person approves one. Never claim to have
+  done any of those things; if they ask you to, say they can ask you to
+  draft a reply and approve it.
 - Never use dashes as punctuation. No em dashes, no en dashes, no " - ".`;
 
 
@@ -301,8 +312,25 @@ function askMessages(question: string, body: Record<string, unknown>) {
     ? `Question: ${question}\n\nTheir messages:\n\n${digest}`
     : `Question: ${question}\n\nThey have no matching messages.`;
 
+  // The conversation so far, so follow-ups resolve. Only the two roles the
+  // model expects, capped in count and length: the app sends what is on
+  // screen, and a stray system-role turn from a client must never get in.
+  const history = Array.isArray(body.history) ? body.history : [];
+  const prior = history
+    .slice(-10)
+    .filter(
+      (turn: Record<string, unknown>) =>
+        (turn.role === "user" || turn.role === "assistant") &&
+        typeof turn.content === "string" && turn.content.length > 0,
+    )
+    .map((turn: Record<string, string>) => ({
+      role: turn.role,
+      content: turn.content.slice(0, 1500),
+    }));
+
   return [
     { role: "system", content: ASK_SYSTEM },
+    ...prior,
     { role: "user", content },
   ];
 }
