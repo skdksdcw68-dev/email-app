@@ -29,7 +29,11 @@ struct EmailBlock: Equatable {
         let raw = String(afterOpen[..<close.lowerBound])
         let before = String(text[..<open.lowerBound])
         let after = String(afterOpen[close.upperBound...])
-        let prose = (before + "\n" + after).trimmingCharacters(in: .whitespacesAndNewlines)
+        let prose = (before + "\n" + after)
+            // The block took its blank lines with it; what is left around
+            // the seam is at most one paragraph break.
+            .replacingOccurrences(of: "\n\\s*\n(\\s*\n)+", with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         return (prose, parse(raw))
     }
 
