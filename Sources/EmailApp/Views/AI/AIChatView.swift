@@ -586,7 +586,8 @@ struct AIChatView: View {
         // recency and hands over a dozen messages from last week that mention
         // none of it.
         var searchedFor: String?
-        if mail.looksLikeMailQuestion(question), !mail.hasKeywordMatch(for: question) {
+        if mail.looksLikeMailQuestion(question) || !context.isEmpty,
+           !mail.hasStrongMatch(for: question) {
             setPending(pendingID, label: "Searching all your mail")
             let older = await mail.olderMail(matching: question)
             searchedFor = older.searchedFor

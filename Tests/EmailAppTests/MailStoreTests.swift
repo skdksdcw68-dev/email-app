@@ -247,4 +247,68 @@ final class MailStoreTests: XCTestCase {
                 .isEmpty
         )
     }
+
+    // MARK: - Order, and knowing when the phone does not have the answer
+
+    func testTheNewestMessageIsAlwaysSentAndComesFirst() {
+        // "What was the last email I got" is a question about order. Ranking
+        // by relevance answered it with whatever was most urgent and left the
+        // newest message out of the digest entirely.
+        let store = MailStore(messages: [
+            Message(sender: .me, recipients: [], subject: "Newest", body: "nothing special",
+                    date: .now, mailbox: .inbox, tags: [.noReplyNeeded]),
+            Message(sender: .me, recipients: [], subject: "Older but urgent", body: "urgent thing",
+                    date: .now.addingTimeInterval(-86_400), mailbox: .inbox, tags: [.urgent, .needsReply]),
+        ])
+
+        let context = store.context(for: "what was the last email I got")
+        XCTAssertEqual(context.first?.subject, "Newest", context.map(\.subject).description)
+    }
+
+    func testTheDigestIsOrderedNewestFirst() {
+        let store = MailStore(messages: [
+            Message(sender: .me, recipients: [], subject: "Old", body: "urgent",
+                    date: .now.addingTimeInterval(-86_400), mailbox: .inbox, tags: [.urgent]),
+            Message(sender: .me, recipients: [], subject: "New", body: "quiet",
+                    date: .now, mailbox: .inbox, tags: [.noReplyNeeded]),
+        ])
+
+        let dates = store.context(for: "anything urgent in my inbox").map(\.date)
+        XCTAssertEqual(dates, dates.sorted(by: >))
+    }
+
+    func testAWordInABodyIsNotEvidenceTheAnswerIsHere() {
+        // The bug: "find me my registration date on upwork" matched the word
+        // "date" in an unrelated message, so the archive was judged to hold
+        // the answer and Gmail was never asked about an email that existed.
+        let store = MailStore(messages: [
+            Message(sender: .me, recipients: [], subject: "Standup",
+                    body: "Let us agree a date for the review.",
+                    date: .now, mailbox: .inbox),
+        ])
+
+        XCTAssertFalse(store.hasStrongMatch(for: "find me my registration date on upwork"))
+    }
+
+    func testASubjectOrSenderMatchIsEvidence() {
+        let store = MailStore(messages: [
+            Message(sender: Contact(name: "Upwork", address: "no-reply@upwork.com"),
+                    recipients: [], subject: "Welcome to Upwork", body: "hello",
+                    date: .now, mailbox: .inbox),
+        ])
+
+        XCTAssertTrue(store.hasStrongMatch(for: "find me my registration date on upwork"))
+    }
+
+    func testLookingSomethingUpCountsAsAMailQuestion() {
+        // None of these say "email", and all of them are about mail.
+        let store = makeStore()
+        for question in [
+            "find me my registration date on upwork",
+            "when did I sign up for that",
+            "do I have a receipt for the flight",
+        ] {
+            XCTAssertTrue(store.looksLikeMailQuestion(question), question)
+        }
+    }
 }

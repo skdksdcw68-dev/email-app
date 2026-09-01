@@ -460,11 +460,27 @@ final class MailStore {
             return []
         }
 
-        return scored
+        let best = scored
             .filter { $0.total > 0 }
             .sorted { $0.total > $1.total }
             .prefix(limit)
             .map(\.message)
+
+        // The three newest, always, whatever they scored.
+        //
+        // "What was the last email I got" is a question about order, not
+        // relevance, and ranking by relevance answered it with whatever
+        // happened to be most urgent: the newest message was not in the
+        // digest at all, so the model named the top of a list it had been
+        // handed and got it wrong with complete confidence.
+        let newest = messages(in: .inbox).prefix(3)
+
+        var seen = Set<Message.ID>()
+        return (Array(newest) + best)
+            .filter { seen.insert($0.id).inserted }
+            // Newest first, and the prompt says so. Order the model can see
+            // is order it can answer about.
+            .sorted { $0.date > $1.date }
     }
 
     /// Whether this is a question about their mail, for callers deciding
@@ -473,15 +489,18 @@ final class MailStore {
         mentionsMail(question)
     }
 
-    /// Whether anything on this phone actually contains the words asked
-    /// about.
+    /// Whether the mail on this phone plausibly holds the answer.
     ///
-    /// Not the same as "retrieval returned nothing". Retrieval falls back to
-    /// recency, so a question about a two year old email still comes back
-    /// with a dozen messages from last week, none of which mention it. This
-    /// is the honest signal that the archive does not hold the answer and
-    /// Gmail is worth asking.
-    func hasKeywordMatch(for question: String) -> Bool {
+    /// Deliberately looks at subjects and senders only, never bodies. A word
+    /// found in the body of an unrelated email is not evidence of anything:
+    /// "find me my registration date on upwork" matched "date" in somebody's
+    /// meeting invitation, the archive was judged to have the answer, Gmail
+    /// was never asked, and the reply was "nothing in your recent mail covers
+    /// that" about an email that was sitting in the account.
+    ///
+    /// A subject or a sender is what a person actually remembers a message
+    /// by, so a hit there is worth trusting and a hit in prose is not.
+    func hasStrongMatch(for question: String) -> Bool {
         let words = Set(
             question.lowercased()
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
@@ -490,8 +509,8 @@ final class MailStore {
         guard !words.isEmpty else { return true }
 
         return messages.contains { message in
-            let haystack = "\(message.subject) \(message.sender.name) \(message.body.prefix(400))".lowercased()
-            return words.contains { haystack.contains($0) }
+            let named = "\(message.subject) \(message.sender.name) \(message.sender.address)".lowercased()
+            return words.contains { named.contains($0) }
         }
     }
 
@@ -521,6 +540,12 @@ final class MailStore {
         "meeting", "deadline", "urgent", "important", "newsletter", "promotion",
         "spam", "starred", "flagged", "tag", "tags", "today", "this week",
         "yesterday", "from ", "sent me", "wrote", "anything new",
+        // Looking something up is a question about mail even when the word
+        // "mail" never appears. "Find me my registration date on upwork" is
+        // the case that went unanswered.
+        "find", "search", "look for", "look up", "when did", "did i", "do i have",
+        "receipt", "confirmation", "order", "booking", "ticket", "registration",
+        "signed up", "sign up", "account", "password", "verify", "verification",
     ]
 
     private static let stopWords: Set<String> = [
