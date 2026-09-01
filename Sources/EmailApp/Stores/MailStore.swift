@@ -20,6 +20,15 @@ final class MailStore {
     /// Messages currently being summarised on demand, so the reading view can
     /// show a skeleton for exactly the one being read.
     private(set) var summarizing: Set<Message.ID> = []
+    /// Bumped whenever somebody's preferences change. People are derived
+    /// from messages *and* preferences, and preferences live in UserDefaults,
+    /// which nothing observes on its own -- so without this, marking a
+    /// person as a client showed up nowhere until something else moved.
+    private(set) var preferencesVersion = 0
+
+    func notePreferencesChanged() {
+        preferencesVersion += 1
+    }
 
     var isConnected: Bool { account != nil }
     var hasMoreMail: Bool { nextPageToken != nil }

@@ -197,9 +197,9 @@ struct MessageDetailView: View {
         } else if message.body.isEmpty {
             MessageSkeleton()
         } else {
-            Text(message.body)
-                .font(.body)
-                .textSelection(.enabled)
+            // A real text view, so a line of the message can be selected and
+            // copied on its own rather than the whole body at once.
+            SelectableText(message.body, font: .preferredFont(forTextStyle: .body))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -231,9 +231,7 @@ private struct AISummaryCard: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tint)
 
-            Text(summary)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
+            SelectableText(summary, font: .preferredFont(forTextStyle: .subheadline))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // A single pass over the text as it lands, so a summary that
                 // appears mid-read announces itself instead of silently

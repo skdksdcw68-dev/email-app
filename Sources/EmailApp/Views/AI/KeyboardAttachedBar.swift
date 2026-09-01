@@ -1,51 +1,46 @@
 import SwiftUI
 import UIKit
 
-/// Pins a SwiftUI bar to the top of the system keyboard the way UIKit does
-/// it: through `UIKeyboardLayoutGuide`.
+/// Pins a SwiftUI bar to the top of the system keyboard, from UIKit.
 ///
-/// This is the whole difference between a bar that *reacts* to the keyboard
-/// and one that is *attached* to it. `safeAreaInset` was the wrong primitive:
-/// the keyboard changed the safe area, the ScrollView relaid out, SwiftUI
-/// recomputed the composer, and only then did it move -- measured on a real
-/// recording, the gap to the keyboard drifted from 8pt to 40pt mid-dismissal
-/// before settling. A layout guide is a constraint straight onto the
-/// keyboard's frame, so the bar rides the keyboard's own animation curve and
-/// follows an interactive drag frame for frame.
+/// The bar's vertical position is computed from the keyboard's own frame, in
+/// window coordinates, every time the keyboard says it is about to move, and
+/// applied inside the keyboard's own animation curve and duration. Nothing
+/// about SwiftUI's layout, safe area or keyboard avoidance is involved in
+/// where the bar goes, which is the point: every version that leaned on any
+/// of those either jumped or ended up behind the keyboard.
 ///
-/// Four rules, all learned the hard way:
+/// What was tried and why it is not here:
 ///
-/// 1. The host is exactly as tall as the bar and only its *bottom* is
-///    constrained, so the keyboard animates the host's position. Pinning the
-///    top as well made the keyboard animate the host's height -- and SwiftUI
-///    content inside a UIKit view lays out at the final size immediately, so
-///    the capsule teleported ~290pt in 42ms while an invisible container
-///    animated. Position animates the layer, and everything in it comes along.
+/// - `safeAreaInset`: the keyboard changed the safe area, the ScrollView
+///   relaid out, SwiftUI recomputed the composer, and only then did it move.
+///   Measured drifting 8pt to 40pt from the keyboard mid-dismissal.
+/// - `UIKeyboardLayoutGuide`: the right idea, and on this device inside a
+///   SwiftUI-hosted controller it did not track. Screenshots with the
+///   keyboard up showed no bar at all -- it was sitting at the bottom of the
+///   screen, under the keyboard, exactly where a guide that never moved
+///   would leave it.
+///
+/// Rules that still hold:
+///
+/// 1. The host is exactly as tall as the bar and only its bottom is
+///    positioned, so the keyboard moves the host rather than resizing it.
+///    Resizing a UIKit host with SwiftUI content inside makes the content
+///    snap to the final layout while the container animates.
 ///
 /// 2. The host's height comes from SwiftUI's own measurement of the bar at
-///    its real width, not from UIKit's intrinsic content size. Intrinsic size
-///    measures at an unconstrained width, where a vertical text field is
-///    always one line -- so the host stayed 48pt and every new line the
-///    person typed was squeezed out of sight.
+///    its real width. Intrinsic content size measures at an unconstrained
+///    width, where a vertical text field is always one line.
 ///
-/// 3. Nothing here runs its own animation. The guide's constraints update
-///    inside the keyboard's animation block and UIKit lays out there; the
-///    one constant we change (the 12pt/8pt gap) is set in the notification
-///    and picked up by that same pass.
-///
-/// 4. The hosted view is rebuilt only when `inputs` change. SwiftUI calls
-///    `updateUIViewController` on every re-render of the owner -- which,
-///    while an answer streams, is dozens of times a second -- and rebuilding
-///    a UIKit-hosted view each time was most of the lag on this screen.
+/// 3. The hosted view is rebuilt only when `inputs` change, not on every
+///    streamed token.
 ///
 /// Two measurements come back out: `height`, the bar's own height, so the
 /// content behind it can leave room; and `bottom`, how much of the screen
-/// the bar and the keyboard together take from the bottom, so anything that
-/// wants to centre in the space above them can.
+/// the bar and the keyboard together take from the bottom.
 struct KeyboardAttachedBar<Bar: View, Inputs: Equatable>: UIViewControllerRepresentable {
     @Binding var height: CGFloat
     @Binding var bottom: CGFloat
-    /// Everything the bar's content depends on.
     let inputs: Inputs
     let bar: Bar
 
@@ -95,7 +90,6 @@ final class KeyboardBarController: UIViewController {
     let hosting = UIHostingController(rootView: AnyView(EmptyView()))
     var onHeightChange: ((CGFloat) -> Void)?
     var onBottomChange: ((CGFloat) -> Void)?
-    /// What the hosted view was last built from. See rule 4 above.
     var lastInputs: Any?
 
     /// Measured from ChatGPT: about 12pt above the keyboard when it is up,
@@ -103,9 +97,11 @@ final class KeyboardBarController: UIViewController {
     static let keyboardGap: CGFloat = 12
     static let restingGap: CGFloat = 8
 
-    private var gap: NSLayoutConstraint?
+    private var bottomOffset: NSLayoutConstraint?
     private var height: NSLayoutConstraint?
-    private var observer: NSObjectProtocol?
+    /// The keyboard's frame in screen coordinates, nil while it is hidden.
+    private var keyboardFrame: CGRect?
+    private var observers: [NSObjectProtocol] = []
     private var barHeight: CGFloat = 0
     private var lastBottom: CGFloat = 0
 
@@ -118,29 +114,24 @@ final class KeyboardBarController: UIViewController {
         view.backgroundColor = .clear
 
         hosting.view.backgroundColor = .clear
-        // The guide already places the bar above the keyboard. Letting the
-        // hosting controller also avoid it would inset the bar twice.
+        // We place the bar above the keyboard ourselves; the hosting
+        // controller must not also inset for it.
         hosting.safeAreaRegions = .container
 
         addChild(hosting)
         view.addSubview(hosting.view)
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
 
-        let guide = view.keyboardLayoutGuide
-        guide.usesBottomSafeArea = true
-
-        let gap = hosting.view.bottomAnchor.constraint(
-            equalTo: guide.topAnchor, constant: -Self.restingGap
-        )
         // Starts at the resting capsule's height; SwiftUI reports the real
         // number on its first layout and every time the bar grows or shrinks.
         let height = hosting.view.heightAnchor.constraint(equalToConstant: 54)
-        self.gap = gap
+        let bottomOffset = hosting.view.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: 0)
         self.height = height
+        self.bottomOffset = bottomOffset
         NSLayoutConstraint.activate([
             hosting.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             hosting.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            gap,
+            bottomOffset,
             height,
         ])
         hosting.didMove(toParent: self)
@@ -149,27 +140,38 @@ final class KeyboardBarController: UIViewController {
             self?.hosting.view.frame ?? .zero
         }
 
-        // Only the gap constant changes here. No animation block: the
-        // keyboard's own layout pass, which runs inside its animation, picks
-        // the new constant up along with the guide's new position.
-        observer = NotificationCenter.default.addObserver(
-            forName: UIResponder.keyboardWillChangeFrameNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            self?.keyboardWillChange(note)
-        }
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { [weak self] note in
+                self?.keyboardWillChange(note)
+            },
+            center.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] note in
+                self?.keyboardFrame = nil
+                self?.place(with: note)
+            },
+            // The keyboard leaves with the app and does not always say so.
+            // Forgetting its frame here is what stops the bar coming back
+            // from another app floating in the middle of the screen.
+            center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.keyboardFrame = nil
+                self?.updateOffset()
+            },
+        ]
     }
 
     deinit {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        // Our own frame or safe area changed: re-place without animating.
+        if updateOffset() { view.setNeedsLayout() }
+
         // How far up the screen the bar's top edge sits -- keyboard included
-        // when it is up. Laid out once per keyboard change with the final
-        // values, so whoever animates against it gets one clean move.
+        // when it is up -- for whoever wants to centre in the space above.
         let occupied = view.bounds.maxY - hosting.view.frame.minY
         guard occupied > 0, abs(occupied - lastBottom) > 0.5 else { return }
         lastBottom = occupied
@@ -186,18 +188,50 @@ final class KeyboardBarController: UIViewController {
         onHeightChange?(measured)
     }
 
+    // MARK: - Placing
+
+    /// Where the bar's bottom belongs right now: above the keyboard if it
+    /// covers any of this view, above the home indicator otherwise.
+    private func targetOffset() -> CGFloat {
+        if let keyboardFrame {
+            let keyboardTop = view.convert(keyboardFrame, from: nil).minY
+            let covered = view.bounds.maxY - keyboardTop
+            if covered > 0 { return -(covered + Self.keyboardGap) }
+        }
+        return -(view.safeAreaInsets.bottom + Self.restingGap)
+    }
+
+    @discardableResult
+    private func updateOffset() -> Bool {
+        guard let bottomOffset else { return false }
+        let target = targetOffset()
+        guard abs(bottomOffset.constant - target) > 0.5 else { return false }
+        bottomOffset.constant = target
+        return true
+    }
+
     private func keyboardWillChange(_ note: Notification) {
-        guard let gap,
-              let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+        guard let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue,
+              let window = view.window
         else { return }
+        // A frame that starts at or below the bottom of the screen is the
+        // keyboard leaving, whatever the notification is called.
+        keyboardFrame = end.minY < window.bounds.maxY ? end : nil
+        place(with: note)
+    }
 
-        let endInView = view.convert(end, from: nil)
-        let visible = endInView.minY < view.bounds.maxY - 1
-        let target = visible ? -Self.keyboardGap : -Self.restingGap
-        guard gap.constant != target else { return }
-
-        gap.constant = target
-        view.setNeedsLayout()
+    /// Moves the bar on the keyboard's own timing, so the two are one motion.
+    private func place(with note: Notification) {
+        guard updateOffset() else { return }
+        let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+        let curve = note.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int ?? 7
+        UIView.animate(
+            withDuration: duration,
+            delay: 0,
+            options: UIView.AnimationOptions(rawValue: UInt(curve << 16))
+        ) {
+            self.view.layoutIfNeeded()
+        }
     }
 }
 

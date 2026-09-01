@@ -38,10 +38,9 @@ struct EmailDraftCard: View {
             field("Subject", draft.subject.isEmpty ? "No subject" : draft.subject, isPlaceholder: draft.subject.isEmpty)
             hairline
 
-            Text(draft.body)
-                .font(.callout)
-                .lineSpacing(3)
-                .textSelection(.enabled)
+            // Selectable a word at a time, so a line of the draft can be
+            // copied out without taking the whole thing.
+            SelectableText(draft.body, font: .preferredFont(forTextStyle: .callout))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)

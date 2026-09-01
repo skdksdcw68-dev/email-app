@@ -1,11 +1,13 @@
 import SwiftUI
+import UIKit
 import Charts
 
 // What an assistant answer is made of, beyond prose.
 //
 // The reply format plan, in one place:
 //   - Prose is rendered by `AssistantProse` with a real type hierarchy:
-//     16pt body, headline section titles, tinted bullets and numbers.
+//     16pt body, headline section titles, tinted bullets and numbers -- and
+//     it is selectable a word at a time, like text in a real editor.
 //   - Numbers land as stat tiles, not sentences -- "3 urgent" reads faster
 //     than "there are three urgent emails".
 //   - Emails land as tappable cards that open the message.
@@ -185,16 +187,28 @@ struct AnswerChartView: View {
 /// headings, bullets, numbered lists, bold and italics inline -- and nothing
 /// speculative beyond that.
 ///
-/// An email block is never shown as text. While it is still streaming in,
-/// the prose stops at the fence and a "Writing the email" line stands in;
-/// once complete, `AIChatView` lifts it out into a draft card.
+/// Rendered as one selectable text view, so the reader can take a sentence
+/// out of the middle of an answer. An email block is never shown as text:
+/// while it is still streaming in, the prose stops at the fence and a
+/// "Writing the email" line stands in; once complete, `AIChatView` lifts it
+/// out into a draft card.
 struct AssistantProse: View {
     let text: String
 
     var body: some View {
+        let parsed = self.parsed
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(pieces.enumerated()), id: \.offset) { _, piece in
-                view(for: piece)
+            if !parsed.pieces.isEmpty {
+                SelectableText(attributed(parsed.pieces))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if parsed.isWritingEmail {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Writing the email…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -207,8 +221,6 @@ struct AssistantProse: View {
         case bullet(String)
         case numbered(Int, String)
         case paragraph(String)
-        /// An email block is arriving; the prose pauses here.
-        case writingEmail
     }
 
     /// The text without any email block: everything before an open fence,
@@ -223,7 +235,7 @@ struct AssistantProse: View {
         return (before, true)
     }
 
-    private var pieces: [Piece] {
+    private var parsed: (pieces: [Piece], isWritingEmail: Bool) {
         let (prose, isWritingEmail) = visible
         var result: [Piece] = []
         var paragraph: [String] = []
@@ -253,9 +265,7 @@ struct AssistantProse: View {
             }
         }
         flush()
-
-        if isWritingEmail { result.append(.writingEmail) }
-        return result
+        return (result, isWritingEmail)
     }
 
     /// "1. thing" -- but not "3.5% growth", which is why the text after the
@@ -269,63 +279,103 @@ struct AssistantProse: View {
         return (number, parts[1].trimmingCharacters(in: .whitespaces))
     }
 
-    // MARK: Views
+    // MARK: Attributed
 
-    @ViewBuilder
-    private func view(for piece: Piece) -> some View {
-        switch piece {
-        case .heading(let string):
-            inline(string)
-                .font(.headline)
-                .padding(.top, 2)
+    /// The type hierarchy, as attributes: 16pt callout for prose, headline
+    /// for headings, tinted markers hanging in a 16pt indent for lists.
+    private func attributed(_ pieces: [Piece]) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let body = UIFont.preferredFont(forTextStyle: .callout)
+        let tint = UIColor.tintColor
 
-        case .subheading(let string):
-            inline(string)
-                .font(.subheadline.weight(.semibold))
+        for (index, piece) in pieces.enumerated() {
+            let block = NSMutableAttributedString()
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = 3
+            style.paragraphSpacing = 10
 
-        case .bullet(let string):
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(verbatim: "\u{2022}")
-                    .font(.callout.weight(.black))
-                    .foregroundStyle(.tint)
-                inline(string)
-                    .font(.callout)
-                    .lineSpacing(3)
+            switch piece {
+            case .heading(let string):
+                block.append(inline(string, font: .preferredFont(forTextStyle: .headline)))
+                style.paragraphSpacing = 6
+                style.paragraphSpacingBefore = 4
+
+            case .subheading(let string):
+                block.append(inline(string, font: weighted(.subheadline, .semibold)))
+                style.paragraphSpacing = 6
+
+            case .bullet(let string):
+                block.append(NSAttributedString(
+                    string: "\u{2022}\t",
+                    attributes: [.font: weighted(.callout, .black), .foregroundColor: tint]
+                ))
+                block.append(inline(string, font: body))
+                style.headIndent = 16
+                style.tabStops = [NSTextTab(textAlignment: .left, location: 16)]
+                style.defaultTabInterval = 16
+                style.paragraphSpacing = 6
+
+            case .numbered(let number, let string):
+                block.append(NSAttributedString(
+                    string: "\(number).\t",
+                    attributes: [.font: weighted(.callout, .semibold), .foregroundColor: tint]
+                ))
+                block.append(inline(string, font: body))
+                style.headIndent = 22
+                style.tabStops = [NSTextTab(textAlignment: .left, location: 22)]
+                style.defaultTabInterval = 22
+                style.paragraphSpacing = 6
+
+            case .paragraph(let string):
+                block.append(inline(string, font: body))
             }
 
-        case .numbered(let number, let string):
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("\(number).")
-                    .font(.callout.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.tint)
-                inline(string)
-                    .font(.callout)
-                    .lineSpacing(3)
-            }
-
-        case .paragraph(let string):
-            inline(string)
-                .font(.callout)
-                .lineSpacing(3)
-
-        case .writingEmail:
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Writing the email…")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+            block.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: block.length))
+            result.append(block)
+            if index < pieces.count - 1 {
+                result.append(NSAttributedString(string: "\n"))
             }
         }
+        return result
     }
 
-    /// Bold and italics, without letting a parse failure eat the text.
-    private func inline(_ string: String) -> Text {
+    private func weighted(_ style: UIFont.TextStyle, _ weight: UIFont.Weight) -> UIFont {
+        let base = UIFont.preferredFont(forTextStyle: style)
+        return UIFont.systemFont(ofSize: base.pointSize, weight: weight)
+    }
+
+    /// Bold, italics, code and links from inline markdown, in the given
+    /// font. A parse failure falls back to the plain string rather than
+    /// eating the text.
+    private func inline(_ string: String, font: UIFont, color: UIColor = .label) -> NSAttributedString {
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace
         )
-        if let attributed = try? AttributedString(markdown: string, options: options) {
-            return Text(attributed)
+        guard let parsed = try? AttributedString(markdown: string, options: options) else {
+            return NSAttributedString(string: string, attributes: [.font: font, .foregroundColor: color])
         }
-        return Text(string)
+
+        let result = NSMutableAttributedString()
+        for run in parsed.runs {
+            let text = String(parsed[run.range].characters)
+            var runFont = font
+
+            if let intent = run.inlinePresentationIntent {
+                var traits: UIFontDescriptor.SymbolicTraits = []
+                if intent.contains(.stronglyEmphasized) { traits.insert(.traitBold) }
+                if intent.contains(.emphasized) { traits.insert(.traitItalic) }
+                if !traits.isEmpty, let descriptor = font.fontDescriptor.withSymbolicTraits(traits) {
+                    runFont = UIFont(descriptor: descriptor, size: 0)
+                }
+                if intent.contains(.code) {
+                    runFont = .monospacedSystemFont(ofSize: font.pointSize - 1, weight: .regular)
+                }
+            }
+
+            var attributes: [NSAttributedString.Key: Any] = [.font: runFont, .foregroundColor: color]
+            if let link = run.link { attributes[.link] = link }
+            result.append(NSAttributedString(string: text, attributes: attributes))
+        }
+        return result
     }
 }

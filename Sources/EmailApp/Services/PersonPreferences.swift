@@ -80,6 +80,34 @@ enum PersonPreferences {
         overrides = all
     }
 
+    // MARK: - Relationship in the user's own words
+
+    /// "Freelancer", "Landlord", "Book club": a relationship the four
+    /// inferred categories cannot name. Shown in place of the category
+    /// wherever the person appears, and offered as its own filter.
+    private static let relationshipKey = "people.relationships"
+
+    private static var relationships: [String: String] {
+        get { UserDefaults.standard.dictionary(forKey: relationshipKey) as? [String: String] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: relationshipKey) }
+    }
+
+    static func relationshipName(for address: String) -> String? {
+        relationships[address.lowercased()]
+    }
+
+    static func setRelationshipName(_ name: String?, for address: String) {
+        var all = relationships
+        let key = address.lowercased()
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            all.removeValue(forKey: key)
+        } else {
+            all[key] = trimmed
+        }
+        relationships = all
+    }
+
     /// How much a person's own standing shifts the priority of their mail.
     ///
     /// Weight, not a verdict. Marking someone important must not make every
@@ -95,5 +123,6 @@ enum PersonPreferences {
         UserDefaults.standard.removeObject(forKey: importantKey)
         UserDefaults.standard.removeObject(forKey: mutedKey)
         UserDefaults.standard.removeObject(forKey: categoryKey)
+        UserDefaults.standard.removeObject(forKey: relationshipKey)
     }
 }

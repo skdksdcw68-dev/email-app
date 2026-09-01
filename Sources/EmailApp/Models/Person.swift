@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 /// A correspondent, assembled from their messages.
 ///
@@ -24,8 +24,27 @@ struct Person: Identifiable, Equatable {
     let isMuted: Bool
     /// Their company, where the address implies one.
     let organization: String?
+    /// The relationship in the user's own words, when they gave one. Beats
+    /// the category everywhere it is shown. A `var` with a default so the
+    /// memberwise initialiser offers it as an optional argument; a `let`
+    /// with a default is left out of that initialiser entirely.
+    var customRelationship: String? = nil
 
     var id: String { contact.address }
+
+    /// What to call the relationship: the user's word if they gave one,
+    /// otherwise the category.
+    var relationshipTitle: String {
+        customRelationship ?? category.title
+    }
+
+    var relationshipSymbol: String {
+        customRelationship == nil ? category.systemImage : "tag.fill"
+    }
+
+    var relationshipColor: Color {
+        customRelationship == nil ? category.color : Color.accentColor
+    }
 
     var lastContactedDescription: String {
         let days = Calendar.current.dateComponents([.day], from: lastContacted, to: .now).day ?? 0
@@ -109,7 +128,8 @@ extension Array where Element == Message {
                 lastContacted: newest.date,
                 isImportant: PersonPreferences.isImportant(address),
                 isMuted: PersonPreferences.isMuted(address),
-                organization: organization(from: address, myDomain: myDomain)
+                organization: organization(from: address, myDomain: myDomain),
+                customRelationship: PersonPreferences.relationshipName(for: address)
             )
         }
         .sorted { left, right in

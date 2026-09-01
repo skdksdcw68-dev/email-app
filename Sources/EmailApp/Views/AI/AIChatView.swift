@@ -64,6 +64,12 @@ struct AIChatView: View {
         var focus: Int
     }
 
+    /// The name is the empty page. It goes the moment there is anything in
+    /// the field -- a space counts -- not when the first message lands.
+    private var showsWordmark: Bool {
+        turns.isEmpty && draft.isEmpty
+    }
+
     private var composerInputs: ComposerInputs {
         ComposerInputs(
             text: draft, showsOptions: showsOptions, isWorking: isWorking,
@@ -98,7 +104,7 @@ struct AIChatView: View {
                 .animation(.spring(response: 0.38, dampingFraction: 0.82), value: turns.count)
             }
             .background {
-                if turns.isEmpty {
+                if showsWordmark {
                     // Centred in whatever is left above the bar and the
                     // keyboard, which is where Perplexity puts theirs. The
                     // measurement comes from UIKit, which knows where the bar
@@ -111,7 +117,7 @@ struct AIChatView: View {
                         .transition(.opacity)
                 }
             }
-            .animation(.easeOut(duration: 0.3), value: turns.isEmpty)
+            .animation(.easeOut(duration: 0.3), value: showsWordmark)
             // Room for the bar. The conversation runs underneath it and shows
             // through its material; this is only how far the last message
             // clears it -- and it grows with the bar, so nothing is left

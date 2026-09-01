@@ -7,26 +7,32 @@ import UIKit
 /// noticing a person you have left hanging, which a chronological mailbox
 /// hides completely. Services are filtered out by default: forty noreply
 /// addresses are not relationships.
+///
+/// The header is drawn here rather than by the navigation bar, because the
+/// navigation bar cannot do what this page needs: the title flush left on
+/// the same line as the search and menu capsule, the filter chips pinned
+/// underneath at all times, and on scroll the title sliding to the centre
+/// while the capsule fades -- the way the App Store's tabs behave.
 struct PeopleView: View {
     @Environment(MailStore.self) private var mail
 
-    @State private var category: PersonCategory?
+    @State private var filter: PeopleFilter?
     @State private var showsServices = false
     @State private var isSearching = false
     @State private var query = ""
+    @State private var scrolledAway = false
+    @State private var restingOffset: CGFloat?
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
-        // Assembling people walks every message. Once per render -- the
-        // earlier version did it five times, once per derived list.
+        // Assembling people walks every message. Once per render.
         let everyone = mail.people
         let visible = everyone.filter { showsServices || $0.category.isPerson }
-        let people = visible.filter { category == nil || $0.category == category }
+        let people = visible.filter { filter?.matches($0) ?? true }
         let important = people.filter { $0.isImportant }
         let waiting = people.filter { !$0.isImportant && $0.awaitingReply > 0 }
         let everyoneElse = people.filter { !$0.isImportant && $0.awaitingReply == 0 }
-        // Only offer a filter for categories that actually have somebody.
-        let present = Set(visible.map(\.category))
-        let availableCategories = PersonCategory.allCases.filter(present.contains)
+        let filters = PeopleFilter.available(in: visible)
         // By name, address or company, across everyone -- services included,
         // because a search is somebody looking for something specific.
         let searchResults = query.isEmpty ? [] : everyone.filter {
@@ -37,20 +43,29 @@ struct PeopleView: View {
 
         return NavigationStack {
             List {
-                if !query.isEmpty {
+                // Zero-height sentinel: its position in the list's coordinate
+                // space is how far the list has scrolled.
+                Section {
+                    Color.clear
+                        .frame(height: 0)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: PeopleScrollKey.self,
+                                    value: proxy.frame(in: .named("people")).minY
+                                )
+                            }
+                        }
+                }
+
+                if isSearching {
                     Section {
                         ForEach(searchResults) { row($0) }
                     }
                 } else {
-                    if availableCategories.count > 1 {
-                        Section {
-                            categoryBar(availableCategories)
-                                .listRowInsets(EdgeInsets())
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                        }
-                    }
-
                     if !important.isEmpty {
                         Section {
                             ForEach(important) { row($0) }
@@ -78,80 +93,172 @@ struct PeopleView: View {
                     }
                 }
             }
-            .modifier(SearchWhenAsked(query: $query, isPresented: $isSearching, prompt: "Search people"))
-            .keyboardDismissable()
-            .navigationTitle("People")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                // The title on the buttons' line and flush left, the way the
-                // App Store's Search page sets its title beside the avatar.
-                // A principal item stretched to the available width puts the
-                // large text where an inline title would be centred.
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 0) {
-                        Text("People")
-                            .font(.system(size: 28, weight: .bold))
-                        Spacer(minLength: 0)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .accessibilityAddTraits(.isHeader)
-                }
-
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
-                        isSearching = true
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .accessibilityLabel("Search")
-
-                    Menu {
-                        Toggle("Show services", isOn: $showsServices)
-                    } label: {
-                        Image(systemName: "ellipsis")
-                    }
-                    .accessibilityLabel("More options")
+            .coordinateSpace(name: "people")
+            .onPreferenceChange(PeopleScrollKey.self) { offset in
+                // The first reading is where the list rests; anything a bit
+                // above that is scrolled. The header keeps one height in both
+                // states, so the resting point never moves under us.
+                if restingOffset == nil { restingOffset = offset }
+                let away = offset < (restingOffset ?? offset) - 24
+                if away != scrolledAway {
+                    withAnimation(.easeOut(duration: 0.18)) { scrolledAway = away }
                 }
             }
+            .keyboardDismissable()
+            .safeAreaInset(edge: .top, spacing: 0) {
+                header(filters: filters)
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationTitle("People")
             .navigationDestination(for: Person.ID.self) { PersonDetailView(address: $0) }
             .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
             .overlay {
-                if !query.isEmpty && searchResults.isEmpty {
+                if isSearching && !query.isEmpty && searchResults.isEmpty {
                     ContentUnavailableView.search(text: query)
-                } else if query.isEmpty && people.isEmpty {
+                } else if isSearching && query.isEmpty {
+                    ContentUnavailableView(
+                        "Search people",
+                        systemImage: "magnifyingglass",
+                        description: Text("By name, email address or company.")
+                    )
+                } else if !isSearching && people.isEmpty {
                     emptyState
                 }
             }
         }
     }
 
-    private func row(_ person: Person) -> some View {
-        NavigationLink(value: person.id) { PersonRow(person: person) }
-    }
+    // MARK: - Header
 
-    private func categoryBar(_ availableCategories: [PersonCategory]) -> some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                categoryChip(nil, title: "All", symbol: "person.2.fill")
-                ForEach(availableCategories) { option in
-                    categoryChip(option, title: option.title, symbol: option.systemImage)
+    /// Title row plus chips. The title row is 44pt in every state so the
+    /// list underneath never shifts: at rest the title is large and left
+    /// with the capsule on the right; scrolled, the title is small and
+    /// centred and the capsule is gone; searching, the row is the field.
+    private func header(filters: [PeopleFilter]) -> some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Text("People")
+                    .font(.headline)
+                    .opacity(scrolledAway && !isSearching ? 1 : 0)
+
+                if isSearching {
+                    searchRow
+                        .transition(.opacity)
+                } else {
+                    HStack(alignment: .center) {
+                        Text("People")
+                            .font(.largeTitle.weight(.bold))
+                            .opacity(scrolledAway ? 0 : 1)
+                            .accessibilityAddTraits(.isHeader)
+                        Spacer(minLength: 0)
+                        actions
+                            .opacity(scrolledAway ? 0 : 1)
+                            .allowsHitTesting(!scrolledAway)
+                    }
+                    .transition(.opacity)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .frame(height: 44)
+            .padding(.horizontal, 20)
+
+            if !isSearching {
+                chips(filters)
+                    .transition(.opacity)
+            }
+        }
+        .padding(.top, 4)
+        .padding(.bottom, 8)
+        .background(Color(uiColor: .systemGroupedBackground))
+        .animation(.easeOut(duration: 0.18), value: scrolledAway)
+        .animation(.snappy(duration: 0.22), value: isSearching)
+    }
+
+    /// Search and the menu in one capsule, on the same glass the system
+    /// uses for its bar buttons.
+    private var actions: some View {
+        HStack(spacing: 0) {
+            Button {
+                isSearching = true
+                searchFocused = true
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 17, weight: .medium))
+                    .frame(width: 48, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Search")
+
+            Menu {
+                Toggle("Show services", isOn: $showsServices)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 17, weight: .medium))
+                    .frame(width: 48, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("More options")
+        }
+        .foregroundStyle(.primary)
+        .barGlass(in: Capsule())
+    }
+
+    private var searchRow: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search people", text: $query)
+                    .focused($searchFocused)
+                    .submitLabel(.search)
+                    .autocorrectionDisabled()
+                if !query.isEmpty {
+                    Button {
+                        query = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 40)
+            .background(Capsule().fill(Color(uiColor: .secondarySystemBackground)))
+
+            Button("Cancel") {
+                query = ""
+                searchFocused = false
+                isSearching = false
+            }
+            .font(.body)
+        }
+    }
+
+    private func chips(_ filters: [PeopleFilter]) -> some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                chip(nil, title: "All", symbol: "person.2.fill", color: .secondary)
+                ForEach(filters, id: \.self) { option in
+                    chip(option, title: option.title, symbol: option.symbol, color: option.color)
+                }
+            }
+            .padding(.horizontal, 20)
         }
         .scrollIndicators(.hidden)
     }
 
-    private func categoryChip(_ option: PersonCategory?, title: String, symbol: String) -> some View {
-        let isSelected = category == option
+    private func chip(_ option: PeopleFilter?, title: String, symbol: String, color: Color) -> some View {
+        let isSelected = filter == option
         return Button {
-            withAnimation(.snappy(duration: 0.2)) { category = isSelected ? nil : option }
+            withAnimation(.snappy(duration: 0.2)) { filter = isSelected ? nil : option }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(isSelected ? Color.white : (option?.color ?? .secondary))
+                    .foregroundStyle(isSelected ? Color.white : color)
                 Text(title)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(isSelected ? Color.white : Color.primary)
@@ -167,19 +274,77 @@ struct PeopleView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
+    }
+
+    // MARK: - Rows
+
+    private func row(_ person: Person) -> some View {
+        NavigationLink(value: person.id) { PersonRow(person: person) }
     }
 
     @ViewBuilder
     private var emptyState: some View {
         ContentUnavailableView(
-            category == nil ? "No People Yet" : "Nobody here",
-            systemImage: category?.systemImage ?? "person.2",
+            filter == nil ? "No People Yet" : "Nobody here",
+            systemImage: filter?.symbol ?? "person.2",
             description: Text(
-                category == nil
+                filter == nil
                     ? "Once your inbox syncs, the people you email appear here."
-                    : "No \(category?.title.lowercased() ?? "") contacts yet."
+                    : "Nobody is tagged \(filter?.title ?? "") yet."
             )
         )
+    }
+}
+
+/// A chip on the People page: one of the categories, or a relationship the
+/// user named themselves.
+enum PeopleFilter: Hashable {
+    case category(PersonCategory)
+    case custom(String)
+
+    var title: String {
+        switch self {
+        case .category(let category): category.title
+        case .custom(let name):       name
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .category(let category): category.systemImage
+        case .custom:                 "tag.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .category(let category): category.color
+        case .custom:                 Color.accentColor
+        }
+    }
+
+    func matches(_ person: Person) -> Bool {
+        switch self {
+        case .category(let category): person.customRelationship == nil && person.category == category
+        case .custom(let name):       person.customRelationship == name
+        }
+    }
+
+    /// Only chips that have somebody behind them: the categories present,
+    /// then every custom name in use.
+    static func available(in people: [Person]) -> [PeopleFilter] {
+        let categories = Set(people.filter { $0.customRelationship == nil }.map(\.category))
+        let customs = Set(people.compactMap(\.customRelationship))
+        return PersonCategory.allCases.filter(categories.contains).map(PeopleFilter.category)
+            + customs.sorted().map(PeopleFilter.custom)
+    }
+}
+
+private struct PeopleScrollKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
@@ -195,6 +360,7 @@ struct PersonRow: View {
                     Text(person.contact.name)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
+                    relationshipBadge
                     if person.isImportant {
                         Image(systemName: "star.fill")
                             .font(.caption2)
@@ -227,6 +393,24 @@ struct PersonRow: View {
         }
         .padding(.vertical, 4)
         .opacity(person.isMuted ? 0.6 : 1)
+    }
+
+    /// The relationship, on the row, in the same capsule the mail tags use.
+    /// Marking somebody a client and then seeing nothing change in the list
+    /// was the whole complaint.
+    private var relationshipBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: person.relationshipSymbol)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(person.relationshipColor)
+            Text(person.relationshipTitle)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color(uiColor: .tertiarySystemFill)))
     }
 }
 

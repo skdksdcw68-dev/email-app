@@ -44,7 +44,9 @@ enum PersonCategory: String, CaseIterable, Identifiable, Codable {
         case .personal:  "heart.fill"
         case .external:  "briefcase.fill"
         case .service:   "gearshape.fill"
-        case .client:    "handshake"
+        // "handshake" is not an SF Symbol; the picker showed a blank where
+        // the glyph should have been.
+        case .client:    "signature"
         case .family:    "house.fill"
         case .friend:    "face.smiling.fill"
         case .school:    "graduationcap.fill"

@@ -39,18 +39,12 @@ struct ChatTurnView: View {
                         .foregroundStyle(.red)
                 } else {
                     if !turn.text.isEmpty {
+                        // No context menu here any more: the prose is a real
+                        // text view with the system's own selection and edit
+                        // menu, and a SwiftUI long-press menu on top of it
+                        // would swallow the press that starts a selection.
                         AssistantProse(text: turn.text)
-                            .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            // Selection alone is fiddly on a long answer; this
-                            // takes the whole thing in one gesture.
-                            .contextMenu {
-                                Button {
-                                    UIPasteboard.general.string = turn.text
-                                } label: {
-                                    Label("Copy answer", systemImage: "doc.on.doc")
-                                }
-                            }
                     }
 
                     ForEach(turn.blocks) { block in
