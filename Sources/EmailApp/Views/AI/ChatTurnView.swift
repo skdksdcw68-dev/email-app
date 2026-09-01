@@ -65,8 +65,17 @@ struct ChatTurnView: View {
                         ActionReceiptCard(receipt: receipt, onUndo: onUndo)
                     }
 
-                    if !turn.sources.isEmpty {
-                        SourceList(sources: turn.sources, searchNote: turn.searchNote)
+                    // Only when Maily went and looked. "Based on 15 emails"
+                    // under every reply, including "hi", was a footnote on a
+                    // conversation: it appeared most often on answers that
+                    // had nothing to do with those fifteen emails, which
+                    // made it noise and worse, made it look wrong.
+                    //
+                    // A search is different. It says where the answer came
+                    // from when the answer came from somewhere the reader
+                    // cannot see.
+                    if let note = turn.searchNote, !note.isEmpty, !turn.sources.isEmpty {
+                        SourceList(sources: turn.sources, searchNote: note)
                     }
                 }
             }
@@ -209,11 +218,12 @@ struct SourceList: View {
         }
     }
 
-    /// What it looked at, or what it went looking for. The second is worth a
-    /// sentence: a search that reached past this phone should say so, or the
-    /// answer looks like it came from nowhere.
+    /// What it went looking for. Only ever shown after a real search, so
+    /// there is always something specific to say.
     private var caption: String {
-        if let note = searchNote, !note.isEmpty { return note }
-        return sources.count == 1 ? "Based on 1 email" : "Based on \(sources.count) emails"
+        guard let note = searchNote, !note.isEmpty else {
+            return sources.count == 1 ? "1 email" : "\(sources.count) emails"
+        }
+        return note
     }
 }

@@ -376,7 +376,9 @@ Rules:
   worse than the sentence it replaced.
 - No preamble. Do not restate the question.
 - If they asked about their mail and nothing is relevant, say "Nothing in
-  your recent mail covers that."
+  your recent mail covers that." Only when you have been told you cannot
+  search. When you can, ask to search instead. Saying you cannot find
+  something you have not looked for is the worst answer available to you.
 - You are told today's date. Use it for "today", "this week", "overdue",
   "before Friday". Never guess what day it is.
 - You may be given the shape of their inbox as tag counts. Those counts
@@ -480,16 +482,45 @@ function askMessages(question: string, body: Record<string, unknown>) {
   }
   const preamble = facts.length ? `${facts.join("\n")}\n\n` : "";
 
+  // The model may ask to look further rather than answer.
+  //
+  // The app used to decide this with keyword rules, and every one of them was
+  // a guess at what somebody would type. "Find my upwork registration" needed
+  // the literal words "welcome to upwork" before anything would search,
+  // because no word list knows that a registration date lives in a welcome
+  // email. The model knows. So it decides, and the app does the looking.
+  const searchRule = body.may_search === false
+    ? `You have already been given the results of a search. Answer from what is
+here, and if it genuinely is not here, say so plainly.`
+    : `The messages above are only the recent mail on their phone, roughly three
+months of it. Their account holds years more, and you can reach it.
+
+If what they are asking for is not in the messages above, and it is the kind
+of thing that would be in an email somewhere, do not tell them you cannot find
+it. Reply with exactly one line and nothing else:
+
+SEARCH: the words to look for
+
+Write the words a person would remember the email by: a sender, a product
+name, a subject phrase. Not a question, not a sentence, not Gmail operators.
+"When did I register on Upwork" becomes SEARCH: upwork welcome registration,
+because a registration date lives in a welcome email.
+
+Use it whenever looking would help. It costs one lookup and it is the whole
+difference between an assistant and a search box that has already given up.
+Never explain that you are about to search: the line, and nothing else.`;
+
   // No digest and no inbox line means the app decided this has nothing to do
   // with their mail. Saying "nothing in your recent mail covers that" to
-  // "what can you do?" is the wrong answer to the wrong question.
+  // "what can you do?" is the wrong answer to the wrong question, and there
+  // is nothing there worth searching for either.
   const aboutMail = digest.length > 0 || Boolean(body.inbox);
 
-  const content = digest
-    ? `${preamble}Question: ${question}\n\nTheir messages:\n\n${digest}`
-    : aboutMail
-    ? `${preamble}Question: ${question}\n\nThey have no matching messages.`
-    : `${preamble}This is not a question about their mail.\n\nQuestion: ${question}`;
+  const content = !aboutMail
+    ? `${preamble}This is not a question about their mail.\n\nQuestion: ${question}`
+    : digest
+    ? `${preamble}Question: ${question}\n\nTheir messages:\n\n${digest}\n\n${searchRule}`
+    : `${preamble}Question: ${question}\n\nThey have no matching recent messages.\n\n${searchRule}`;
 
   // The conversation so far, so follow-ups resolve. Only the two roles the
   // model expects, capped in count and length: the app sends what is on

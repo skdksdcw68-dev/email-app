@@ -630,6 +630,43 @@ struct AIChatView: View {
             ) { fragment in
                 appendDelta(pendingID, fragment)
             }
+
+            // The model can ask to look further instead of answering.
+            //
+            // Every keyword rule that decided this on its own was a guess at
+            // what somebody would type, and each one broke on the next
+            // phrasing: "find my upwork registration" needed the exact words
+            // "welcome to upwork" before anything would look. The model knows
+            // that a welcome email is where a registration date lives. It is
+            // the only thing here that does, so it gets to decide.
+            if let wanted = SearchRequest.extract(from: currentText(of: pendingID)) {
+                setPending(pendingID, label: "Looking through all your mail")
+                clearText(of: pendingID)
+
+                let older = await mail.olderMail(matching: wanted)
+                searchedFor = older.searchedFor ?? wanted
+                found = older.messages
+
+                var seen = Set<Message.ID>(context.map(\.id))
+                context += found.filter { seen.insert($0.id).inserted }
+
+                setPending(pendingID, label: found.isEmpty ? "Reading" : "Found \(found.count). Reading")
+                try await AIService.askStreaming(
+                    question: question,
+                    context: context,
+                    history: history,
+                    inbox: mail.tagSummary,
+                    signedInAs: user.account?.displayName,
+                    tone: user.tonePreference,
+                    memories: memory.prompt,
+                    // Second pass: it has been given what it asked for, so
+                    // asking again would be a loop.
+                    maySearch: false
+                ) { fragment in
+                    appendDelta(pendingID, fragment)
+                }
+            }
+
             finish(pendingID, sources: context, searchNote: searchedFor, found: found)
             offered = context
 
@@ -687,6 +724,20 @@ struct AIChatView: View {
             .map(\.text)
         guard !earlier.isEmpty else { return question }
         return (earlier + [question]).joined(separator: ". ")
+    }
+
+    private func currentText(of id: ChatMessage.ID?) -> String {
+        guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return "" }
+        return turns[index].text
+    }
+
+    /// Wipes what the model wrote so the second pass starts on a clean turn.
+    /// Leaving "SEARCH: upwork welcome" on screen and appending the real
+    /// answer under it would show the reader the plumbing.
+    private func clearText(of id: ChatMessage.ID?) {
+        guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
+        turns[index].text = ""
+        turns[index].isPending = true
     }
 
     /// Changes what the thinking indicator says while it is still thinking.
