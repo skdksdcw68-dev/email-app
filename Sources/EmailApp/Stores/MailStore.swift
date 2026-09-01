@@ -348,10 +348,25 @@ final class MailStore {
         }
     }
 
-    /// Conversations waiting on somebody, in either direction.
+    /// Conversations waiting on somebody, in either direction, minus the ones
+    /// waved away that have not moved since.
     var followUps: [FollowUp] {
         guard let account else { return [] }
-        return messages.followUps(myAddress: account.email)
+        _ = preferencesVersion
+        return messages.followUps(myAddress: account.email).filter {
+            !FollowUpPreferences.isDismissed($0.id, lastActivity: $0.message.date)
+        }
+    }
+
+    /// Waves one away. It comes back if the conversation moves again.
+    func dismissFollowUp(_ id: String) {
+        FollowUpPreferences.dismiss(id)
+        notePreferencesChanged()
+    }
+
+    func restoreFollowUp(_ id: String) {
+        FollowUpPreferences.restore(id)
+        notePreferencesChanged()
     }
 
     /// The messages worth showing the model for a given question.

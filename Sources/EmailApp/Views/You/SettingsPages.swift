@@ -208,6 +208,7 @@ struct PrivacySettingsView: View {
             Button("Sign out", role: .destructive) {
                 mail.disconnect()
                 PersonPreferences.clearAll()
+                FollowUpPreferences.clearAll()
                 // Memory is about the person rather than the mailbox, so
                 // disconnecting an inbox keeps it. Signing out does not.
                 memory.forgetAll()

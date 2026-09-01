@@ -17,22 +17,6 @@ extension MailStore {
         )
     }
 
-    /// The one-line status under the greeting.
-    var inboxStatus: String {
-        let counts = self.counts
-        if !isConnected { return "Connect an inbox to get started." }
-        if counts.urgent > 0 {
-            return counts.urgent == 1
-                ? "One email needs you right away."
-                : "\(counts.urgent) emails need you right away."
-        }
-        if counts.needsReply > 0 {
-            return counts.needsReply == 1
-                ? "One reply is waiting on you."
-                : "\(counts.needsReply) replies are waiting on you."
-        }
-        return "Your inbox is under control."
-    }
 
     // MARK: - Needs your attention
 

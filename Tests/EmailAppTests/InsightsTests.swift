@@ -8,7 +8,7 @@ final class InsightsTests: XCTestCase {
     private let bob = Contact(name: "Bob Brown", address: "bob@example.com")
 
     /// Mail always arrives with a connected account -- `connect()` sets both
-    /// together -- so fixtures must too, or `inboxStatus` correctly reports
+    /// together -- so fixtures must too, or the counts correctly report
     /// that there is no inbox.
     private func connected(_ messages: [Message]) -> MailStore {
         MailStore(
@@ -56,25 +56,6 @@ final class InsightsTests: XCTestCase {
                     date: .now, isRead: true, mailbox: .inbox, tags: [.noReplyNeeded]),
         ])
         XCTAssertTrue(calm.counts.isCalm)
-        XCTAssertEqual(calm.inboxStatus, "Your inbox is under control.")
-    }
-
-    func testStatusLeadsWithUrgent() {
-        XCTAssertEqual(makeStore().inboxStatus, "One email needs you right away.")
-    }
-
-    func testStatusFallsBackToRepliesWhenNothingIsUrgent() {
-        let store = connected([
-            Message(sender: alice, recipients: [], subject: "A", body: "-",
-                    date: .now, mailbox: .inbox, tags: [.needsReply]),
-            Message(sender: bob, recipients: [], subject: "B", body: "-",
-                    date: .now, mailbox: .inbox, tags: [.needsReply]),
-        ])
-        XCTAssertEqual(store.inboxStatus, "2 replies are waiting on you.")
-    }
-
-    func testDisconnectedStoreAsksForAnInbox() {
-        XCTAssertEqual(MailStore().inboxStatus, "Connect an inbox to get started.")
     }
 
     // MARK: - Needs attention

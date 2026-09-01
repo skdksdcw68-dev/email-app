@@ -31,6 +31,11 @@ import UIKit
 struct AIChatView: View {
     /// A saved conversation to pick up, or nil for a new one.
     var conversationID: UUID? = nil
+    /// A conversation that has gone quiet, opened straight into a chase.
+    /// The chat starts with the follow-up already being written, because
+    /// coming here from "Nudge" and being shown an empty box would be a
+    /// worse version of what the button promised.
+    var nudging: Message.ID? = nil
 
     @Environment(MailStore.self) private var mail
     @Environment(UserStore.self) private var user
@@ -234,7 +239,10 @@ struct AIChatView: View {
                 }
             }
         }
-        .task { restoreConversationIfNeeded() }
+        .task {
+            restoreConversationIfNeeded()
+            startNudgeIfNeeded()
+        }
         // Saved whenever the conversation settles: local answers, greetings,
         // sends, and each model answer once it has finished streaming. Not
         // per token -- that is `isWorking` below.
@@ -483,6 +491,32 @@ struct AIChatView: View {
                 detail: "Inside Maily only. Gmail elsewhere still shows them unread.",
                 undo: changed
             )))
+        }
+    }
+
+    // MARK: - Chasing
+
+    /// Opened from a follow-up. Goes straight to the writer with the exact
+    /// message in hand, rather than through the intent parser, so there is
+    /// no chance of chasing the wrong person about the wrong thread.
+    private func startNudgeIfNeeded() {
+        guard let nudging, turns.isEmpty, let target = mail.message(nudging) else { return }
+
+        let days = Calendar.current.dateComponents([.day], from: target.date, to: .now).day ?? 0
+        let name = firstName(of: target.sender)
+        turns.append(.user("Follow up with \(name) about \"\(target.subject)\""))
+
+        work = Task {
+            await write(
+                to: target.sender,
+                replyingTo: target,
+                instruction: """
+                Write a short, friendly follow-up. It has been \(days) days with no reply. \
+                Do not repeat the original message back at them, do not apologise for \
+                chasing, and do not invent anything that was not already agreed. One or \
+                two sentences, ending with a clear ask.
+                """
+            )
         }
     }
 
