@@ -68,6 +68,8 @@ struct ChatDraft: Identifiable, Equatable {
 
     let id = UUID()
     var to: Contact
+    /// Extra recipients, comma-separated, as typed in the editor.
+    var cc = ""
     var subject: String
     var body: String
     /// The message this answers, when it is a reply. Threads the send.

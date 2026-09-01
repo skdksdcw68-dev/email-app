@@ -9,6 +9,7 @@ import UIKit
 struct ChatTurnView: View {
     @Binding var turn: ChatMessage
     let onSendDraft: () -> Void
+    let onEditDraft: () -> Void
     let onDiscardDraft: () -> Void
 
     var body: some View {
@@ -57,7 +58,12 @@ struct ChatTurnView: View {
                     }
 
                     if let draft = Binding($turn.draft) {
-                        EmailDraftCard(draft: draft, onSend: onSendDraft, onDiscard: onDiscardDraft)
+                        EmailDraftCard(
+                            draft: draft,
+                            onSend: onSendDraft,
+                            onEdit: onEditDraft,
+                            onDiscard: onDiscardDraft
+                        )
                     }
 
                     if turn.isLocal {
@@ -113,14 +119,15 @@ struct ThinkingIndicator: View {
 ///
 /// Verifiability matters, but a card of twenty emails under every answer
 /// was louder than the answer. Collapsed, this is a caption; tapped, it
-/// opens into the list, each row a link to the message.
+/// opens into the same cards the assistant uses everywhere else, each one a
+/// link to the message.
 struct SourceList: View {
     let sources: [Message]
 
     @State private var isExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Button {
                 withAnimation(.snappy(duration: 0.22)) { isExpanded.toggle() }
             } label: {
@@ -140,40 +147,8 @@ struct SourceList: View {
             .accessibilityLabel(isExpanded ? "Hide sources" : "Show sources")
 
             if isExpanded {
-                VStack(alignment: .leading, spacing: 8) {
-                    // Unnumbered. The model does not write [1], [2] into the
-                    // prose, so numbering these would point at markers that
-                    // are not there.
-                    ForEach(sources) { message in
-                        NavigationLink(value: message.id) {
-                            HStack(alignment: .top, spacing: 9) {
-                                Image(systemName: "envelope")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 18, height: 18)
-
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(message.sender.name)
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.primary)
-                                    Text(message.subject)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                                Spacer(minLength: 0)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(uiColor: .secondarySystemBackground))
-                }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                AnswerMessageList(messages: sources)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
     }

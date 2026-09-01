@@ -10,6 +10,10 @@ import UIKit
 /// edge. The earlier two-row panel had the expanded state as its resting
 /// state, which is why it never read as the real thing.
 ///
+/// While Maily is answering, the send button becomes a stop button. That is
+/// how the platform's assistants show work in progress: not a placeholder
+/// that says "typing", but a control that lets you end it.
+///
 /// Positioning is not this view's job. `KeyboardAttachedBar` pins it to the
 /// keyboard through UIKit's layout guide; nothing here animates position.
 /// The plus button is not this view's menu either: it asks the owner to
@@ -28,6 +32,7 @@ struct ChatComposer: View {
     /// to live on this side of the UIKit hosting boundary.
     let focusToken: Int
     let onSend: () -> Void
+    let onStop: () -> Void
 
     @FocusState private var isFocused: Bool
 
@@ -63,7 +68,7 @@ struct ChatComposer: View {
         HStack(alignment: .bottom, spacing: 6) {
             plusButton
 
-            TextField(isWorking ? "Maily is typing…" : "Ask Maily", text: $text, axis: .vertical)
+            TextField("Ask Maily", text: $text, axis: .vertical)
                 .font(.system(size: 16))
                 .lineSpacing(3)
                 // One line at rest, growing to six, then scrolling inside
@@ -74,7 +79,7 @@ struct ChatComposer: View {
                 .padding(.vertical, 7)
                 .id(resetToken)
 
-            sendButton
+            actionButton
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
@@ -116,26 +121,31 @@ struct ChatComposer: View {
         .accessibilityLabel("Options")
     }
 
-    private var sendButton: some View {
-        Button(action: onSend) {
-            Image(systemName: "arrow.up")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(canSend ? Color.white : Color.white.opacity(0.85))
+    /// Send, or -- while an answer is being written -- stop.
+    private var actionButton: some View {
+        Button {
+            if isWorking { onStop() } else { onSend() }
+        } label: {
+            Image(systemName: isWorking ? "stop.fill" : "arrow.up")
+                .font(.system(size: isWorking ? 13 : 17, weight: .semibold))
+                .foregroundStyle(.white)
                 .frame(width: 32, height: 32)
                 .background {
                     Circle().fill(
-                        canSend
+                        isWorking || canSend
                             ? AnyShapeStyle(Color.accentColor)
                             : AnyShapeStyle(Color.primary.opacity(0.2))
                     )
                 }
+                .contentTransition(.symbolEffect(.replace))
         }
         .buttonStyle(PressButtonStyle())
-        .disabled(!canSend)
+        .disabled(!isWorking && !canSend)
         // A quick fade, not a bounce. The enable state flips on every
         // keystroke at the edge of an empty field; a spring there wobbles.
         .animation(.easeOut(duration: 0.15), value: canSend)
-        .accessibilityLabel("Send")
+        .animation(.easeOut(duration: 0.15), value: isWorking)
+        .accessibilityLabel(isWorking ? "Stop" : "Send")
     }
 }
 

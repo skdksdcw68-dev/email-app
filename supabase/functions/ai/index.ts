@@ -222,6 +222,57 @@ quotes around it.`;
   return json({ body: improved.trim(), model: DRAFT_MODEL });
 }
 
+// ------------------------------------------------------------------ revise
+
+// One requested change to a draft the assistant wrote, and nothing else.
+// The failure mode to guard against is the model "helpfully" rewriting the
+// whole thing when asked to warm up one line.
+async function revise(body: Record<string, string>) {
+  const tone = body.tone ?? "match how I already write";
+
+  const system = `You revise an email draft. Apply exactly the change asked for and
+nothing else.
+
+Tone: ${tone}.
+
+Rules:
+- Keep the meaning, the facts, the names and the decision exactly as they
+  are, unless the change asked for is about one of them.
+- Keep the length, unless the change asked for is about length.
+- Do not add facts, names, dates, numbers or promises that are not already in
+  the draft.
+- No subject line, no signature block. Body text only.
+- Never use dashes as punctuation. No em dashes, no en dashes, no " - ".
+- No "I hope this finds you well", no "reaching out", no "circle back", no
+  "at your earliest convenience". Nobody talks like that.
+
+Return the revised email and nothing else. No preamble, no explanation, no
+quotes around it.`;
+
+  const context = body.body
+    ? [
+        "For context, the message being replied to:",
+        `From: ${body.from ?? ""}`,
+        `Subject: ${body.subject ?? ""}`,
+        body.body.slice(0, BODY_LIMIT),
+        "",
+      ].join("\n")
+    : "";
+
+  const content = `${context}The draft:\n${body.text ?? ""}\n\nThe change asked for:\n${body.instruction ?? ""}`;
+
+  const revised = await openai(
+    DRAFT_MODEL,
+    [
+      { role: "system", content: system },
+      { role: "user", content },
+    ],
+    false,
+  );
+
+  return json({ body: revised.trim(), model: DRAFT_MODEL });
+}
+
 // --------------------------------------------------------------------- ask
 
 const ASK_SYSTEM = `You are Maily, the assistant inside a person's email app. You are
@@ -367,6 +418,8 @@ Deno.serve(async (request) => {
         return await draft(payload);
       case "refine":
         return await refine(payload);
+      case "revise":
+        return await revise(payload);
       case "ask":
         return await ask(payload);
       case "ask_stream":

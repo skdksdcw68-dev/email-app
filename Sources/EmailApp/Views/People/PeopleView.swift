@@ -81,10 +81,22 @@ struct PeopleView: View {
             .modifier(SearchWhenAsked(query: $query, isPresented: $isSearching, prompt: "Search people"))
             .keyboardDismissable()
             .navigationTitle("People")
-            // Inline, so the title shares its line with the buttons instead
-            // of sitting a row below them.
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // The title on the buttons' line and flush left, the way the
+                // App Store's Search page sets its title beside the avatar.
+                // A principal item stretched to the available width puts the
+                // large text where an inline title would be centred.
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 0) {
+                        Text("People")
+                            .font(.system(size: 28, weight: .bold))
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .accessibilityAddTraits(.isHeader)
+                }
+
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
                         isSearching = true

@@ -23,8 +23,9 @@ import UIKit
 ///      digest, streaming prose with sources. If *it* writes an email, the
 ///      email comes back in a block that becomes a card, never as prose.
 ///
-/// Sending is the one thing the agent does to the world, and it does it
-/// only from the card, only on Send, and reports exactly what happened.
+/// Anything the model is doing can be stopped from the composer. Sending is
+/// the one thing the agent does to the world, and it does it only from the
+/// card, only on Send, and reports exactly what happened.
 struct AIChatView: View {
     @Environment(MailStore.self) private var mail
     @Environment(UserStore.self) private var user
@@ -33,9 +34,11 @@ struct AIChatView: View {
     @State private var draft = ""
     @State private var isWorking = false
     @State private var showsOptions = false
-    /// Reported by the attached bar, so the conversation leaves room for it.
-    /// Starts at the resting capsule height so the first frame is right.
+    /// Reported by the attached bar: its own height, so the conversation
+    /// leaves room for it, and how much of the screen it and the keyboard
+    /// take from the bottom, so the empty page can centre above them.
     @State private var barHeight: CGFloat = 54
+    @State private var barTop: CGFloat = 62
     @State private var composerReset = 0
     @State private var composerFocus = 0
     /// Emails Maily just put in front of the person, so "the first one" and
@@ -43,6 +46,13 @@ struct AIChatView: View {
     @State private var offered: [Message] = []
     /// A draft request waiting on the answer to "which one?".
     @State private var pendingChoice: DraftRequest?
+    /// The model call in flight, so the stop button has something to stop.
+    @State private var work: Task<Void, Never>?
+    @State private var editing: EditingDraft?
+
+    private struct EditingDraft: Identifiable {
+        let id: ChatMessage.ID
+    }
 
     /// What the composer is built from. The UIKit host rebuilds its content
     /// only when this changes, not on every streamed token.
@@ -62,75 +72,89 @@ struct AIChatView: View {
     }
 
     var body: some View {
-        ZStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 20) {
-                        ForEach($turns) { $turn in
-                            ChatTurnView(
-                                turn: $turn,
-                                onSendDraft: { Task { await sendDraft(in: turn.id) } },
-                                onDiscardDraft: { discardDraft(in: turn.id) }
-                            )
-                            .id(turn.id)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .bottom).combined(with: .opacity),
-                                removal: .opacity
-                            ))
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
-                    .animation(.spring(response: 0.38, dampingFraction: 0.82), value: turns.count)
-                }
-                // The conversation runs underneath the floating bar and shows
-                // through its material; this is only how far the last message
-                // clears it.
-                .contentMargins(.bottom, barHeight + KeyboardBarController.keyboardGap, for: .scrollContent)
-                .scrollDismissesKeyboard(.interactively)
-                // A tap anywhere on the conversation puts the keyboard away.
-                // Simultaneous, so the links inside answers still fire -- and
-                // safe here because this screen has no press-and-hold control
-                // for the gesture to fight.
-                .simultaneousGesture(TapGesture().onEnded {
-                    dismissKeyboard()
-                })
-                .onChange(of: turns.count) { _, _ in
-                    guard let last = turns.last else { return }
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
-                }
-                .overlay {
-                    KeyboardAttachedBar(height: $barHeight, inputs: composerInputs) {
-                        ChatComposer(
-                            text: $draft,
-                            showsOptions: $showsOptions,
-                            isWorking: isWorking,
-                            resetToken: composerReset,
-                            focusToken: composerFocus,
-                            onSend: send
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    ForEach($turns) { $turn in
+                        ChatTurnView(
+                            turn: $turn,
+                            onSendDraft: { Task { await sendDraft(in: turn.id) } },
+                            onEditDraft: {
+                                dismissKeyboard()
+                                editing = EditingDraft(id: turn.id)
+                            },
+                            onDiscardDraft: { discardDraft(in: turn.id) }
                         )
+                        .id(turn.id)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .opacity
+                        ))
                     }
-                    // Full-bleed on purpose: if SwiftUI shrank this for the
-                    // keyboard, the bar would be back to following SwiftUI's
-                    // layout instead of UIKit's guide.
-                    .ignoresSafeArea()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+                .animation(.spring(response: 0.38, dampingFraction: 0.82), value: turns.count)
+            }
+            .background {
+                if turns.isEmpty {
+                    // Centred in whatever is left above the bar and the
+                    // keyboard, which is where Perplexity puts theirs. The
+                    // measurement comes from UIKit, which knows where the bar
+                    // actually is; SwiftUI's own keyboard geometry is what
+                    // put this behind the capsule last time.
+                    MailyWordmark()
+                        .padding(.bottom, barTop)
+                        .ignoresSafeArea(.keyboard)
+                        .animation(.easeOut(duration: 0.25), value: barTop)
+                        .transition(.opacity)
                 }
             }
-
-            if turns.isEmpty {
-                // Centred in whatever is left above the keyboard and the bar,
-                // which is where Perplexity puts theirs: the keyboard rising
-                // lifts it, the keyboard leaving lets it settle back.
-                MailyWordmark()
-                    .padding(.bottom, barHeight + KeyboardBarController.keyboardGap)
+            .animation(.easeOut(duration: 0.3), value: turns.isEmpty)
+            // Room for the bar. The conversation runs underneath it and shows
+            // through its material; this is only how far the last message
+            // clears it -- and it grows with the bar, so nothing is left
+            // hidden behind a taller capsule.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear
+                    .frame(height: barHeight + KeyboardBarController.keyboardGap)
                     .allowsHitTesting(false)
-                    .transition(.opacity)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            // A tap anywhere on the conversation puts the keyboard away.
+            // Simultaneous, so the links inside answers still fire -- and
+            // safe here because this screen has no press-and-hold control
+            // for the gesture to fight.
+            .simultaneousGesture(TapGesture().onEnded {
+                dismissKeyboard()
+            })
+            .onChange(of: turns.count) { _, _ in
+                scrollToEnd(proxy, animation: .easeOut(duration: 0.3))
+            }
+            // The bar grew a line: keep the last message above it, the way
+            // the platform's assistants keep the bottom pinned.
+            .onChange(of: barHeight) { _, _ in
+                scrollToEnd(proxy, animation: .easeOut(duration: 0.18))
+            }
+            .overlay {
+                KeyboardAttachedBar(height: $barHeight, bottom: $barTop, inputs: composerInputs) {
+                    ChatComposer(
+                        text: $draft,
+                        showsOptions: $showsOptions,
+                        isWorking: isWorking,
+                        resetToken: composerReset,
+                        focusToken: composerFocus,
+                        onSend: send,
+                        onStop: stop
+                    )
+                }
+                // Full-bleed on purpose: if SwiftUI shrank this for the
+                // keyboard, the bar would be back to following SwiftUI's
+                // layout instead of UIKit's guide.
+                .ignoresSafeArea()
             }
         }
-        .animation(.easeOut(duration: 0.3), value: turns.isEmpty)
         .keyboardDismissable()
         // No title. The page is the wordmark when empty and the conversation
         // when not; a second "Maily" in the bar would be clutter.
@@ -139,9 +163,8 @@ struct AIChatView: View {
         // Pushed page, so the tab bar goes.
         .hidesTabBar()
         // Deliberately no navigationDestination here. The AI tab's stack
-        // already resolves Message.ID; declaring it again inside a pushed
-        // view made SwiftUI rebuild this screen when a card was tapped, so
-        // the person landed in a fresh empty chat instead of the email.
+        // resolves Message.ID; declaring it again inside a pushed view made
+        // SwiftUI rebuild this screen when a card was tapped.
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -160,11 +183,26 @@ struct AIChatView: View {
         .sheet(isPresented: $showsOptions) {
             ChatOptionsSheet(onPick: handle)
         }
+        .fullScreenCover(item: $editing) { item in
+            if let binding = draftBinding(for: item.id) {
+                DraftEditorView(draft: binding, tone: user.tonePreference) {
+                    Task { await sendDraft(in: item.id) }
+                }
+            }
+        }
     }
 
     // MARK: - Chrome
 
+    private func scrollToEnd(_ proxy: ScrollViewProxy, animation: Animation) {
+        guard let last = turns.last else { return }
+        withAnimation(animation) {
+            proxy.scrollTo(last.id, anchor: .bottom)
+        }
+    }
+
     private func clearConversation() {
+        work?.cancel()
         withAnimation {
             turns = []
             offered = []
@@ -187,8 +225,21 @@ struct AIChatView: View {
         }
     }
 
+    /// A live binding into the draft on one turn, for the editor.
+    private func draftBinding(for turnID: ChatMessage.ID) -> Binding<ChatDraft>? {
+        guard let index = turns.firstIndex(where: { $0.id == turnID }),
+              turns[index].draft != nil
+        else { return nil }
+        return Binding(
+            get: { turns[index].draft ?? ChatDraft(to: Contact(name: "", address: ""), subject: "", body: "") },
+            set: { turns[index].draft = $0 }
+        )
+    }
+
     // MARK: - Asking
 
+    /// The keyboard stays up after a send. Putting it away made every
+    /// follow-up start with a tap on the field.
     private func send() {
         let question = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
@@ -197,8 +248,12 @@ struct AIChatView: View {
         ask(question)
     }
 
+    /// Ends whatever the model is doing. The partial answer stays.
+    private func stop() {
+        work?.cancel()
+    }
+
     private func ask(_ question: String) {
-        dismissKeyboard()
         turns.append(.user(question))
 
         let pending = pendingDraftTurn
@@ -220,7 +275,7 @@ struct AIChatView: View {
                 if narrowed.count == 1 {
                     pendingChoice = nil
                     let target = narrowed[0]
-                    Task {
+                    work = Task {
                         await write(
                             to: target.sender, replyingTo: target,
                             instruction: choice.instruction ?? "Reply to what they asked. Keep it short."
@@ -255,7 +310,7 @@ struct AIChatView: View {
             }
 
         case .draft(let request):
-            Task { await produceDraft(for: request) }
+            work = Task { await produceDraft(for: request) }
 
         case .question:
             if let local = mail.localAnswer(for: question) {
@@ -263,7 +318,7 @@ struct AIChatView: View {
                 turns.append(.local(local))
                 return
             }
-            Task { await askModel(question) }
+            work = Task { await askModel(question) }
         }
     }
 
@@ -317,8 +372,16 @@ struct AIChatView: View {
             finish(pendingID, sources: context)
             offered = context
         } catch {
-            replace(pendingID, with: error.localizedDescription, failed: true)
+            if isCancellation(error) {
+                stopped(pendingID, sources: context)
+            } else {
+                replace(pendingID, with: error.localizedDescription, failed: true)
+            }
         }
+    }
+
+    private func isCancellation(_ error: Error) -> Bool {
+        Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
     /// Appends a fragment as it arrives. No animation on each one: animating
@@ -352,11 +415,31 @@ struct AIChatView: View {
         }
     }
 
+    /// The person stopped it. Whatever had arrived stays, minus any email
+    /// block that never finished -- half an envelope is not a draft.
+    private func stopped(_ id: ChatMessage.ID?, sources: [Message]) {
+        guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
+
+        var text = turns[index].text
+        if let open = text.range(of: EmailBlock.opening),
+           text[open.upperBound...].range(of: EmailBlock.closing) == nil {
+            text = String(text[..<open.lowerBound])
+        }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if text.isEmpty {
+            replace(id, with: "Stopped.", failed: false)
+        } else {
+            turns[index].text = text
+            finish(id, sources: sources)
+        }
+    }
+
     /// A block the model wrote, threaded onto the email it answers when the
     /// address matches one we showed it.
     private func makeDraft(from block: EmailBlock, sources: [Message]) -> ChatDraft {
         let address = block.toAddress
-        let original = sources.first { $0.sender.address.lowercased() == address.lowercased() && !address.isEmpty }
+        let original = sources.first { !address.isEmpty && $0.sender.address.lowercased() == address.lowercased() }
         let name = block.toName.isEmpty ? (original?.sender.name ?? "") : block.toName
         return ChatDraft(
             to: Contact(name: name, address: address),
@@ -456,7 +539,11 @@ struct AIChatView: View {
             offered = []
             pendingChoice = nil
         } catch {
-            replace(pendingID, with: "I couldn't write that. \(error.localizedDescription)", failed: true)
+            if isCancellation(error) {
+                replace(pendingID, with: "Stopped.", failed: false)
+            } else {
+                replace(pendingID, with: "I couldn't write that. \(error.localizedDescription)", failed: true)
+            }
         }
     }
 
@@ -488,10 +575,12 @@ struct AIChatView: View {
             turns[index].draft?.status = .sending
         }
 
+        let cc = pending.cc.trimmingCharacters(in: .whitespaces)
         do {
             try await mail.send(
                 subject: pending.subject,
                 to: pending.to.address,
+                cc: cc.isEmpty ? nil : cc,
                 body: pending.body,
                 replyingTo: pending.replyingTo
             )

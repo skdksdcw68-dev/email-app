@@ -6,6 +6,11 @@ import UIKit
 /// The chat is pushed from here rather than being the tab itself: this screen
 /// is the standing view of the mailbox, and a conversation about it is
 /// something you go into and come back from.
+/// The one non-message destination the AI tab pushes.
+enum AIRoute: Hashable {
+    case chat
+}
+
 struct AITabView: View {
     @Environment(MailStore.self) private var mail
 
@@ -27,9 +32,12 @@ struct AITabView: View {
                 }
 
                 Section {
-                    NavigationLink {
-                        AIChatView()
-                    } label: {
+                    // Value-based, like every other link in this stack. A
+                    // view-based push here and value-based pushes inside the
+                    // chat cannot share one path: tapping an email card from
+                    // the chat replaced the chat instead of stacking on it,
+                    // and Back skipped straight over it.
+                    NavigationLink(value: AIRoute.chat) {
                         HStack(spacing: 12) {
                             Image(systemName: "bubble.left.and.text.bubble.right.fill")
                                 .font(.body)
@@ -67,6 +75,7 @@ struct AITabView: View {
                 }
             }
             .navigationTitle("AI")
+            .navigationDestination(for: AIRoute.self) { _ in AIChatView() }
             .navigationDestination(for: AIQuestion.self) { AIAnswerView(question: $0) }
             .navigationDestination(for: Message.ID.self) { MessageDetailView(messageID: $0) }
         }

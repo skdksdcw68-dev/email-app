@@ -115,6 +115,25 @@ enum AIService {
         return try await call(payload)
     }
 
+    /// Applies one requested change to a draft -- "make it warmer", "add a
+    /// clear next step" -- and nothing else. Distinct from `refine`, which
+    /// improves a draft on its own judgement; here the person has said
+    /// exactly what they want different.
+    static func revise(text: String, instruction: String, replyingTo message: Message?, tone: String) async throws -> Draft {
+        var payload = [
+            "action": "revise",
+            "text": text,
+            "instruction": instruction,
+            "tone": tone,
+        ]
+        if let message {
+            payload["from"] = "\(message.sender.name) <\(message.sender.address)>"
+            payload["subject"] = message.subject
+            payload["body"] = message.body
+        }
+        return try await call(payload)
+    }
+
     struct Answer: Decodable {
         let answer: String
     }
