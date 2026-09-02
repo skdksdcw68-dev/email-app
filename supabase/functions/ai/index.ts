@@ -371,9 +371,11 @@ Rules:
   carries what the card cannot: the answer to what they actually asked. For
   "when did I register" it is the date. For "what did she want" it is what
   she wanted. For "show me the last one" it can be four words.
-- Show at most eight. If more match, show the eight that matter and say how
-  many there were. Show nothing when the answer is a number, a yes or no, or
-  a summary across many messages; then it is prose, or stats.
+- Show as many as they asked for. "My last ten emails" is ten, if ten were
+  given to you. When they did not say how many, show the ones that answer
+  and no padding; if more match than you show, say how many there were.
+  Show nothing when the answer is a number, a yes or no, or a summary across
+  many messages; then it is prose, or stats.
 - Be brief. A list of three things beats a paragraph about them. Markdown
   headings, bullets and bold are fine; the app renders them.
 - When the answer turns on two or three numbers, draw them instead of
@@ -471,7 +473,7 @@ function askMessages(question: string, body: Record<string, unknown>) {
   const messages = Array.isArray(body.messages) ? body.messages : [];
 
   const digest = messages
-    .slice(0, 25)
+    .slice(0, 40)
     .map((message: Record<string, string>, index: number) =>
       [
         `[${index + 1}]`,
@@ -523,22 +525,41 @@ with a show block and put the answer to their question in the sentence beside
 it. If it genuinely is not here, say "Nothing in your mail matched that." in
 one plain sentence, not "recent mail": the whole account was searched. Do not
 list what is here instead.`
-    : `The messages above are only the recent mail on their phone, roughly three
-months of it. Their account holds years more, and you can reach it.
+    : `The messages above are only what the app picked out for this question:
+the newest few, and the ones whose words matched. Their account holds years
+more, and you can reach it.
 
 If what they are asking for is not in the messages above, and it is the kind
 of thing that would be in an email somewhere, do not tell them you cannot find
-it. Reply with exactly one line and nothing else:
+it. Reply with exactly one line and nothing else. There are two kinds of line,
+and which one you choose is the whole skill.
+
+When the question is about WHEN SOMETHING BEGAN, ask for the oldest mail:
+
+OLDEST: from:linkedin | from:instagram
+
+The account was created, the subscription started, the first order, the first
+message from someone, when did I join, how long have I been with. Gmail hands
+back the newest matches first, and a company that writes every day has years
+of notifications on top of its welcome email, so searching for the welcome
+finds the newest eight notifications and never the welcome. OLDEST walks back
+to the very first mail matching each query instead. One query per thing they
+asked about, separated by "|", using Gmail's from: where you know the sender
+and plain words where you do not: "from:stripe", "from:twitter OR from:x.com",
+"upwork". Do not add words like "welcome": the oldest mail from them is the
+evidence whatever it says.
+
+When the question is about WHAT AN EMAIL SAID, ask by wording:
 
 SEARCH: words | different words | different words again
 
 Think about what the evidence would actually look like, not about how they
 phrased the question. They asked a question; the email was written by somebody
-who had never heard it. "When was my Upwork account created" is answered by an
-email that says none of those words, so the hypotheses are the wordings a
-welcome email might really use:
+who had never heard it. "Did the invoice from Stripe get paid" is answered by
+an email that says none of those words, so the hypotheses are the wordings the
+email might really use:
 
-SEARCH: upwork welcome | welcome to upwork | upwork account created
+SEARCH: stripe receipt | stripe payment succeeded | stripe invoice paid
 
 Rules for each alternative:
 - Two or three words. Never more. They are joined with AND, so every extra
@@ -546,17 +567,20 @@ Rules for each alternative:
 - Only words that would appear in the email itself. Not "registration", which
   is your word for it, unless the email would really say it.
 - Two to four alternatives, separated by "|", best guess first.
-- No questions, no sentences, no Gmail operators.
+- Gmail's from: and subject: are fine when you know them. No questions, no
+  sentences.
 
 You have ${hopsLeft} ${hopsLeft === 1 ? "look" : "looks"} left. ${
       hasSearched
-        ? `A previous search has already run and what it found is in the list
-above. If it missed, do not repeat the same words: think about what other
-wording the email would have used, and try those instead.`
+        ? `A previous look has already run and what it found is in the list
+above. If it missed, do not repeat it: if you searched by wording, try other
+wording, or ask for OLDEST if the question is really about when something
+started. If you asked for OLDEST and got nothing, the sender is probably
+named differently: try the name as a plain word instead of from:.`
         : `Use it whenever looking would help.`
     }
 
-Never explain that you are about to search: the line, and nothing else.`;
+Never explain that you are about to look: the line, and nothing else.`;
 
   // No digest and no inbox line means the app decided this has nothing to do
   // with their mail. Saying "nothing in your recent mail covers that" to

@@ -44,7 +44,8 @@ struct ImportLedger: Codable, Equatable {
         pending.isEmpty ? nil : Array(pending.prefix(size))
     }
 
-    /// Crosses ids off. Called only after those messages are on disk, so a
+    /// Crosses ids off. The copy in memory is crossed off as messages arrive;
+    /// the copy on disk is only ever `save()`d after those messages are, so a
     /// kill between the fetch and the write costs a re-fetch rather than a
     /// hole nobody knows about.
     mutating func complete(_ ids: [String]) {

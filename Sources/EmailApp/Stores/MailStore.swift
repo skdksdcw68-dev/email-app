@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 @Observable
 @MainActor
@@ -74,9 +75,14 @@ final class MailStore {
     /// How many pages to pull at a time. Each id costs a second request for
     /// the full message, so a bigger page is a lot more requests in flight.
     static let pageSize = 25
-    /// Larger during the one-off import: the user is watching a progress bar
-    /// and waiting, so throughput matters more than responsiveness.
-    static let importPageSize = 50
+    /// How many bodies the import asks for at once. Gmail allows about fifty
+    /// message reads a second per user; fifty in flight, plus the second
+    /// request a long body needs, was right on that line and got refused.
+    static let importPageSize = 25
+
+    /// How many of the newest inbox messages ride along with every question
+    /// about mail, before relevance picks the rest.
+    static let newestInContext = 10
 
     /// True while a background top-up is fetching what a previous import
     /// could not, so a second launch trigger does not start a second one.
@@ -190,7 +196,10 @@ final class MailStore {
     /// Re-pulls the inbox with a refreshed token. Pull-to-refresh, for now;
     /// incremental History API sync comes with the backend.
     func refresh() async {
-        guard isConnected, !isRefreshing else { return }
+        // Not while the import is running. It is already fetching everything a
+        // refresh would, and two writers to the mailbox at once is how the
+        // counter used to disagree with itself.
+        guard isConnected, !isRefreshing, !importProgress.isRunning else { return }
         isRefreshing = true
         connectionError = nil
         defer { isRefreshing = false }
@@ -290,16 +299,36 @@ final class MailStore {
     }
 
     /// Works the ledger down to nothing, or to what will not come today.
+    ///
+    /// The ledger in memory and the one on disk are allowed to differ, on
+    /// purpose. The one here is crossed off the moment a message arrives, so
+    /// the loop moves on and the counter only ever climbs. The one on disk is
+    /// written only after the archive is, so being killed between the two
+    /// costs a re-fetch and never a hole.
+    ///
+    /// The first version kept a single ledger and crossed it off at the
+    /// flush. `nextChunk` reads the front of the queue, and nothing left the
+    /// front until 250 had been fetched, so it handed back the same fifty ids
+    /// five times over: every chunk was downloaded five times, the counter
+    /// climbed to 250 and fell back to 50 each time the flush caught up, and
+    /// Gmail, asked for everything five times, started refusing.
     private func drain(_ start: ImportLedger, quietly: Bool) async {
+        // The system allows a little more time after the person leaves. Long
+        // enough for the chunk in flight and the write behind it, so putting
+        // the phone down does not undo the last half minute.
+        let grace = UIApplication.shared.beginBackgroundTask(withName: "mail.import")
+        defer { if grace != .invalid { UIApplication.shared.endBackgroundTask(grace) } }
+
         var ledger = start
         // A resume builds on the mail already here rather than fetching it
         // twice.
         var collected = messages
-        // Fetched, not yet written. These stay uncrossed in the ledger until
-        // they are, so being killed here costs a re-fetch and not a hole.
+        // Landed, not yet on disk.
         var held: [Message] = []
-        var heldIDs: [String] = []
-        // Chunks that refused this run. They stay pending for a later launch.
+        // Ids Gmail did not hand over. A first miss is usually a rate limit
+        // and is tried again at the back of the queue; a second miss is left
+        // for a later launch rather than tried all afternoon.
+        var missedOnce = Set<String>()
         var refused = Set<String>()
 
         if !quietly {
@@ -307,54 +336,60 @@ final class MailStore {
         }
 
         while let chunk = ledger.nextChunk(Self.importPageSize) {
-            // Back round to chunks already tried and failed: everything left
-            // has had its turn, so stop rather than spin.
+            // Back round to ids already tried twice: everything left has had
+            // its turn, so stop rather than spin.
             if chunk.allSatisfy(refused.contains) { break }
 
             guard let token = try? await AuthService.currentGmailAccessToken() else { break }
 
-            guard let fetched = await Self.retrying({
+            let fetched = await Self.retrying({
                 try await GmailService.messages(ids: chunk, accessToken: token)
-            }) else {
-                refused.formUnion(chunk)
-                ledger.postpone(chunk)
-                continue
-            }
+            }) ?? []
+
+            // Only what actually arrived is crossed off. A message Gmail
+            // refused mid-chunk used to be marked done along with the rest,
+            // and was never asked for again.
+            let landed = Set(fetched.compactMap(\.remoteID))
+            let missing = chunk.filter { !landed.contains($0) }
 
             held += fetched
-            heldIDs += chunk
+            ledger.complete(chunk.filter(landed.contains))
 
-            if !quietly {
-                importProgress = .importing(
-                    done: ledger.done + heldIDs.count, total: ledger.total
-                )
+            if !missing.isEmpty {
+                for id in missing where !missedOnce.insert(id).inserted {
+                    refused.insert(id)
+                }
+                ledger.postpone(missing)
+                // A miss is usually Gmail asking for a moment. Give it one.
+                try? await Task.sleep(for: .seconds(1))
             }
 
-            // Write, then cross off. That order is the whole guarantee.
-            if heldIDs.count >= Self.importFlushEvery {
+            if !quietly {
+                importProgress = .importing(done: ledger.done, total: ledger.total)
+            }
+
+            // Write, then let the disk catch up. That order is the whole
+            // guarantee.
+            if held.count >= Self.importFlushEvery {
                 collected = Self.folding(held, into: collected)
                 await MessageArchive.save(collected)
-                ledger.complete(heldIDs)
                 ledger.save()
                 held = []
-                heldIDs = []
             }
         }
 
         if !quietly { importProgress = .saving }
 
-        // Keyed on the ids, not the messages. A chunk Gmail answered with
-        // nothing still has to be crossed off, or pending never shrinks and
-        // the loop has nothing to end it.
-        if !heldIDs.isEmpty {
+        if !held.isEmpty {
             collected = Self.folding(held, into: collected)
-            ledger.complete(heldIDs)
         }
         await MessageArchive.save(collected)
 
         // Everything arrives at once, after the progress screen has said it
-        // is finishing. One layout pass instead of twenty.
-        messages = collected
+        // is finishing. One layout pass instead of twenty. Folded rather than
+        // assigned: mail that a catch-up or a search brought in while this
+        // ran is not thrown away by it.
+        messages = Self.folding(collected, into: messages)
         applyLocalReadState()
         nextPageToken = nil
 
@@ -607,14 +642,16 @@ final class MailStore {
             .prefix(limit)
             .map(\.message)
 
-        // The three newest, always, whatever they scored.
+        // The newest, always, whatever they scored.
         //
         // "What was the last email I got" is a question about order, not
         // relevance, and ranking by relevance answered it with whatever
         // happened to be most urgent: the newest message was not in the
         // digest at all, so the model named the top of a list it had been
-        // handed and got it wrong with complete confidence.
-        let newest = messages(in: .inbox).prefix(3)
+        // handed and got it wrong with complete confidence. Ten rather than
+        // three, because "my last ten emails" is the same question with a
+        // number in it, and the model can only show what it was handed.
+        let newest = messages(in: .inbox).prefix(Self.newestInContext)
 
         var seen = Set<Message.ID>()
         return (Array(newest) + best)

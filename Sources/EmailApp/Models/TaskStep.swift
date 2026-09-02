@@ -55,6 +55,39 @@ struct TaskStep: Equatable, Codable, Identifiable {
         TaskStep(kind: .understanding, detail: "Working out what would answer this")
     }
 
+    /// The model, asked again after a look came back empty. A different
+    /// promise from the first "working out": it now knows what is not there.
+    static func rethinking() -> TaskStep {
+        TaskStep(kind: .understanding, detail: "Thinking about what else the email might say")
+    }
+
+    /// Walking back to the start of the account for the earliest match. The
+    /// date is read off the oldest message found, never typed here.
+    ///
+    /// `reachedStart` is false when the walk hit its ceiling before the
+    /// account ran out, so the oldest here may not be the oldest there is.
+    /// Saying so is what stops "you joined in 2022" being stated over an
+    /// account that goes back further.
+    static func wentBack(_ query: String, found: [Message], reachedStart: Bool) -> TaskStep {
+        let what = "Went back for the first \u{201C}\(query)\u{201D}"
+        guard let oldest = found.min(by: { $0.date < $1.date }) else {
+            return TaskStep(kind: .searching, detail: "\(what) \u{2014} nothing")
+        }
+        let when = oldest.date.formatted(date: .abbreviated, time: .omitted)
+        return TaskStep(
+            kind: .searching,
+            detail: reachedStart
+                ? "\(what) \u{2014} \(when)"
+                : "\(what) \u{2014} stopped at \(when), there is older"
+        )
+    }
+
+    /// Gmail could not be asked. Different from "nothing": nothing means it
+    /// looked and the mail is not there, this means it never got to look.
+    static func unreachable(_ query: String) -> TaskStep {
+        TaskStep(kind: .searching, detail: "Could not reach Gmail for \u{201C}\(query)\u{201D}")
+    }
+
     /// The count comes from the results, never from the caller.
     static func searched(_ query: String, found: [Message]) -> TaskStep {
         let outcome = found.isEmpty

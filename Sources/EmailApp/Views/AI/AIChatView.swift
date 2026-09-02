@@ -565,7 +565,10 @@ struct AIChatView: View {
             .suffix(10)
             .map { (role: $0.role == .user ? "user" : "assistant", content: $0.text) }
 
-        turns.append(.thinking)
+        // The trail from the first moment, on every question. "Thinking" with
+        // three dots was what plain questions showed while searches got the
+        // trail, so the same app looked like two apps.
+        turns.append(.working(.understanding()))
         let pendingID = turns.last?.id
         let started = Date.now
 
@@ -619,24 +622,45 @@ struct AIChatView: View {
                     appendDelta(pendingID, fragment)
                 }
 
-                let hypotheses = SearchRequest.extract(from: currentText(of: pendingID))
-                guard !hypotheses.isEmpty, hopsLeft > 0 else { break }
+                guard let request = SearchRequest.extract(from: currentText(of: pendingID)),
+                      hopsLeft > 0 else { break }
 
                 // What streamed in was the request, not an answer. Showing
                 // "SEARCH: upwork welcome" to the reader is showing them the
                 // plumbing.
                 clearText(of: pendingID)
-                begin(pendingID, .understanding())
 
-                let report = await mail.investigate(hypotheses)
+                let report = await mail.investigate(request)
                 record(pendingID, report.steps)
 
-                searchedFor = report.answered ?? hypotheses.first
+                searchedFor = report.answered ?? request.queries.first
                 var seen = Set<Message.ID>(found.map(\.id))
                 found += report.found.filter { seen.insert($0.id).inserted }
 
                 var known = Set<Message.ID>(context.map(\.id))
                 context += report.found.filter { known.insert($0.id).inserted }
+                // Newest first, still. The prompt promises the model that the
+                // first message is the most recent, and a search result
+                // appended at the end would quietly make that false.
+                context.sort { $0.date > $1.date }
+                // Within what the server will read. What was found stays,
+                // whatever its date; it is the oldest recent mail that goes,
+                // because a 2019 welcome email sorted to the bottom and then
+                // cut off the end would be a search that found nothing.
+                if context.count > Self.contextCeiling {
+                    let keep = Set(found.map(\.id))
+                    var spare = context.count - Self.contextCeiling
+                    context = context.reversed().filter { message in
+                        guard spare > 0, !keep.contains(message.id) else { return true }
+                        spare -= 1
+                        return false
+                    }.reversed()
+                }
+
+                // What the model is doing next is the step left open: reading
+                // what came back, or, when nothing did, deciding what else the
+                // email might have said. Counted from what was found.
+                begin(pendingID, found.isEmpty ? .rethinking() : .reading(found))
 
                 hopsLeft -= 1
             }
@@ -674,6 +698,11 @@ struct AIChatView: View {
     /// How many times the model may ask to look before it has to answer.
     /// Three: enough to guess, see what came back, and guess better.
     static let searchHops = 3
+
+    /// The most messages a question carries to the model. The server reads
+    /// this many and no more, so the app decides which ones rather than
+    /// letting the cut fall wherever the list happened to end.
+    static let contextCeiling = 40
 
     /// The emails the model put on screen in this turn, if any.
     private func shown(in id: ChatMessage.ID?) -> [Message]? {
@@ -738,8 +767,13 @@ struct AIChatView: View {
     /// every token turns a smooth stream into a stutter.
     private func appendDelta(_ id: ChatMessage.ID?, _ fragment: String) {
         guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
-        turns[index].isPending = false
         turns[index].text += fragment
+        // The trail stays up while what has arrived could still turn into a
+        // request to look. "SEARCH: upwork welcome" flashing on screen for
+        // the second before the search replaced it was the plumbing showing.
+        if !SearchRequest.couldBecomeRequest(turns[index].text) {
+            turns[index].isPending = false
+        }
     }
 
     /// The answer is complete. Blocks land now, so cards do not pop in

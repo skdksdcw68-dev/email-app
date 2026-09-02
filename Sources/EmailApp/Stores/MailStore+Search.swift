@@ -81,42 +81,6 @@ extension MailStore {
         }
     }
 
-    /// The same search, tried progressively less strictly.
-    ///
-    /// Gmail joins bare words with AND. "Upwork welcome registration account
-    /// created" therefore means *all five* words in one email, and the actual
-    /// Welcome to Upwork message contains neither "registration" nor
-    /// "created" -- so a search that ran perfectly was guaranteed to find
-    /// nothing, and the answer came back "not in your mail" about an email
-    /// sitting in the account.
-    ///
-    /// So: the exact query first, then the same words as alternatives, then
-    /// the single most distinctive one. Something too broad can be read; a
-    /// perfect query matching nothing cannot.
-    static func widening(from planned: String?, terms: [String], raw: String) -> [String] {
-        var attempts: [String] = []
-        if let planned, !planned.isEmpty { attempts.append(planned) }
-
-        let source = terms.isEmpty ? raw.components(separatedBy: " ") : terms
-        let words = source
-            .map { $0.trimmingCharacters(in: CharacterSet.alphanumerics.inverted) }
-            .filter { $0.count > 2 }
-        guard !words.isEmpty else { return attempts }
-
-        if words.count > 1 {
-            attempts.append(words.joined(separator: " OR "))
-        }
-        // The longest word is the one carrying the question: "registration"
-        // rather than "account". On its own it is broad, and broad is
-        // readable.
-        if let longest = words.max(by: { $0.count < $1.count }) {
-            attempts.append(longest)
-        }
-
-        var seen = Set<String>()
-        return attempts.filter { seen.insert($0.lowercased()).inserted }
-    }
-
     func clearSearch() {
         searchResults = []
         searchTerms = []

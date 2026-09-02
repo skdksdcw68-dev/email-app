@@ -90,14 +90,14 @@ struct ChatTurnView: View {
                     // cannot see -- and when nothing came, it says that, so
                     // "I can't find it" reads as looked-and-missed rather
                     // than never-looked.
-                    if let note = turn.searchNote, !note.isEmpty {
-                        SourceList(
-                            sources: turn.sources,
-                            searchNote: note,
-                            // Folded when the answer already shows the email
-                            // it found; open when the results are the answer.
-                            startsExpanded: !turn.showsMessages
-                        )
+                    //
+                    // Not when the answer already shows an email. The card
+                    // is the source, and "Upwork welcome · 8" underneath it,
+                    // opening onto eight emails from anyone, was the app
+                    // listing what it had read rather than what it found.
+                    // The folded trail above keeps the path auditable.
+                    if let note = turn.searchNote, !note.isEmpty, !turn.showsMessages {
+                        SourceList(sources: turn.sources, searchNote: note, startsExpanded: true)
                     }
                 }
             }

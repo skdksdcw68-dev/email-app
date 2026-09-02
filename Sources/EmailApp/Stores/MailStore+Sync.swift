@@ -33,7 +33,7 @@ extension MailStore {
     /// cursor is older than the week or so of history Gmail keeps.
     @discardableResult
     func catchUp() async -> [Message] {
-        guard isConnected, !isRefreshing else { return [] }
+        guard isConnected, !isRefreshing, !importProgress.isRunning else { return [] }
         guard let cursor = syncCursor else {
             await refresh()
             await rememberCursor()

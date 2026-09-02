@@ -99,9 +99,11 @@ enum AnswerFences {
         return (tidied, blocks)
     }
 
-    /// The most a show block will draw. Past this it stops being a choice
-    /// and becomes the inbox again.
-    static let showLimit = 8
+    /// The most a show block will draw. A guard against a runaway block, not
+    /// a design choice: how many to show is the reader's call, and "list my
+    /// last ten" answered with eight was the app overruling them. The model
+    /// can only number what it was given, which is the real bound.
+    static let showLimit = 40
 
     // MARK: - Blocks
 
