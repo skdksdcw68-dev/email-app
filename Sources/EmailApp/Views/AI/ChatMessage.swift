@@ -25,9 +25,9 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     var draft: ChatDraft? = nil
     /// Shown as the thinking state until the answer lands.
     var isPending = false
-    /// What the pending indicator says: "Thinking" by default, "Writing to
-    /// Sara" while a draft is being produced.
-    var pendingLabel: String? = nil
+    /// What Maily actually did on this turn, in order. Live while it works,
+    /// kept afterwards so the path to an answer stays auditable.
+    var steps: [TaskStep] = []
     var failed = false
     /// What an action actually did, once it has done it.
     var receipt: ChatReceipt? = nil
@@ -52,8 +52,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         ChatMessage(role: .assistant, text: "", isPending: true)
     }
 
-    static func working(_ label: String) -> ChatMessage {
-        ChatMessage(role: .assistant, text: "", isPending: true, pendingLabel: label)
+    static func working(_ step: TaskStep) -> ChatMessage {
+        ChatMessage(role: .assistant, text: "", steps: [step], isPending: true)
     }
 
     static func say(_ text: String) -> ChatMessage {

@@ -507,14 +507,22 @@ function askMessages(question: string, body: Record<string, unknown>) {
   // the literal words "welcome to upwork" before anything would search,
   // because no word list knows that a registration date lives in a welcome
   // email. The model knows. So it decides, and the app does the looking.
-  const searchRule = body.may_search === false
+  // How many more times the model may ask to look before it has to answer.
+  // Absent or zero means this is the last word.
+  const hopsLeft = typeof body.hops_left === "number" ? body.hops_left : 0;
+  // The app says so. It cannot be inferred from the history: the SEARCH
+  // line is stripped from the turn before the reader ever sees it, so it is
+  // never in the conversation that comes back.
+  const hasSearched = body.searched === true;
+
+  const searchRule = hopsLeft <= 0
     ? `You have already been given the results of a search; they are in the list
-above alongside their recent mail. Answer from what is here. If one of the
-messages is the thing they were looking for, show it with a show block and put
-the answer to their question in the sentence beside it. If it genuinely is not
-here, say "Nothing in your mail matched that." in one plain sentence, not
-"recent mail": the whole account was searched. Do not list what is here
-instead.`
+above alongside their recent mail. This is your last look, so answer from what
+is here. If one of the messages is the thing they were looking for, show it
+with a show block and put the answer to their question in the sentence beside
+it. If it genuinely is not here, say "Nothing in your mail matched that." in
+one plain sentence, not "recent mail": the whole account was searched. Do not
+list what is here instead.`
     : `The messages above are only the recent mail on their phone, roughly three
 months of it. Their account holds years more, and you can reach it.
 
@@ -522,21 +530,32 @@ If what they are asking for is not in the messages above, and it is the kind
 of thing that would be in an email somewhere, do not tell them you cannot find
 it. Reply with exactly one line and nothing else:
 
-SEARCH: the words to look for
+SEARCH: words | different words | different words again
 
-Two or three words. Never more.
+Think about what the evidence would actually look like, not about how they
+phrased the question. They asked a question; the email was written by somebody
+who had never heard it. "When was my Upwork account created" is answered by an
+email that says none of those words, so the hypotheses are the wordings a
+welcome email might really use:
 
-Every word you add makes the search stricter, not better: they are joined
-with AND, so five words demands an email containing all five and will find
-nothing. Write only the words that would actually appear in the email itself.
-"When did I register on Upwork" becomes SEARCH: upwork welcome, because a
-registration date lives in a welcome email and the word "registration" is
-probably nowhere in it.
+SEARCH: upwork welcome | welcome to upwork | upwork account created
 
-Not a question, not a sentence, not Gmail operators.
+Rules for each alternative:
+- Two or three words. Never more. They are joined with AND, so every extra
+  word makes it stricter and a five word guess matches nothing.
+- Only words that would appear in the email itself. Not "registration", which
+  is your word for it, unless the email would really say it.
+- Two to four alternatives, separated by "|", best guess first.
+- No questions, no sentences, no Gmail operators.
 
-Use it whenever looking would help. It costs one lookup and it is the whole
-difference between an assistant and a search box that has already given up.
+You have ${hopsLeft} ${hopsLeft === 1 ? "look" : "looks"} left. ${
+      hasSearched
+        ? `A previous search has already run and what it found is in the list
+above. If it missed, do not repeat the same words: think about what other
+wording the email would have used, and try those instead.`
+        : `Use it whenever looking would help.`
+    }
+
 Never explain that you are about to search: the line, and nothing else.`;
 
   // No digest and no inbox line means the app decided this has nothing to do

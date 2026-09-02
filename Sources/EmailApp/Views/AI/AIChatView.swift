@@ -578,70 +578,67 @@ struct AIChatView: View {
         // is agreeing to.
         var context = mail.context(for: question, following: history.last(where: { $0.role == "assistant" })?.content)
 
-        // Set only when the model asks to look beyond the mail on this phone.
+        // Filled as the investigation goes, and only by it.
         //
-        // The app used to decide that itself first, from whether any word in
-        // the question turned up in a subject. "The last email I got was
-        // what" lost "email" and "what" as stop words, was left with "last",
-        // found no subject containing it, and went to Gmail with the
-        // previous turns glued on -- which searched the whole account for
-        // "Hi". No rule about words knows what a question means. The model
-        // does, and it says SEARCH: when it needs to.
+        // The app used to decide when to search from whether any word in the
+        // question turned up in a subject. "The last email I got was what"
+        // lost "email" and "what" as stop words, was left with "last", found
+        // no subject containing it, and searched the whole account for "Hi".
+        // No rule about words knows what a question means. The model does,
+        // and it says SEARCH: when it needs to.
         var searchedFor: String?
         var found: [Message] = []
 
         do {
-            // Streamed, so the answer types itself out instead of landing
-            // whole after a long silence.
-            try await AIService.askStreaming(
-                question: question,
-                context: context,
-                history: history,
-                // Fifty tokens, and it lets the model answer about piles it
-                // was not shown. Withheld only when nothing about this is
-                // about mail, which is what keeps an aside cheap.
-                inbox: context.isEmpty ? nil : mail.tagSummary,
-                signedInAs: user.account?.displayName,
-                tone: user.tonePreference,
-                memories: memory.prompt
-            ) { fragment in
-                appendDelta(pendingID, fragment)
-            }
+            var hopsLeft = Self.searchHops
 
-            // The model can ask to look further instead of answering.
+            // One pass per hop. The model either answers, or asks to look
+            // and gets asked again with what came back.
             //
-            // Every keyword rule that decided this on its own was a guess at
-            // what somebody would type, and each one broke on the next
-            // phrasing: "find my upwork registration" needed the exact words
-            // "welcome to upwork" before anything would look. The model knows
-            // that a welcome email is where a registration date lives. It is
-            // the only thing here that does, so it gets to decide.
-            if let wanted = SearchRequest.extract(from: currentText(of: pendingID)) {
-                setPending(pendingID, label: "Looking through all your mail")
-                clearText(of: pendingID)
-
-                let older = await mail.olderMail(matching: wanted)
-                searchedFor = older.searchedFor ?? wanted
-                found = older.messages
-
-                var seen = Set<Message.ID>(context.map(\.id))
-                context += found.filter { seen.insert($0.id).inserted }
-
-                setPending(pendingID, label: found.isEmpty ? "Reading" : "Found \(found.count). Reading")
+            // One hop was not enough. A first guess at the words that would
+            // be in an email is often wrong, and the old loop had exactly one
+            // guess before it had to answer -- so "when did I register" came
+            // back as "not in your mail" the moment the first query missed.
+            // Three hops is an investigation: guess, see what came back,
+            // guess better.
+            while true {
                 try await AIService.askStreaming(
                     question: question,
                     context: context,
                     history: history,
-                    inbox: mail.tagSummary,
+                    // Fifty tokens, and it lets the model answer about piles
+                    // it was not shown. Withheld only when nothing about this
+                    // is about mail, which is what keeps an aside cheap.
+                    inbox: context.isEmpty ? nil : mail.tagSummary,
                     signedInAs: user.account?.displayName,
                     tone: user.tonePreference,
                     memories: memory.prompt,
-                    // Second pass: it has been given what it asked for, so
-                    // asking again would be a loop.
-                    maySearch: false
+                    hopsLeft: hopsLeft,
+                    hasSearched: searchedFor != nil
                 ) { fragment in
                     appendDelta(pendingID, fragment)
                 }
+
+                let hypotheses = SearchRequest.extract(from: currentText(of: pendingID))
+                guard !hypotheses.isEmpty, hopsLeft > 0 else { break }
+
+                // What streamed in was the request, not an answer. Showing
+                // "SEARCH: upwork welcome" to the reader is showing them the
+                // plumbing.
+                clearText(of: pendingID)
+                begin(pendingID, .understanding())
+
+                let report = await mail.investigate(hypotheses)
+                record(pendingID, report.steps)
+
+                searchedFor = report.answered ?? hypotheses.first
+                var seen = Set<Message.ID>(found.map(\.id))
+                found += report.found.filter { seen.insert($0.id).inserted }
+
+                var known = Set<Message.ID>(context.map(\.id))
+                context += report.found.filter { known.insert($0.id).inserted }
+
+                hopsLeft -= 1
             }
 
             finish(pendingID, context: context, searchNote: searchedFor, found: found)
@@ -674,6 +671,10 @@ struct AIChatView: View {
         Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
+    /// How many times the model may ask to look before it has to answer.
+    /// Three: enough to guess, see what came back, and guess better.
+    static let searchHops = 3
+
     /// The emails the model put on screen in this turn, if any.
     private func shown(in id: ChatMessage.ID?) -> [Message]? {
         guard let id, let turn = turns.first(where: { $0.id == id }) else { return nil }
@@ -698,12 +699,39 @@ struct AIChatView: View {
         turns[index].isPending = true
     }
 
-    /// Changes what the thinking indicator says while it is still thinking.
-    /// "Searching all your mail" is a different wait from "Thinking", and a
-    /// wait nobody can name feels twice as long.
-    private func setPending(_ id: ChatMessage.ID?, label: String) {
+    /// Starts a step, leaving it open. The trail shows the open one pulsing,
+    /// which is what tells somebody the app has not stalled -- and unlike a
+    /// spinner, it says what it is waiting on.
+    private func begin(_ id: ChatMessage.ID?, _ step: TaskStep) {
         guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
-        turns[index].pendingLabel = label
+        withAnimation(.easeOut(duration: 0.2)) {
+            close(&turns[index].steps)
+            turns[index].steps.append(step)
+        }
+    }
+
+    /// Adds steps that already happened, each one closed.
+    ///
+    /// These come back from the investigation rather than being written
+    /// here, so what the trail claims and what the app did cannot drift
+    /// apart. There is no way from this file to add a step that says a
+    /// search found twelve emails.
+    private func record(_ id: ChatMessage.ID?, _ steps: [TaskStep]) {
+        guard let id, let index = turns.firstIndex(where: { $0.id == id }), !steps.isEmpty else { return }
+        withAnimation(.easeOut(duration: 0.2)) {
+            close(&turns[index].steps)
+            turns[index].steps += steps.map { step in
+                var step = step
+                step.isDone = true
+                return step
+            }
+        }
+    }
+
+    private func close(_ steps: inout [TaskStep]) {
+        for index in steps.indices where !steps[index].isDone {
+            steps[index].isDone = true
+        }
     }
 
     /// Appends a fragment as it arrives. No animation on each one: animating
@@ -743,6 +771,7 @@ struct AIChatView: View {
         // app attached what it had rather than what was asked for.
         let structured = AnswerFences.extract(from: text, messages: context)
 
+        close(&turns[index].steps)
         withAnimation(.easeOut(duration: 0.25)) {
             turns[index].text = structured.prose
             turns[index].blocks = structured.blocks
@@ -848,7 +877,7 @@ struct AIChatView: View {
     @MainActor
     private func write(to contact: Contact, replyingTo original: Message?, instruction: String) async {
         let name = firstName(of: contact)
-        turns.append(.working("Writing to \(name)"))
+        turns.append(.working(.writing(to: name)))
         let pendingID = turns.last?.id
 
         isWorking = true

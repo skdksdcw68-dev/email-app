@@ -241,9 +241,13 @@ enum AIService {
         signedInAs: String? = nil,
         tone: String? = nil,
         memories: String? = nil,
-        /// Whether the model may answer with a request to search instead of
-        /// an answer. False on the second pass, or it would loop.
-        maySearch: Bool = true,
+        /// How many more times the model may ask to search instead of
+        /// answering. Counts down each hop, so an investigation can take
+        /// two or three passes and still cannot run forever.
+        hopsLeft: Int = 2,
+        /// Whether a search has already run for this question. Changes the
+        /// advice: a second guess should not repeat the first one's words.
+        hasSearched: Bool = false,
         onDelta: @MainActor (String) -> Void
     ) async throws {
         // 300, not 400. Twelve messages at 400 characters is most of what a
@@ -276,7 +280,8 @@ enum AIService {
         if let signedInAs, !signedInAs.isEmpty { payload["user"] = signedInAs }
         if let tone, !tone.isEmpty { payload["tone"] = tone }
         if let memories, !memories.isEmpty { payload["memories"] = memories }
-        payload["may_search"] = maySearch
+        payload["hops_left"] = max(0, hopsLeft)
+        payload["searched"] = hasSearched
 
         var request = URLRequest(url: SupabaseConfig.url.appending(path: "functions/v1/ai"))
         request.httpMethod = "POST"

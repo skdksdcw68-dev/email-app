@@ -1,42 +1,57 @@
 import Foundation
 
-/// The model asking to look further before it answers.
+/// The model asking to look, instead of answering.
 ///
-/// Every rule that decided this on the app's behalf was a guess at what
-/// somebody would type, and each one broke on the next phrasing. "Find my
-/// Upwork registration" needed the words "welcome to upwork" before anything
-/// would search, because a keyword table cannot know that a welcome email is
-/// where a registration date lives. The model does know that. So instead of
-/// guessing for it, the app gives it a way to say "not here, look further"
-/// and does the looking.
+///     SEARCH: upwork welcome | upwork verify | joined upwork
 ///
-/// The contract is one line and nothing else:
+/// One line, and the app does the looking. The alternatives after the first
+/// are the point. A single query is a guess, and Gmail joins bare words with
+/// AND, so a guess that is slightly wrong returns nothing at all and the
+/// answer comes back "not in your mail" about an email sitting in the
+/// account. Three guesses are an investigation: the words a welcome email
+/// actually uses are one of them.
 ///
-///     SEARCH: upwork welcome registration
-///
-/// Same shape as the ```` ```email ```` block: a small, checkable thing the
-/// model can emit that the app knows how to act on.
+/// The model writes these rather than the app, because knowing that a
+/// registration date lives in a welcome email is meaning, not string
+/// matching. No word list gets there. See the `SEARCH` rules in the `ask`
+/// function for what it is told.
 enum SearchRequest {
 
     static let marker = "SEARCH:"
 
-    /// The terms to look for, or nil when this is an ordinary answer.
-    ///
-    /// Deliberately strict about position. A model mentioning the word
-    /// "search" in the middle of a sentence is talking, not asking, and
-    /// treating that as a request would send the app off to Gmail in the
-    /// middle of a perfectly good answer.
-    static func extract(from text: String) -> String? {
+    /// At most this many alternatives per hop. Each one is a Gmail request,
+    /// and a model asked for "several" will happily write twelve.
+    static let maxHypotheses = 4
+
+    /// The queries to try, best first, or nothing if this is an answer.
+    static func extract(from text: String) -> [String] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix(marker) else { return nil }
+        guard trimmed.hasPrefix(marker) else { return [] }
 
-        let terms = trimmed
+        let line = trimmed
             .dropFirst(marker.count)
-            // One line. Anything after is the model carrying on regardless.
             .prefix { $0 != "\n" }
-            .trimmingCharacters(in: CharacterSet(charactersIn: " \"'`."))
 
-        guard terms.count >= 2 else { return nil }
-        return String(terms.prefix(200))
+        var seen = Set<String>()
+        let hypotheses = line
+            .split(separator: "|")
+            .map { piece in
+                piece.trimmingCharacters(in: CharacterSet(charactersIn: " \"'`.,"))
+            }
+            .filter { candidate in
+                // Two characters is the shortest thing worth asking Gmail
+                // about, and a repeat costs a request for nothing.
+                candidate.count >= 2 && seen.insert(candidate.lowercased()).inserted
+            }
+            .prefix(maxHypotheses)
+            .map { String($0.prefix(200)) }
+
+        return Array(hypotheses)
+    }
+
+    /// Whether the model asked to search rather than answering. Used to
+    /// decide whether what streamed in is prose worth showing.
+    static func isRequest(_ text: String) -> Bool {
+        !extract(from: text).isEmpty
     }
 }

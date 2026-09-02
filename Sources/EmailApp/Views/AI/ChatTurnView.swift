@@ -33,12 +33,26 @@ struct ChatTurnView: View {
         case .assistant:
             VStack(alignment: .leading, spacing: 12) {
                 if turn.isPending {
-                    ThinkingIndicator(label: turn.pendingLabel ?? "Thinking")
+                    // The trail once there is one. Before the first step the
+                    // app genuinely has nothing to report, and inventing a
+                    // line to fill the gap is the thing this replaced.
+                    if turn.steps.isEmpty {
+                        ThinkingIndicator()
+                    } else {
+                        TaskTrail(steps: turn.steps)
+                    }
                 } else if turn.failed {
                     Label(turn.text, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
                         .foregroundStyle(.red)
                 } else {
+                    // What it did, above what it concluded, folded away.
+                    // More than one step means there was a path worth being
+                    // able to check; a single step is not a story.
+                    if turn.steps.count > 1 {
+                        TaskTrailSummary(steps: turn.steps)
+                    }
+
                     if !turn.text.isEmpty {
                         // No context menu here any more: the prose is a real
                         // text view with the system's own selection and edit
