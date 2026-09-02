@@ -406,8 +406,8 @@ struct AutoReplySetupView: View {
             action: { go(.done) }
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                PreviewBlock(title: "If somebody wrote", body: AutoReplyPreview.incoming(for: config))
-                PreviewBlock(title: "Maily would answer", body: AutoReplyPreview.reply(for: config), isReply: true)
+                PreviewBlock(title: "If somebody wrote", text: AutoReplyPreview.incoming(for: config))
+                PreviewBlock(title: "Maily would answer", text: AutoReplyPreview.reply(for: config), isReply: true)
 
                 if !config.activeInstructions.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {

@@ -233,7 +233,7 @@ struct ReviewCard: View {
 /// An email, drawn as an email rather than described as one.
 struct PreviewBlock: View {
     let title: String
-    let body: String
+    let text: String
     var isReply = false
 
     var body: some View {
@@ -241,7 +241,7 @@ struct PreviewBlock: View {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            Text(body)
+            Text(text)
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
