@@ -181,7 +181,7 @@ struct AutoReplySetupView: View {
     /// The questions that belong to this persona, and only those.
     private var workFields: [(label: String, hint: String, text: Binding<String>)] {
         let business = Binding(get: { config.business }, set: { config.business = $0 })
-        switch config.persona {
+        return switch config.persona {
         case .founder:
             [("Company name", "Acme", business.brand),
              ("What does it do?", "In your own words.", business.whatItDoes),
