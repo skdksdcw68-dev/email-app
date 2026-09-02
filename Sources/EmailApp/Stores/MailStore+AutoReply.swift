@@ -126,15 +126,30 @@ extension MailStore {
                 return
             }
 
-            guard result.confidence >= Self.autoReplyConfidenceFloor else {
+            // The reply read back against what they approved, on the
+            // device. The model was told what it may say; this is the part
+            // that does not take its word for it.
+            let verified = AutoReplyVerification.check(
+                reply: result.reply,
+                approved: config.business.filled.map(\.value).joined(separator: "\n"),
+                boundaries: AutoReplyConfig.Boundary.allCases
+                    .filter(config.mustAsk.contains)
+                    .map(\.title),
+                confidence: result.confidence,
+                floor: Self.autoReplyConfidenceFloor
+            )
+
+            guard verified.isClear else {
                 queue.record(decision(
                     for: message,
                     outcome: .escalated,
-                    reason: "Maily could answer this but wasn't confident enough, so it's yours.",
+                    reason: verified.problems.first ?? "Maily wasn't sure enough about this one.",
                     reply: result.reply,
                     evidence: result.evidence,
-                    withheld: result.withheld
+                    withheld: result.withheld + verified.problems,
+                    verification: verified
                 ))
+                Analytics.record(.autoReplyHeldBack, ["problems": .int(verified.problems.count)])
                 return
             }
 
@@ -144,7 +159,8 @@ extension MailStore {
                 reason: result.reason.isEmpty ? "Answered from what you approved." : result.reason,
                 reply: result.reply,
                 evidence: result.evidence,
-                withheld: result.withheld
+                withheld: result.withheld,
+                verification: verified
             ))
 
             Analytics.record(.autoReplyDrafted, [
@@ -176,7 +192,8 @@ extension MailStore {
         reason: String,
         reply: String? = nil,
         evidence: [String] = [],
-        withheld: [String] = []
+        withheld: [String] = [],
+        verification: AutoReplyVerification? = nil
     ) -> AutoReplyDecision {
         AutoReplyDecision(
             messageID: message.remoteID ?? message.id.uuidString,
@@ -187,7 +204,8 @@ extension MailStore {
             reason: reason,
             reply: reply,
             evidence: evidence,
-            withheld: withheld
+            withheld: withheld,
+            verification: verification
         )
     }
 

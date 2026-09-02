@@ -80,6 +80,9 @@ enum Analytics {
         /// was to, never what it said.
         case autoReplyDrafted = "auto_reply_drafted"
         case autoReplySent = "auto_reply_sent"
+        /// The device check refused a reply the model was happy with. The
+        /// count of problems only -- never what they were.
+        case autoReplyHeldBack = "auto_reply_held_back"
         /// The second tier found something in a message. Count and
         /// direction only; never what it found.
         case factsExtracted = "facts_extracted"
