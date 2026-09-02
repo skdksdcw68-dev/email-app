@@ -29,19 +29,32 @@ import Foundation
 /// there. See the search rules in the `ask` function for what it is told.
 struct SearchRequest: Equatable {
 
-    enum Kind: Equatable {
+    enum Kind: Equatable, CaseIterable {
         /// Hypotheses about the words in the email. Each is a Gmail query.
         case wording
         /// The earliest mail matching each query, back to the start of the
         /// account.
         case earliest
+        /// Numbers of messages already in front of it, wanted in full.
+        ///
+        /// The digest carries the opening of each message, which is enough
+        /// to know what a message is and not enough to answer from it. The
+        /// ask in an email is often in the last paragraph, after the context
+        /// that explains it. This is how the model says "I can see which one
+        /// it is, now let me actually read it".
+        case opening
 
         var marker: String {
             switch self {
             case .wording: "SEARCH:"
             case .earliest: "OLDEST:"
+            case .opening: "OPEN:"
             }
         }
+
+        /// Whether this asks Gmail for something, or only asks for more of
+        /// what the model already has.
+        var needsGmail: Bool { self != .opening }
     }
 
     let kind: Kind
@@ -57,7 +70,7 @@ struct SearchRequest: Equatable {
     static func extract(from text: String) -> SearchRequest? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        for kind in [Kind.wording, .earliest] where trimmed.hasPrefix(kind.marker) {
+        for kind in Kind.allCases where trimmed.hasPrefix(kind.marker) {
             let line = trimmed
                 .dropFirst(kind.marker.count)
                 .prefix { $0 != "\n" }
@@ -95,8 +108,38 @@ struct SearchRequest: Equatable {
     static func couldBecomeRequest(_ text: String) -> Bool {
         let head = text.drop { $0.isWhitespace }
         guard !head.isEmpty else { return true }
-        return [Kind.wording, .earliest].contains { kind in
+        return Kind.allCases.contains { kind in
             head.hasPrefix(kind.marker) || kind.marker.hasPrefix(head)
         }
     }
+}
+
+extension SearchRequest {
+
+    /// For an `OPEN:` request, the message numbers it named, as indexes into
+    /// the list the model was given.
+    ///
+    /// Only the first number in each piece counts, so "3. the invoice" is
+    /// message three rather than three and a stray digit from the words after
+    /// it. Anything outside the list is dropped: a model that asks for
+    /// message ninety when it was shown twelve has miscounted, and inventing
+    /// a message to satisfy it would be worse than ignoring it.
+    func numbers(within count: Int) -> [Int] {
+        guard kind == .opening, count > 0 else { return [] }
+        var seen = Set<Int>()
+        return queries
+            .flatMap { $0.split(separator: ",") }
+            .compactMap { piece in
+                let digits = piece.drop { !$0.isNumber }.prefix { $0.isNumber }
+                return Int(digits)
+            }
+            .filter { $0 >= 1 && $0 <= count && seen.insert($0).inserted }
+            .prefix(Self.maxOpened)
+            .map { $0 }
+    }
+
+    /// How many messages one OPEN may ask for. Each is a few thousand
+    /// characters; four is a thorough read of a thread, and twelve is the
+    /// digest again with extra steps.
+    static let maxOpened = 4
 }

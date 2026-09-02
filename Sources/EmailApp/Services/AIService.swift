@@ -273,6 +273,9 @@ enum AIService {
         /// on whom, and for what. Numbered against `context`, so the model
         /// can show the message a line points at.
         facts: String? = nil,
+        /// Messages the model asked to read properly. These go at length;
+        /// everything else keeps the opening that says what it is.
+        inFull: Set<Message.ID> = [],
         /// How many more times the model may ask to search instead of
         /// answering. Counts down each hop, so an investigation can take
         /// two or three passes and still cannot run forever.
@@ -285,11 +288,17 @@ enum AIService {
         // 300, not 400. Twelve messages at 400 characters is most of what a
         // question costs, and the opening 300 carries the point of an email.
         let digest = context.map { message in
-            [
-                "from": "\(message.sender.name) <\(message.sender.address)>",
+            let opened = inFull.contains(message.id)
+            return [
+                "from": "(message.sender.name) <(message.sender.address)>",
                 "date": message.fullDate,
                 "subject": message.subject,
-                "body": String(message.body.prefix(300)),
+                // 300 says what a message is. It does not say what it asks
+                // for: the request in an email is usually in the last
+                // paragraph, after the context explaining it. So the model
+                // can name the ones it needs and get them whole.
+                "body": String(message.body.prefix(opened ? Self.openedBodyLimit : 300)),
+                "full": opened ? "yes" : "no",
                 // Whether they have seen it. This is what stops the model
                 // telling somebody to reply to an email they read on Monday
                 // and decided about already.
@@ -356,6 +365,10 @@ enum AIService {
 
     /// "Monday, 1 September 2026" -- the device's own date, in the device's
     /// own locale.
+    /// What a message the model asked to open carries. Enough for the ask
+    /// at the bottom of a long email, short of shipping a thread wholesale.
+    static let openedBodyLimit = 4000
+
     /// Also read by the Auto-Reply runtime, which has the same problem: a
     /// model that does not know the date cannot resolve "by Friday".
     static var todayLine: String {

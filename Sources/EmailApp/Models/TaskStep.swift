@@ -135,3 +135,15 @@ struct TaskStep: Equatable, Codable, Identifiable {
         return "\(stepPart) \u{00B7} \(searchPart)"
     }
 }
+
+extension TaskStep {
+    /// Opening messages it can already see, to read them properly rather
+    /// than from their first three lines.
+    static func readingInFull(_ messages: [Message]) -> TaskStep {
+        let subject = messages.first?.subject ?? ""
+        let detail = messages.count == 1
+            ? "Reading \"\(subject.prefix(48))\" in full"
+            : "Reading \(messages.count) of them in full"
+        return TaskStep(kind: .reading, detail: detail)
+    }
+}

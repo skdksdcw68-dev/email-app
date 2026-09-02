@@ -750,7 +750,10 @@ function askMessages(question: string, body: Record<string, unknown>) {
         `Subject: ${message.subject ?? ""}`,
         `Read: ${message.read ?? "unknown"}`,
         message.tags ? `Tags: ${message.tags}` : "",
-        `${(message.body ?? "").slice(0, 400)}`,
+        // A message the model asked to open comes through whole. Everything
+        // else keeps its opening, which says what the message is without
+        // paying to ship a mailbox.
+        `${(message.body ?? "").slice(0, message.full === "yes" ? 4000 : 400)}`,
       ].filter(Boolean).join("\n")
     )
     .join("\n\n");
@@ -827,7 +830,22 @@ and plain words where you do not: "from:stripe", "from:twitter OR from:x.com",
 "upwork". Do not add words like "welcome": the oldest mail from them is the
 evidence whatever it says.
 
-When the question is about WHAT AN EMAIL SAID, ask by wording:
+When you can SEE the right message but not enough of it, ask to read it:
+
+OPEN: 3
+
+Each message above is shown from its opening only. That is enough to know
+what a message is and often not enough to answer from it: the ask in an
+email usually comes after the paragraph explaining it, the amount is under
+the pleasantries, the date is at the bottom. If the answer is in a message
+you were given and you cannot see it, say OPEN: and the numbers, up to four,
+separated by "|" or commas. You get those messages whole and everything else
+as before. Use this before searching when the thing they asked about is
+plainly one of the messages in front of you -- searching for what you are
+already holding is the slowest way to answer.
+
+When the question is about WHAT AN EMAIL SAID and you cannot see the message
+at all, ask by wording:
 
 SEARCH: words | different words | different words again
 

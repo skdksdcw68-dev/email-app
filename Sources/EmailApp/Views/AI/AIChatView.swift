@@ -589,6 +589,9 @@ struct AIChatView: View {
         // and it says SEARCH: when it needs to.
         var searchedFor: String?
         var found: [Message] = []
+        // Messages the model asked to read properly, carried at length on
+        // every hop after it asked.
+        var opened: Set<Message.ID> = []
 
         do {
             var hopsLeft = Self.searchHops
@@ -617,6 +620,7 @@ struct AIChatView: View {
                     // Numbered against this hop's context, which a search may
                     // have reordered since the last one.
                     facts: FactStore.describe(facts, numbered: context),
+                    inFull: opened,
                     hopsLeft: hopsLeft,
                     hasSearched: searchedFor != nil
                 ) { fragment in
@@ -630,6 +634,20 @@ struct AIChatView: View {
                 // "SEARCH: upwork welcome" to the reader is showing them the
                 // plumbing.
                 clearText(of: pendingID)
+
+                // It can see the right message and needs to actually read it.
+                // Nothing is fetched: the app already holds these, and the
+                // only thing that changes is how much of them goes over.
+                guard request.kind.needsGmail else {
+                    let wanted = request.numbers(within: context.count)
+                        .map { context[$0 - 1] }
+                    guard !wanted.isEmpty else { break }
+
+                    opened.formUnion(wanted.map(\.id))
+                    record(pendingID, [.readingInFull(wanted)])
+                    hopsLeft -= 1
+                    continue
+                }
 
                 let report = await mail.investigate(request)
                 record(pendingID, report.steps)
