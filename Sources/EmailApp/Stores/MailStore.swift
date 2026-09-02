@@ -407,7 +407,7 @@ final class MailStore {
     /// reason to abandon a mailbox. Returning nil rather than throwing is
     /// deliberate: the caller's job is to carry on with the rest.
     static func retrying<T>(
-        _ attempts: Int = 3,
+        attempts: Int = 3,
         _ work: () async throws -> T
     ) async -> T? {
         for attempt in 1...attempts {
