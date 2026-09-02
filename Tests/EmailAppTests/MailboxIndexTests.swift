@@ -214,7 +214,8 @@ final class MailboxIndexTests: XCTestCase {
         PersonPreferences.setImportant(true, for: "sara@x.com")
         mail.notePreferencesChanged()
 
-        XCTAssertEqual(mail.people.filter(.isImportant).map(.contact.address), ["sara@x.com"])
+        let important = mail.people.filter { $0.isImportant }
+        XCTAssertEqual(important.map(\.contact.address), ["sara@x.com"])
     }
 
     func testDismissingAFollowUpTakesItOutWithoutTheMailChanging() {
