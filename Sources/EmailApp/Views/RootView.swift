@@ -45,8 +45,10 @@ struct MainTabView: View {
             InboxTabView()
                 .tabItem { Label("Inbox", systemImage: "tray.full.fill") }
                 // Unread count, the way every mail app marks the tab.
-                // .badge renders nothing at zero, so no empty bubble.
-                .badge(mail.unreadCount(in: .inbox))
+                // .badge renders nothing at an empty string, so no bubble at
+                // zero -- and nothing past 99, because a four-digit bubble
+                // is a smear, not a number.
+                .badge(unreadBadge)
                 .tag(AppTab.inbox)
 
             AITabView()
@@ -61,6 +63,18 @@ struct MainTabView: View {
                 .tabItem { Label("You", systemImage: "person.crop.circle.fill") }
                 .tag(AppTab.you)
         }
+    }
+
+    /// A dictionary lookup, not a count of the mailbox.
+    ///
+    /// This sits in the tab container's body, so it is read on every tab
+    /// switch and after every classified email -- and it used to filter and
+    /// sort every message held to get the number, which is most of why
+    /// moving between tabs stuttered. `MailboxIndex` keeps it now.
+    private var unreadBadge: String {
+        let count = mail.unreadCount(in: .inbox)
+        if count == 0 { return "" }
+        return count > 99 ? "99+" : "\(count)"
     }
 }
 

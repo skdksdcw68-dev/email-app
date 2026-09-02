@@ -27,6 +27,64 @@ final class MailStore {
     /// person as a client showed up nowhere until something else moved.
     private(set) var preferencesVersion = 0
 
+    /// Bumped by `write`, and the only thing that makes `derived` stale.
+    private(set) var mailVersion = 0
+
+    // MARK: - Derived
+
+    @ObservationIgnored private var indexCache: MailboxIndex?
+    @ObservationIgnored private var indexKey: (mail: Int, prefs: Int, account: String?) = (-1, -1, nil)
+
+    /// Everything the screens read off the mailbox: counts, thread sizes,
+    /// the per-mailbox lists, follow-ups. Built once per change and handed
+    /// back as-is until something moves.
+    ///
+    /// Reading `mailVersion` and `preferencesVersion` here is what ties a
+    /// screen asking for a count to the mail it came from. Without it the
+    /// cache would be invisible to observation and nothing would redraw.
+    var derived: MailboxIndex {
+        let key = (mail: mailVersion, prefs: preferencesVersion, account: account?.email)
+        if let indexCache, indexKey == key { return indexCache }
+
+        let built = MailboxIndex(messages, myAddress: account?.email)
+        indexCache = built
+        indexKey = key
+        return built
+    }
+
+    @ObservationIgnored private var positionCache: (version: Int, map: [Message.ID: Int])?
+
+    /// Where each message sits in `messages`, so changing one is a lookup
+    /// rather than a scan.
+    ///
+    /// Deliberately its own cache rather than part of `derived`. Classifying
+    /// a backlog is hundreds of single-message writes, and each one asks for
+    /// this -- rebuilding the sorted per-mailbox lists and the follow-ups
+    /// that often would cost more than the scan it replaced. This is one
+    /// pass and no sort.
+    private var positions: [Message.ID: Int] {
+        let version = mailVersion
+        if let positionCache, positionCache.version == version { return positionCache.map }
+
+        var map: [Message.ID: Int] = [:]
+        map.reserveCapacity(messages.count)
+        for (index, message) in messages.enumerated() { map[message.id] = index }
+        positionCache = (version, map)
+        return map
+    }
+
+    /// The one door into the mailbox.
+    ///
+    /// Everything derived from `messages` is cached, and this is what tells
+    /// the cache it is stale -- changing `messages` any other way leaves
+    /// every screen showing yesterday's numbers. It also batches: a merge of
+    /// twenty-five messages is one change here, so the app redraws once
+    /// rather than twenty-five times.
+    private func write(_ change: (inout [Message]) -> Void) {
+        change(&messages)
+        mailVersion &+= 1
+    }
+
     // MARK: - Search
     //
     // Written by `MailStore+Search`, which is where the reasoning lives.
@@ -56,14 +114,16 @@ final class MailStore {
     /// here; leaving them would make the app the only place they still exist.
     func forget(remoteIDs: Set<String>) {
         guard !remoteIDs.isEmpty else { return }
-        messages.removeAll { remoteIDs.contains($0.remoteID ?? "") }
+        write { $0.removeAll { remoteIDs.contains($0.remoteID ?? "") } }
     }
 
     func absorb(_ found: [Message]) {
         var known = Set(messages.compactMap(\.remoteID))
-        for message in found {
-            guard let remoteID = message.remoteID, known.insert(remoteID).inserted else { continue }
-            messages.append(message)
+        write { list in
+            for message in found {
+                guard let remoteID = message.remoteID, known.insert(remoteID).inserted else { continue }
+                list.append(message)
+            }
         }
     }
 
@@ -395,8 +455,12 @@ final class MailStore {
         // is finishing. One layout pass instead of twenty. Folded rather than
         // assigned: mail that a catch-up or a search brought in while this
         // ran is not thrown away by it.
-        messages = Self.folding(collected, into: messages)
-        applyLocalReadState()
+        let read = locallyRead
+        let replied = locallyReplied
+        write { list in
+            list = Self.folding(collected, into: list)
+            Self.applyLocalReadState(to: &list, read: read, replied: replied)
+        }
         nextPageToken = nil
 
         if ledger.isComplete {
@@ -475,25 +539,32 @@ final class MailStore {
             if let remoteID = message.remoteID { byRemoteID[remoteID] = index }
         }
 
-        for message in fetched {
-            guard let remoteID = message.remoteID else {
-                messages.append(message)
-                continue
-            }
-            if let index = byRemoteID[remoteID] {
-                // Keep what the model worked out; take everything else fresh,
-                // so read state and flags follow Gmail.
-                var updated = message
-                updated.tags = messages[index].tags
-                updated.aiSummary = messages[index].aiSummary
-                messages[index] = updated
-            } else {
-                messages.append(message)
-                byRemoteID[remoteID] = messages.count - 1
-            }
-        }
+        let read = locallyRead
+        let replied = locallyReplied
 
-        applyLocalReadState()
+        // One write for the whole page. Message by message, this was
+        // twenty-five redraws of every screen showing a count.
+        write { list in
+            for message in fetched {
+                guard let remoteID = message.remoteID else {
+                    list.append(message)
+                    continue
+                }
+                if let index = byRemoteID[remoteID] {
+                    // Keep what the model worked out; take everything else
+                    // fresh, so read state and flags follow Gmail.
+                    var updated = message
+                    updated.tags = list[index].tags
+                    updated.aiSummary = list[index].aiSummary
+                    list[index] = updated
+                } else {
+                    list.append(message)
+                    byRemoteID[remoteID] = list.count - 1
+                }
+            }
+
+            Self.applyLocalReadState(to: &list, read: read, replied: replied)
+        }
     }
 
     /// Restores the archive so a cold launch has mail on screen before any
@@ -502,8 +573,12 @@ final class MailStore {
         guard messages.isEmpty else { return }
         let stored = await MessageArchive.load()
         guard !stored.isEmpty, messages.isEmpty else { return }
-        messages = stored
-        applyLocalReadState()
+        let read = locallyRead
+        let replied = locallyReplied
+        write { list in
+            list = stored
+            Self.applyLocalReadState(to: &list, read: read, replied: replied)
+        }
     }
 
     /// Pulls the next page as the user reaches the end of the list.
@@ -531,7 +606,7 @@ final class MailStore {
                 return !known.contains(remoteID)
             }
 
-            messages.append(contentsOf: fresh)
+            write { $0.append(contentsOf: fresh) }
             nextPageToken = page.nextPageToken
             Task { await enhanceWithAI() }
         } catch {
@@ -568,12 +643,11 @@ final class MailStore {
 
     /// Conversations waiting on somebody, in either direction, minus the ones
     /// waved away that have not moved since.
+    /// Built once per change in `MailboxIndex`. The AI tab asks for these
+    /// three times in a single draw, and each ask used to rebuild every
+    /// thread and then read UserDefaults once per row.
     var followUps: [FollowUp] {
-        guard let account else { return [] }
-        _ = preferencesVersion
-        return messages.followUps(myAddress: account.email).filter {
-            !FollowUpPreferences.isDismissed($0.id, lastActivity: $0.message.date)
-        }
+        derived.followUps
     }
 
     /// Waves one away. It comes back if the conversation moves again.
@@ -714,9 +788,12 @@ final class MailStore {
     ]
 
     /// How many messages share this one's conversation. 1 means it stands alone.
+    /// A dictionary lookup, because this is asked once per visible row.
+    /// It used to scan the whole mailbox for every row on screen, which is
+    /// what made scrolling a long inbox stutter.
     func threadCount(for message: Message) -> Int {
         guard let thread = message.threadID else { return 1 }
-        return messages.filter { $0.threadID == thread }.count
+        return derived.threadSizes[thread] ?? 1
     }
 
     /// Second pass over the mailbox: the model reads what the rules could only
@@ -880,7 +957,7 @@ final class MailStore {
         // itself on this.
         NotificationCenter.default.post(name: .mailboxDisconnected, object: nil)
         account = nil
-        messages = []
+        write { $0 = [] }
         MessageArchive.clear()
         UserDefaults.standard.removeObject(forKey: Self.readKey)
         UserDefaults.standard.removeObject(forKey: Self.repliedKey)
@@ -900,31 +977,37 @@ final class MailStore {
 
     /// Messages in a mailbox, narrowed by an optional AI tag, unread state and
     /// search text.
+    /// The list a screen shows. Sorted and thread-collapsed once in
+    /// `MailboxIndex`, so this is a filter over an ordered list rather than
+    /// its own sort -- and with no tag, query or unread filter it is the
+    /// cached list itself.
     func messages(
         in mailbox: Mailbox,
         tag: AITag? = nil,
         unreadOnly: Bool = false,
         matching query: String = ""
     ) -> [Message] {
-        messages
-            .filter { mailbox.isSmart ? $0.isFlagged && $0.mailbox != .trash : $0.mailbox == mailbox }
+        let list = derived.byMailbox[mailbox] ?? []
+        guard tag != nil || unreadOnly || !query.isEmpty else { return list }
+
+        return list
             .filter { message in
                 guard let tag else { return true }
                 return message.tags.contains(tag)
             }
             .filter { !unreadOnly || !$0.isRead }
             .filter { query.isEmpty || $0.matches(query) }
-            .sorted { $0.date > $1.date }
-            .collapsingThreads()
     }
 
+    /// Unread conversations. Read straight off the index, because this is
+    /// what the tab badge asks for on every draw.
     func unreadCount(in mailbox: Mailbox) -> Int {
-        messages(in: mailbox).filter { !$0.isRead }.count
+        derived.unread[mailbox] ?? 0
     }
 
     /// How many messages in a mailbox carry a given tag. Drives the chip counts.
     func count(of tag: AITag, in mailbox: Mailbox) -> Int {
-        messages(in: mailbox, tag: tag).count
+        tagCounts(in: mailbox).total[tag] ?? 0
     }
 
     /// How many *unread* messages carry a tag. This is what the filter pills
@@ -932,7 +1015,7 @@ final class MailStore {
     /// everything urgent takes "Very Urgent 49" down to nothing instead of
     /// leaving a stale 49 pinned over a handled inbox.
     func unreadCount(of tag: AITag, in mailbox: Mailbox) -> Int {
-        messages(in: mailbox, tag: tag, unreadOnly: true).count
+        tagCounts(in: mailbox).unread[tag] ?? 0
     }
 
     /// Every tag's total and unread count in one pass over the mailbox.
@@ -946,24 +1029,22 @@ final class MailStore {
     }
 
     func tagCounts(in mailbox: Mailbox) -> TagCounts {
-        var counts = TagCounts()
-        for message in messages(in: mailbox) {
-            for tag in message.tags {
-                counts.total[tag, default: 0] += 1
-                if !message.isRead { counts.unread[tag, default: 0] += 1 }
-            }
-        }
-        return counts
+        derived.tagCounts[mailbox] ?? TagCounts()
     }
 
     /// Only the tags that actually appear in this mailbox, so the filter bar
     /// never offers a chip that would empty the list.
+    ///
+    /// One lookup, not ten. This used to ask `count(of:)` per tag, and each
+    /// of those sorted the whole mailbox.
     func availableTags(in mailbox: Mailbox) -> [AITag] {
-        AITag.allCases.filter { count(of: $0, in: mailbox) > 0 }
+        let counts = tagCounts(in: mailbox)
+        return AITag.allCases.filter { (counts.total[$0] ?? 0) > 0 }
     }
 
     func message(_ id: Message.ID) -> Message? {
-        messages.first { $0.id == id }
+        guard let index = positions[id], index < messages.count else { return nil }
+        return messages[index]
     }
 
     // MARK: - Writing
@@ -1037,14 +1118,17 @@ final class MailStore {
     /// Applies what the user has read and answered here on top of what Gmail
     /// reported. Gmail sends UNREAD back on every refresh and the classifier
     /// re-asserts `needsReply`, so without this both would undo themselves.
-    private func applyLocalReadState() {
-        let read = locallyRead
-        let replied = locallyReplied
+    /// Takes the list rather than the property, so it can run inside a
+    /// `write` that is already holding it. Two nested writes to the same
+    /// array would be an exclusivity violation, not a slow path.
+    private static func applyLocalReadState(
+        to list: inout [Message], read: Set<String>, replied: Set<String>
+    ) {
         guard !read.isEmpty || !replied.isEmpty else { return }
-        for index in messages.indices {
-            guard let remoteID = messages[index].remoteID else { continue }
-            if read.contains(remoteID) { messages[index].isRead = true }
-            if replied.contains(remoteID) { messages[index].tags.remove(.needsReply) }
+        for index in list.indices {
+            guard let remoteID = list[index].remoteID else { continue }
+            if read.contains(remoteID) { list[index].isRead = true }
+            if replied.contains(remoteID) { list[index].tags.remove(.needsReply) }
         }
     }
 
@@ -1060,7 +1144,7 @@ final class MailStore {
     func delete(_ id: Message.ID) {
         guard let message = message(id) else { return }
         if message.mailbox == .trash {
-            messages.removeAll { $0.id == id }
+            write { $0.removeAll { $0.id == id } }
         } else {
             move(id, to: .trash)
         }
@@ -1113,7 +1197,7 @@ final class MailStore {
         local.remoteID = sent.id
         local.threadID = sent.threadID
         local.hasAttachment = !attachments.isEmpty
-        messages.append(local)
+        write { $0.append(local) }
     }
 
     /// Refuses before anything is uploaded, so nobody watches a progress
@@ -1168,7 +1252,7 @@ final class MailStore {
             mailbox: .drafts
         )
         local.remoteID = id
-        messages.append(local)
+        write { $0.append(local) }
     }
 
     enum SendError: LocalizedError {
@@ -1188,8 +1272,8 @@ final class MailStore {
     }
 
     private func update(_ id: Message.ID, _ change: (inout Message) -> Void) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        change(&messages[index])
+        guard let index = positions[id], index < messages.count else { return }
+        write { change(&$0[index]) }
     }
 }
 

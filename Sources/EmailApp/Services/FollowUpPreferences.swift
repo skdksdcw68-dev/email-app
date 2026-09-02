@@ -10,14 +10,24 @@ enum FollowUpPreferences {
 
     private static let key = "followups.dismissed"
 
+    /// Read back from UserDefaults once, not once per follow-up.
+    ///
+    /// This is asked about every conversation waiting on somebody, and the
+    /// getter below rebuilt the whole dictionary out of UserDefaults on each
+    /// ask -- so drawing the AI tab was hundreds of reads and hundreds of
+    /// dictionaries. Kept in memory instead, and written through.
+    nonisolated(unsafe) private static var cached: [String: Date]?
+
     private static var dismissals: [String: Date] {
         get {
-            guard let raw = UserDefaults.standard.dictionary(forKey: key) as? [String: Double] else {
-                return [:]
-            }
-            return raw.mapValues { Date(timeIntervalSince1970: $0) }
+            if let cached { return cached }
+            let raw = UserDefaults.standard.dictionary(forKey: key) as? [String: Double] ?? [:]
+            let loaded = raw.mapValues { Date(timeIntervalSince1970: $0) }
+            cached = loaded
+            return loaded
         }
         set {
+            cached = newValue
             UserDefaults.standard.set(
                 newValue.mapValues(\.timeIntervalSince1970), forKey: key
             )
@@ -44,6 +54,7 @@ enum FollowUpPreferences {
     }
 
     static func clearAll() {
+        cached = [:]
         UserDefaults.standard.removeObject(forKey: key)
     }
 }

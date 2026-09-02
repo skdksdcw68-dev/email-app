@@ -96,8 +96,11 @@ struct AITabView: View {
     @ViewBuilder
     private var briefing: some View {
         let counts = mail.counts
-        let quiet = mail.followUps.filter { $0.direction == .waitingOnThem }.count
-        let waiting = mail.followUps.filter { $0.direction == .waitingOnYou }.count
+        // One ask, not two. Follow-ups are derived from every thread in the
+        // mailbox, and this view used to ask three times in a single draw.
+        let followUps = mail.followUps
+        let quiet = followUps.filter { $0.direction == .waitingOnThem }.count
+        let waiting = followUps.filter { $0.direction == .waitingOnYou }.count
 
         Section {
             if !mail.isConnected {
@@ -162,13 +165,17 @@ struct AITabView: View {
     @ViewBuilder
     private var followUpSection: some View {
         let followUps = mail.followUps
-        let waiting = followUps.filter { $0.direction == .waitingOnYou }
-        let quiet = followUps.filter { $0.direction == .waitingOnThem }
+        let waiting = followUps.filter { $0.direction == .waitingOnYou }.prefix(6)
+        let quiet = followUps.filter { $0.direction == .waitingOnThem }.prefix(6)
+
+        // What each of the twelve rows on screen is waiting for, looked up
+        // once. Asking per row meant filtering every fact twelve times.
+        let asks = mail.facts.openByThread
 
         if !waiting.isEmpty {
             Section {
-                ForEach(waiting.prefix(6)) { followUp in
-                    followUpRow(followUp)
+                ForEach(waiting) { followUp in
+                    followUpRow(followUp, ask: asks[followUp.message.threadID ?? ""])
                 }
             } header: {
                 Text("Waiting on you")
@@ -177,8 +184,8 @@ struct AITabView: View {
 
         if !quiet.isEmpty {
             Section {
-                ForEach(quiet.prefix(6)) { followUp in
-                    followUpRow(followUp)
+                ForEach(quiet) { followUp in
+                    followUpRow(followUp, ask: asks[followUp.message.threadID ?? ""])
                 }
             } header: {
                 Text("Gone quiet")
@@ -196,12 +203,16 @@ struct AITabView: View {
     /// request that is still open. Swipe to cross one off.
     @ViewBuilder
     private var comingUpSection: some View {
-        let upcoming = mail.facts.upcoming()
+        let upcoming = mail.facts.upcoming().prefix(6)
 
         if !upcoming.isEmpty {
+            // The messages these six point at, found in one pass. Looked up
+            // per row, this was six scans of the whole mailbox per draw.
+            let sources = messageIDs(for: upcoming)
+
             Section {
-                ForEach(upcoming.prefix(6)) { fact in
-                    factRow(fact)
+                ForEach(upcoming) { fact in
+                    factRow(fact, source: sources[fact.messageID])
                 }
             } header: {
                 Text("Coming up")
@@ -209,14 +220,24 @@ struct AITabView: View {
         }
     }
 
+    /// Gmail's id to the app's, for the handful of facts on screen.
+    private func messageIDs(for facts: some Sequence<Fact>) -> [String: Message.ID] {
+        let wanted = Set(facts.map(\.messageID))
+        var found: [String: Message.ID] = [:]
+        for message in mail.messages {
+            guard let remoteID = message.remoteID, wanted.contains(remoteID) else { continue }
+            if found[remoteID] == nil { found[remoteID] = message.id }
+        }
+        return found
+    }
+
     @ViewBuilder
-    private func factRow(_ fact: Fact) -> some View {
-        let message = mail.messages.first { $0.remoteID == fact.messageID }
+    private func factRow(_ fact: Fact, source: Message.ID?) -> some View {
         let overdue = fact.isOverdue()
         let who = fact.person.name.isEmpty ? fact.person.address : fact.person.name
         let when = fact.due.map { Fact.dayPhrase($0) } ?? ""
 
-        NavigationLink(value: message?.id ?? UUID()) {
+        NavigationLink(value: source ?? UUID()) {
             HStack(spacing: 12) {
                 Image(systemName: symbol(for: fact))
                     .font(.footnote)
@@ -235,7 +256,7 @@ struct AITabView: View {
             }
             .padding(.vertical, 2)
         }
-        .disabled(message == nil)
+        .disabled(source == nil)
         .swipeActions(edge: .trailing) {
             Button {
                 mail.facts.markDone(fact.id)
@@ -256,7 +277,7 @@ struct AITabView: View {
     }
 
     @ViewBuilder
-    private func followUpRow(_ followUp: FollowUp) -> some View {
+    private func followUpRow(_ followUp: FollowUp, ask: Fact? = nil) -> some View {
         NavigationLink(value: followUp.message.id) {
             HStack(spacing: 12) {
                 Image(systemName: followUp.direction == .waitingOnYou
@@ -273,8 +294,7 @@ struct AITabView: View {
                     // What the thread is actually waiting for, when the app
                     // has read it: "Send the revised quote" says more than
                     // "Re: Re: Q3 pricing". The subject when it has not.
-                    Text(mail.facts.facts(inThread: followUp.message.threadID).first?.text
-                         ?? followUp.message.subject)
+                    Text(ask?.text ?? followUp.message.subject)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

@@ -103,6 +103,20 @@ final class FactStore {
         return open.filter { $0.threadID == threadID && $0.kind != .date }
     }
 
+    /// The newest open ask per conversation, in one pass.
+    ///
+    /// A list of follow-up rows wants one of these each, and asking per row
+    /// filtered every fact once per row. `facts` is newest first, so the
+    /// first one seen for a thread is the one to show.
+    var openByThread: [String: Fact] {
+        var newest: [String: Fact] = [:]
+        for fact in facts where !fact.isDone && fact.kind != .date {
+            guard let thread = fact.threadID, newest[thread] == nil else { continue }
+            newest[thread] = fact
+        }
+        return newest
+    }
+
     /// What goes in the prompt: everything still open, dated things first,
     /// then the newest, capped so a busy quarter does not become a page.
     /// The model is told whose move each is and which message it came from.

@@ -26,6 +26,10 @@ struct InboxHomeView: View {
     /// Held until the notice is answered, so agreeing runs the search they
     /// already asked for rather than making them type it again.
     @State private var pendingAISearch: String?
+    /// How many rows are drawn. Grows as they reach the end; reset when the
+    /// folder or the filter changes, so switching to Flagged does not open
+    /// on row three hundred.
+    @State private var shownRows = InboxHomeView.pageOfRows
 
     private var isBrowsing: Bool { mailbox == .inbox }
 
@@ -57,11 +61,21 @@ struct InboxHomeView: View {
 
     private var isSearchActive: Bool { !query.isEmpty }
 
+    /// How many rows the list is built with. Three months of mail is a few
+    /// thousand conversations, and handing all of them to a List means it
+    /// measures all of them -- on a screen that shows twelve.
+    ///
+    /// Everything is still held in memory: the assistant answers from the
+    /// whole three months, and search reaches all of it. This is only how
+    /// much is drawn, and it grows as they reach the end.
+    static let pageOfRows = 300
+
     var body: some View {
-        // Each of these sorts the mailbox. Once per render, not once per
-        // row: computing the list again inside every row's onAppear was a
-        // sort of two thousand messages on every scroll step.
-        let messages = mail.messages(in: mailbox, tag: tag)
+        // Sorted and thread-collapsed once, in MailboxIndex, rather than
+        // here: this used to sort the whole mailbox on every draw.
+        let all = mail.messages(in: mailbox, tag: tag)
+        let messages = Array(all.prefix(shownRows))
+        let hasMoreLocally = all.count > messages.count
         let lastID = messages.last?.id
         let attention = mail.needsAttention(limit: .max)
         let counts = mail.tagCounts(in: mailbox)
@@ -119,17 +133,28 @@ struct InboxHomeView: View {
                     .alignmentGuide(.listRowSeparatorLeading) { _ in 68 }
                     .messageSwipeActions(for: message)
                     .onAppear {
-                        // The end of the list is the trigger for the next page.
-                        if message.id == lastID {
+                        // The end of the list is the trigger for more. What
+                        // is already on the phone comes first and costs
+                        // nothing; only when that runs out is it Gmail's turn.
+                        guard message.id == lastID else { return }
+                        if hasMoreLocally {
+                            shownRows += Self.pageOfRows
+                        } else {
                             Task { await mail.loadMore() }
                         }
                     }
                 }
 
-                if mail.hasMoreMail && !messages.isEmpty {
+                if (hasMoreLocally || mail.hasMoreMail) && !messages.isEmpty {
                     MessageRowSkeleton()
                         .listRowSeparator(.hidden)
-                        .onAppear { Task { await mail.loadMore() } }
+                        .onAppear {
+                            if hasMoreLocally {
+                                shownRows += Self.pageOfRows
+                            } else {
+                                Task { await mail.loadMore() }
+                            }
+                        }
                 }
             }
         }
@@ -232,7 +257,11 @@ struct InboxHomeView: View {
         }
         .onChange(of: mailbox) { _, newValue in
             if let tag, mail.count(of: tag, in: newValue) == 0 { self.tag = nil }
+            shownRows = Self.pageOfRows
         }
+        // A different filter is a different list, and it should open at the
+        // top of it rather than three hundred rows in.
+        .onChange(of: tag) { _, _ in shownRows = Self.pageOfRows }
         .sheet(isPresented: $isComposing) { ComposeView() }
     }
 
