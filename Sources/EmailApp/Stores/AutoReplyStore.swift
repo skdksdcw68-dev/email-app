@@ -47,6 +47,10 @@ final class AutoReplyStore {
         value.isOn = true
         value.knowledgeConfirmed = true
         value.mode = self.config.isSetUp ? self.config.mode : .draft
+        // From now on, not from three months ago. An edit keeps the
+        // original line so a tweak does not make it forget what it has
+        // already been watching.
+        value.watchingSince = self.config.watchingSince ?? .now
         value.updatedAt = .now
         self.config = value
         persist()
@@ -58,6 +62,9 @@ final class AutoReplyStore {
     func setOn(_ isOn: Bool) {
         guard config.isSetUp else { return }
         config.isOn = isOn
+        // Switching back on after a break starts from now. The week it was
+        // off is not a backlog to work through.
+        if isOn { config.watchingSince = .now }
         config.updatedAt = .now
         persist()
     }

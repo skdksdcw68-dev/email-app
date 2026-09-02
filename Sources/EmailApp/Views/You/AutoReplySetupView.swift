@@ -24,16 +24,31 @@ struct AutoReplySetupView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var config: AutoReplyConfig
-    @State private var index = 0
+    @State private var index: Int
     @State private var understanding: AutoReplyUnderstanding?
     @State private var example: AutoReplyExample?
     @State private var isThinking = false
     @State private var failure: String?
     @State private var draftInstruction = ""
 
-    init(editing existing: AutoReplyConfig? = nil) {
-        _config = State(initialValue: existing ?? AutoReplyConfig())
-        _understanding = State(initialValue: existing?.understanding)
+    /// A whole setup, or one question out of it.
+    ///
+    /// `singleStep` is the edit case: somebody who came to change what
+    /// happens when Maily is unsure wants that question and a Save, not the
+    /// eleven screens either side of it.
+    private let singleStep: Bool
+
+    init(
+        editing existing: AutoReplyConfig? = nil,
+        startingAt step: Step? = nil,
+        singleStep: Bool = false
+    ) {
+        let config = existing ?? AutoReplyConfig()
+        _config = State(initialValue: config)
+        _understanding = State(initialValue: config.understanding)
+        self.singleStep = singleStep
+        let all = Step.allCases
+        _index = State(initialValue: step.flatMap { all.firstIndex(of: $0) } ?? 0)
     }
 
     // MARK: - The step graph
@@ -48,7 +63,8 @@ struct AutoReplySetupView: View {
     /// The steps this particular setup asks for, in order. Conditional, so
     /// nobody is asked for a price they said Maily should never quote.
     private var steps: [Step] {
-        Step.allCases.filter { step in
+        if singleStep { return Step.allCases }
+        return Step.allCases.filter { step in
             switch step {
             case .pricing:
                 config.allowed.contains(.pricing) || config.inbound.contains("pricing")
@@ -73,7 +89,7 @@ struct AutoReplySetupView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if step != .intro && step != .done {
+            if !singleStep && step != .intro && step != .done {
                 ProgressView(value: progress)
                     .tint(Color.accentColor)
                     .padding(.horizontal, 20)
@@ -107,12 +123,12 @@ struct AutoReplySetupView: View {
                 .padding(.bottom, 8)
             }
         }
-        .navigationTitle(step == .intro || step == .done ? "" : "Auto-Reply")
+        .navigationTitle(singleStep || step == .intro || step == .done ? "" : "Auto-Reply")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
+        .navigationBarBackButtonHidden(!singleStep)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                if canGoBack {
+                if canGoBack && !singleStep {
                     Button {
                         withAnimation(.snappy(duration: 0.22)) { index -= 1 }
                     } label: {
@@ -137,6 +153,7 @@ struct AutoReplySetupView: View {
     // MARK: - Moving
 
     private var buttonTitle: String? {
+        if singleStep { return "Save" }
         switch step {
         case .intro: "Set up Auto-Reply"
         case .checkpoint, .summary: "That looks right"
@@ -158,6 +175,14 @@ struct AutoReplySetupView: View {
     }
 
     private func advance() {
+        // One question, one Save. Nobody editing "when unsure" wants to be
+        // walked through the ten screens after it.
+        if singleStep {
+            config.instructions = AutoReplyStore.tidied(config.instructions)
+            autoReply.complete(config)
+            dismiss()
+            return
+        }
         if step == .done {
             finish()
             return

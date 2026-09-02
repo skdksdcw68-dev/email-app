@@ -145,6 +145,17 @@ enum AutoReplyEligibility {
             return .ineligible("Not in the inbox.")
         }
 
+        // Only what has arrived since they switched this on.
+        //
+        // This is the difference between a feature that costs pennies and one
+        // that reads three months of inbox the day it is enabled. Nobody
+        // turning on Auto-Reply is asking it to answer a conversation that
+        // finished in June, and paying a model to decide that for four
+        // hundred old messages is the purest waste in the app.
+        if let since = config.watchingSince, message.date < since {
+            return .ineligible("This arrived before Auto-Reply was switched on.")
+        }
+
         let mine = myAddress.lowercased()
         guard message.sender.address.lowercased() != mine else {
             return .ineligible("You wrote this.")

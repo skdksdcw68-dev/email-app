@@ -47,34 +47,6 @@ struct AutoReplyQueueView: View {
                     )
                 }
 
-                // What it decided most recently, right here rather than one
-                // screen away. "It did nothing" and "it deliberately left
-                // these alone, here's why" look identical otherwise, and only
-                // one of them is a bug.
-                if !queue.log.isEmpty {
-                    Section {
-                        ForEach(queue.log.prefix(4)) { decision in
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: 7) {
-                                    Image(systemName: decision.symbol)
-                                        .font(.caption2)
-                                        .foregroundStyle(decision.outcome == .escalated
-                                                         ? Color.orange : Color.secondary)
-                                    Text(decision.subject)
-                                        .font(.caption.weight(.medium))
-                                        .lineLimit(1)
-                                }
-                                Text(decision.reason)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .padding(.vertical, 2)
-                        }
-                    } header: {
-                        Text("Most recently")
-                    }
-                }
             } else {
                 Section {
                     // The same card the assistant uses in chat, because it is
@@ -94,13 +66,34 @@ struct AutoReplyQueueView: View {
                 }
             }
 
+            // Everything it has written before, openable. A reply it sent
+            // last Tuesday is the thing somebody wants to look at when they
+            // are deciding whether to trust this, and it should not take a
+            // search of their Sent folder to find it.
+            let history = queue.log.filter { $0.reply != nil || $0.outcome == .sent }
+            if !history.isEmpty {
+                Section {
+                    ForEach(history.prefix(20)) { decision in
+                        NavigationLink {
+                            AutoReplyDetailView(decision: decision)
+                        } label: {
+                            historyRow(decision)
+                        }
+                    }
+                } header: {
+                    Text("Already written")
+                } footer: {
+                    Text("Tap any of these to read what Maily said.")
+                }
+            }
+
             Section {
                 NavigationLink { AutoReplyLogView() } label: {
-                    Label("What Maily decided", systemImage: "list.bullet.rectangle")
+                    Label("Everything it looked at", systemImage: "list.bullet.rectangle")
                         .font(.subheadline)
                 }
             } footer: {
-                Text("Every message Auto-Reply looked at, including the ones it left alone, and why.")
+                Text("Including the mail it left alone, and why.")
             }
         }
         .navigationTitle("Replies")
@@ -193,9 +186,9 @@ struct AutoReplyQueueView: View {
             return "Auto-Reply isn't running, so nothing is being answered yet."
         }
         if queue.log.isEmpty {
-            return "Maily hasn't found anything it can answer yet. It only replies to the kinds of mail you allowed, from real people — not newsletters, no-reply addresses, or mail you sent yourself."
+            return "Maily is watching for new mail. It only answers what arrives from now on, in the kinds you allowed, from real people — not newsletters, no-reply addresses, or mail you sent yourself."
         }
-        return "Maily has looked at your mail and didn't find anything it could answer on its own. What it decided is below."
+        return "Maily has looked at what came in and had nothing it could answer on its own."
     }
 
 }
@@ -279,5 +272,126 @@ struct AutoReplyLogView: View {
         case .skipped: .secondary
         case .failed: .red
         }
+    }
+}
+
+extension AutoReplyQueueView {
+
+    /// A reply Maily has already written, sent or binned.
+    func historyRow(_ decision: AutoReplyDecision) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 7) {
+                Image(systemName: decision.symbol)
+                    .font(.caption2)
+                    .foregroundStyle(historyTint(decision.outcome))
+                    .frame(width: 16)
+                Text(decision.outcomeTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(historyTint(decision.outcome))
+                Spacer(minLength: 0)
+                Text(decision.decidedAt.formatted(.relative(presentation: .named)))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Text(decision.from)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+            Text(decision.subject)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 2)
+    }
+
+    func historyTint(_ outcome: AutoReplyDecision.Outcome) -> Color {
+        switch outcome {
+        case .sent: .green
+        case .drafted: .accentColor
+        case .escalated: .orange
+        case .skipped: .secondary
+        case .failed: .red
+        }
+    }
+}
+
+/// One reply Maily wrote, read back afterwards.
+///
+/// Read-only on purpose. A reply that has gone cannot be unsent and a reply
+/// that was binned is not coming back, so offering an editor here would be
+/// offering something the app cannot honour. What it can do is show exactly
+/// what was said, what it leaned on, and what it refused -- which is the
+/// whole of what somebody deciding whether to trust this needs.
+struct AutoReplyDetailView: View {
+    let decision: AutoReplyDecision
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(decision.from).font(.subheadline.weight(.semibold))
+                    Text(decision.subject).font(.caption).foregroundStyle(.secondary)
+                    Text(decision.decidedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 2)
+            } header: {
+                Text(decision.outcomeTitle)
+            } footer: {
+                Text(decision.reason)
+            }
+
+            if let reply = decision.reply, !reply.isEmpty {
+                Section {
+                    Text(reply)
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                } header: {
+                    Text("What Maily wrote")
+                }
+            }
+
+            if !decision.evidence.isEmpty {
+                Section {
+                    ForEach(decision.evidence, id: \.self) { fact in
+                        Label(fact, systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("What it used")
+                }
+            }
+
+            if !decision.withheld.isEmpty {
+                Section {
+                    ForEach(decision.withheld, id: \.self) { item in
+                        Label(item, systemImage: "hand.raised.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                } header: {
+                    Text("What it left alone")
+                }
+            }
+
+            if let verification = decision.verification, verification.confidence > 0 {
+                Section {
+                    LabeledContent("How sure it was", value: "\(Int(verification.confidence * 100))%")
+                    ForEach(verification.problems, id: \.self) { problem in
+                        Label(problem, systemImage: "shield.lefthalf.filled")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                } header: {
+                    Text("The check")
+                }
+            }
+        }
+        .navigationTitle("Reply")
+        .navigationBarTitleDisplayMode(.inline)
+        .hidesTabBar()
     }
 }

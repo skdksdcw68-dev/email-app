@@ -171,12 +171,7 @@ struct YouView: View {
             }
             Spacer(minLength: 8)
             if !autoReplyQueue.waiting.isEmpty {
-                Text("\(autoReplyQueue.waiting.count)")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.accentColor))
+                WaitingBadge(count: autoReplyQueue.waiting.count)
             } else if autoReply.config.isSetUp {
                 Text(autoReply.config.isOn ? "On" : "Off")
                     .font(.caption.weight(.semibold))

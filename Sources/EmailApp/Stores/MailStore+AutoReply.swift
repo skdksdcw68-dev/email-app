@@ -54,9 +54,16 @@ extension MailStore {
             myLatestReply[thread] = message.date
         }
 
+        // Anything older than the moment they switched this on is not
+        // Auto-Reply's business, and is dropped here rather than logged as a
+        // skip: three months of "this arrived before Auto-Reply was switched
+        // on" is not a record of anything, it is noise burying the decisions
+        // that matter.
+        let since = config.watchingSince ?? .distantPast
         let candidates = messages(in: .inbox)
             .filter { message in
                 guard let remoteID = message.remoteID else { return false }
+                guard message.date >= since else { return false }
                 return !queue.hasDecided(remoteID)
             }
             .prefix(Self.autoReplyScanLimit)

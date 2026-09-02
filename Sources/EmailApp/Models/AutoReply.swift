@@ -58,6 +58,15 @@ struct AutoReplyConfig: Codable, Equatable {
     /// Confirmed on the review screen. Nothing runs until this is true, so
     /// mail is never answered from facts nobody has read back.
     var knowledgeConfirmed = false
+
+    /// The moment Auto-Reply started watching.
+    ///
+    /// Nothing that arrived before this is ever considered. Without it, the
+    /// day somebody switches this on it works through three months of
+    /// inbox -- paying to read, and possibly answer, conversations that
+    /// finished in June. It answers what arrives from now on, which is the
+    /// only thing anybody wanted it to do.
+    var watchingSince: Date?
     var updatedAt = Date.now
 
     /// How many kinds of mail it is actually authorised to handle, for the

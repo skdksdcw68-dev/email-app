@@ -143,14 +143,7 @@ struct AutoReplyView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 8)
-                    if !queue.waiting.isEmpty {
-                        Text("\(queue.waiting.count)")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.accentColor))
-                    }
+                    WaitingBadge(count: queue.waiting.count)
                 }
                 .padding(.vertical, 2)
             }
@@ -169,39 +162,31 @@ struct AutoReplyView: View {
 
     private var whatItDoesSection: some View {
         Section {
-            ForEach(AutoReplyConfig.RunMode.allCases) { mode in
-                Button {
-                    if mode == .send && config.mode != .send {
+            // One switch, because it is one decision. Two rows with a tick
+            // made it read as a preference rather than the single place
+            // where authority changes hands.
+            Toggle(isOn: Binding(
+                get: { config.mode == .send },
+                set: { wantsSending in
+                    if wantsSending {
                         isConfirmingSend = true
                     } else {
-                        autoReply.setMode(mode)
+                        autoReply.setMode(.draft)
                     }
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: mode == .draft ? "square.and.pencil" : "paperplane.fill")
-                            .font(.footnote)
-                            .foregroundStyle(config.mode == mode ? Color.accentColor : .secondary)
-                            .frame(width: 24)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(mode.title)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.primary)
-                            Text(mode.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 8)
-                        if config.mode == mode {
-                            Image(systemName: "checkmark")
-                                .font(.footnote.weight(.bold))
-                                .foregroundStyle(.tint)
-                        }
-                    }
-                    .padding(.vertical, 2)
                 }
-                .buttonStyle(.plain)
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Send it for me")
+                        .font(.subheadline.weight(.medium))
+                    Text(config.mode == .send
+                         ? "Replies go without you seeing them first."
+                         : "Off, Maily writes the reply and waits for you.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
+            .padding(.vertical, 2)
 
             // The one control that has to work when somebody is panicking.
             // It stops everything and puts the mode back, so getting out is
@@ -219,7 +204,7 @@ struct AutoReplyView: View {
             Text("What Maily does with a reply")
         } footer: {
             Text(config.mode == .send
-                 ? "Maily only sends when it's over \(Int(MailStore.autoSendConfidenceFloor * 100))% sure, answered the whole message, and the reply passed the check against what you approved. Never twice in one conversation, never more than \(MailStore.autoSendPerHour) an hour, and you get a notification for each one."
+                 ? "Only replies Maily is over \(Int(MailStore.autoSendConfidenceFloor * 100))% sure about, that answered the whole message and passed the check against what you approved. Never twice in one conversation, never more than \(MailStore.autoSendPerHour) an hour, and you get a notification for each."
                  : "Every reply waits for you. Nothing leaves on its own.")
         }
     }
@@ -290,10 +275,10 @@ struct AutoReplyView: View {
 
     private var manageSection: some View {
         Section {
-            Button("Edit setup") { isSettingUp = true }
+            NavigationLink("Edit setup") { AutoReplyEditView() }
             Button("Delete setup", role: .destructive) { isConfirmingForget = true }
         } footer: {
-            Text("Editing opens the same questions with your answers already in them.")
+            Text("Change one thing without going through the whole setup again.")
         }
     }
 }

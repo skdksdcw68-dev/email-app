@@ -135,3 +135,25 @@ struct AutoReplyCard: View {
         }
     }
 }
+
+/// How many replies are waiting, in red.
+///
+/// Red because it is the one number in this feature that is a to-do rather
+/// than a statistic: somebody wrote in, Maily answered, and the reply is
+/// sitting there unsent. Capped at 9+ so the bubble stays a dot rather than
+/// a smear, which is the same reason the tab badge caps.
+struct WaitingBadge: View {
+    let count: Int
+
+    var body: some View {
+        if count > 0 {
+            Text(count > 9 ? "9+" : "\(count)")
+                .font(.caption.weight(.bold).monospacedDigit())
+                .foregroundStyle(.white)
+                .padding(.horizontal, count > 9 ? 6 : 7)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color.red))
+                .accessibilityLabel(count == 1 ? "1 reply waiting" : "\(count) replies waiting")
+        }
+    }
+}
