@@ -7,7 +7,7 @@ import UIKit
 /// scale, same 20pt gutter, same left alignment. Somebody who has just signed
 /// up should recognise this immediately -- it is the same app asking them
 /// something, not a different screen borrowed from somewhere else.
-struct StepHeader<Content: View>: View {
+struct AutoReplyStep<Content: View>: View {
     let title: String
     let subtitle: String?
     @ViewBuilder let content: Content
@@ -253,7 +253,7 @@ struct FieldBlock: View {
 
 struct AutoReplyIntroStep: View {
     var body: some View {
-        StepHeader("Let Maily handle the routine replies.",
+        AutoReplyStep("Let Maily handle the routine replies.",
                    "Teach it how you work, what it can answer, and when it should bring you in.") {
             VStack(alignment: .leading, spacing: 16) {
                 point("brain.head.profile", "Understand your work",

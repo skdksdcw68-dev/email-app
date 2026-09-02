@@ -269,7 +269,7 @@ struct AutoReplySetupView: View {
     }
 
     private var personaStep: some View {
-        StepHeader("What best describes what you do?",
+        AutoReplyStep("What best describes what you do?",
                    "This decides what Maily asks you next.") {
             OptionGrid(
                 options: AutoReplyConfig.Persona.allCases.map {
@@ -289,7 +289,7 @@ struct AutoReplySetupView: View {
 
     private var workStep: some View {
         let persona = config.persona ?? .other
-        return StepHeader(AutoReplyOptions.workTitle(for: persona),
+        return AutoReplyStep(AutoReplyOptions.workTitle(for: persona),
                           "Pick everything that applies.") {
             OptionGrid(options: AutoReplyOptions.work(for: persona), selected: config.workTopics) { id in
                 toggle(id, in: \.workTopics)
@@ -299,7 +299,7 @@ struct AutoReplySetupView: View {
 
     private var audienceStep: some View {
         let persona = config.persona ?? .other
-        return StepHeader("Who writes to you?",
+        return AutoReplyStep("Who writes to you?",
                           "Maily uses this to judge who a message is from.") {
             OptionGrid(options: AutoReplyOptions.audience(for: persona), selected: config.audience) { id in
                 toggle(id, in: \.audience)
@@ -309,7 +309,7 @@ struct AutoReplySetupView: View {
 
     private var inboundStep: some View {
         let persona = config.persona ?? .other
-        return StepHeader("What do they usually ask about?",
+        return AutoReplyStep("What do they usually ask about?",
                           "The things you find yourself answering again and again.") {
             OptionGrid(options: AutoReplyOptions.inbound(for: persona), selected: config.inbound) { id in
                 toggle(id, in: \.inbound)
@@ -318,7 +318,7 @@ struct AutoReplySetupView: View {
     }
 
     private var knowledgeStep: some View {
-        StepHeader("Anything Maily should be able to state?",
+        AutoReplyStep("Anything Maily should be able to state?",
                    "Only what you're happy for it to tell somebody. Everything you leave blank, it brings back to you instead of guessing.") {
             VStack(spacing: 14) {
                 FieldBlock(label: "Your name or brand", hint: "How people know you.", text: $config.business.brand)
@@ -331,7 +331,7 @@ struct AutoReplySetupView: View {
     }
 
     private var pricingStep: some View {
-        StepHeader("How should Maily handle pricing?",
+        AutoReplyStep("How should Maily handle pricing?",
                    "Most people's answer is \"it depends\", and that is a real answer here.") {
             VStack(spacing: 9) {
                 ForEach(AutoReplyConfig.PricingMode.allCases) { mode in
@@ -353,7 +353,7 @@ struct AutoReplySetupView: View {
     }
 
     private var availabilityStep: some View {
-        StepHeader("How should Maily handle availability?",
+        AutoReplyStep("How should Maily handle availability?",
                    "Committing your time is the easiest thing to get wrong.") {
             VStack(spacing: 9) {
                 ForEach(AutoReplyConfig.AvailabilityMode.allCases) { mode in
@@ -374,7 +374,7 @@ struct AutoReplySetupView: View {
 
     private var policiesStep: some View {
         let persona = config.persona ?? .other
-        return StepHeader("Any rules Maily should know?",
+        return AutoReplyStep("Any rules Maily should know?",
                           "Pick the ones you actually have. You'll write each in one line.") {
             VStack(spacing: 9) {
                 ForEach(AutoReplyOptions.policies(for: persona)) { option in
@@ -408,7 +408,7 @@ struct AutoReplySetupView: View {
     }
 
     private var allowedStep: some View {
-        StepHeader("Which of these can Maily answer without you?",
+        AutoReplyStep("Which of these can Maily answer without you?",
                    "Only what you pick here is ever eligible for an automatic reply.") {
             VStack(spacing: 9) {
                 ForEach(AutoReplyConfig.Category.allCases) { category in
@@ -430,7 +430,7 @@ struct AutoReplySetupView: View {
     }
 
     private var boundariesStep: some View {
-        StepHeader("What should always come back to you?",
+        AutoReplyStep("What should always come back to you?",
                    "These beat everything else. Even where a message looks answerable, anything here stops and waits.") {
             VStack(spacing: 9) {
                 ForEach(AutoReplyConfig.Boundary.allCases) { boundary in
@@ -453,7 +453,7 @@ struct AutoReplySetupView: View {
     }
 
     private var unsureStep: some View {
-        StepHeader("When Maily isn't sure, what should it do?",
+        AutoReplyStep("When Maily isn't sure, what should it do?",
                    "This is what happens whenever a message is near the line rather than clearly inside it.") {
             VStack(spacing: 9) {
                 ForEach(AutoReplyConfig.Escalation.allCases) { option in
@@ -472,7 +472,7 @@ struct AutoReplySetupView: View {
     }
 
     private var styleStep: some View {
-        StepHeader("How should it sound?",
+        AutoReplyStep("How should it sound?",
                    "Maily already knows your writing style. This is for the replies it sends on your behalf.") {
             VStack(alignment: .leading, spacing: 18) {
                 PickerRow("Tone", AutoReplyConfig.Style.Tone.allCases, selection: $config.style.tone)
@@ -488,7 +488,7 @@ struct AutoReplySetupView: View {
     }
 
     private var instructionsStep: some View {
-        StepHeader("Any specific rules for Auto-Reply?",
+        AutoReplyStep("Any specific rules for Auto-Reply?",
                    "Give Maily rules about how you want your replies to behave. Optional, and you can change them any time.") {
             VStack(alignment: .leading, spacing: 12) {
                 InstructionEditor(instructions: $config.instructions, draft: $draftInstruction)
@@ -507,7 +507,7 @@ struct AutoReplySetupView: View {
     }
 
     private func understandingStep(_ title: String) -> some View {
-        StepHeader(title, "Everything here comes from what you chose. Read it and correct anything that isn't you.") {
+        AutoReplyStep(title, "Everything here comes from what you chose. Read it and correct anything that isn't you.") {
             AutoReplyUnderstandingView(
                 understanding: understanding,
                 isThinking: isThinking,
@@ -517,7 +517,7 @@ struct AutoReplySetupView: View {
     }
 
     private var exampleStep: some View {
-        StepHeader("This is how it would reply.",
+        AutoReplyStep("This is how it would reply.",
                    "Written from your setup, for a message you'd actually get.") {
             AutoReplyExampleView(
                 example: example,
