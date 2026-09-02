@@ -84,6 +84,11 @@ final class MailStore {
     /// about mail, before relevance picks the rest.
     static let newestInContext = 10
 
+    /// What the mail committed people to: asks, promises, open questions,
+    /// dates. Filled by the second tier of the classifier, owned here because
+    /// it is read out of these messages and cleared with them.
+    let facts: FactStore
+
     /// True while a background top-up is fetching what a previous import
     /// could not, so a second launch trigger does not start a second one.
     private var isToppingUp = false
@@ -98,7 +103,8 @@ final class MailStore {
 
     private static let accountKey = "mail.account"
 
-    init(account: GmailAccount? = nil, messages: [Message] = []) {
+    init(account: GmailAccount? = nil, messages: [Message] = [], facts: FactStore? = nil) {
+        self.facts = facts ?? FactStore()
         // A previously connected mailbox is remembered so a cold launch does
         // not present the connect screen to someone already signed in.
         if let account {
@@ -716,11 +722,30 @@ final class MailStore {
     /// Second pass over the mailbox: the model reads what the rules could only
     /// guess at, and replaces the priority it inferred.
     ///
+    /// Two tiers. The first reads the opening of every message that is not
+    /// bulk and settles priority, kind and whether a reply is wanted. It also
+    /// says whether a closer read would find anything: an ask, a promise, a
+    /// date. Only those go to the second tier, which reads the whole message
+    /// and writes down what is in it as facts. Most mail never reaches it,
+    /// which is what keeps the whole pass cheap.
+    ///
     /// Bulk mail is skipped entirely. The rules already settled it from a
     /// List-Unsubscribe header, and it is the largest bucket -- not paying to
     /// have a model confirm that a newsletter is a newsletter is most of the
-    /// cost saving.
+    /// cost saving. Sent mail skips the first tier instead: it is written by
+    /// a person by construction, and what it promised is exactly what the
+    /// second tier is for.
+    ///
+    /// Works through the backlog in batches rather than stopping at the first
+    /// fifteen. It used to stop, so only the top of the list was ever read by
+    /// the model and "what did I promise last month" had nothing to go on.
     func enhanceWithAI(limit: Int = 15) async {
+        // Conversations move on whether or not the model is allowed to read
+        // them, and a fact crossed off by a reply should not wait for that.
+        if let account {
+            facts.reconcile(with: messages, myAddress: account.email, replied: locallyReplied)
+        }
+
         // The setting is real: off means nothing leaves the device and nothing
         // is charged. Local rules still tag, because those cost nothing.
         guard AppSettings.tagsIncomingMail else { return }
@@ -739,23 +764,81 @@ final class MailStore {
             apply(AIService.Classification(cached), to: message.id)
         }
 
-        let targets = messages
-            .filter { $0.aiSummary == nil && !$0.tags.contains(.noReplyNeeded) }
-            .prefix(limit)
-        guard !targets.isEmpty else { return }
-
-        await withTaskGroup(of: (Message.ID, AIService.Classification?).self) { group in
-            for message in targets {
-                group.addTask { (message.id, try? await AIService.classify(message)) }
-            }
-            for await (id, classification) in group {
-                guard let classification else { continue }
-                apply(classification, to: id)
-                if let remoteID = message(id)?.remoteID {
-                    ClassificationCache.store(classification, for: remoteID)
+        var budget = Self.enhancePassLimit
+        while budget > 0 {
+            let firstTier = messages
+                .filter { $0.mailbox != .sent && $0.aiSummary == nil && !$0.tags.contains(.noReplyNeeded) }
+                .prefix(limit)
+            // Messages the first tier already flagged whose second read never
+            // ran -- the app was closed, the call failed -- and sent mail,
+            // which goes straight to the second tier.
+            let secondTier = messages
+                .filter { message in
+                    guard let remoteID = message.remoteID, !facts.hasExtracted(remoteID) else { return false }
+                    if message.mailbox == .sent { return true }
+                    return ClassificationCache.entry(for: remoteID)?.extract == true
                 }
+                .prefix(max(0, limit - firstTier.count))
+
+            guard !firstTier.isEmpty || !secondTier.isEmpty else { break }
+            budget -= firstTier.count + secondTier.count
+
+            let landed = await withTaskGroup(of: Bool.self, returning: Int.self) { group in
+                for message in firstTier {
+                    group.addTask { await self.classifyAndExtract(message) }
+                }
+                for message in secondTier {
+                    group.addTask { await self.extractFacts(from: message) }
+                }
+                var count = 0
+                for await ok in group where ok { count += 1 }
+                return count
             }
+            // A batch where nothing came back is the service being down, not
+            // the mail being hard. The same fifteen would be sent again
+            // until the budget ran out; stop and let the next refresh try.
+            guard landed > 0 else { break }
         }
+    }
+
+    /// The most messages one pass will send to the model. A first import is
+    /// a few thousand; twenty batches of fifteen is a couple of minutes in
+    /// the background, and the next refresh picks up where it stopped.
+    static let enhancePassLimit = 300
+
+    /// First tier, then the second where the first asked for it. False when
+    /// the service did not answer.
+    private func classifyAndExtract(_ message: Message) async -> Bool {
+        guard let classification = try? await AIService.classify(message) else { return false }
+        apply(classification, to: message.id)
+        guard let remoteID = message.remoteID else { return true }
+        ClassificationCache.store(classification, for: remoteID)
+
+        if classification.wantsExtraction {
+            _ = await extractFacts(from: message)
+        } else {
+            // Nothing to find, on the model's word. Marked read so the sent
+            // mail path and the retry path never send it again.
+            facts.record([], from: remoteID)
+        }
+        return true
+    }
+
+    /// Second tier: what this message committed people to, turned round to
+    /// the reader's side and kept on the phone. False when the service did
+    /// not answer.
+    private func extractFacts(from message: Message) async -> Bool {
+        guard let remoteID = message.remoteID, let account else { return false }
+        guard let extraction = try? await AIService.extract(message) else { return false }
+        let found = extraction.facts(for: message, myAddress: account.email)
+        facts.record(found, from: remoteID)
+        if !found.isEmpty {
+            Analytics.record(.factsExtracted, [
+                "count": .int(found.count),
+                "sent": .bool(message.mailbox == .sent),
+            ])
+        }
+        return true
     }
 
     /// The model owns priority; the rules keep everything they can see that it

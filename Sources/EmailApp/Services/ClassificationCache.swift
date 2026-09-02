@@ -19,6 +19,9 @@ enum ClassificationCache {
         /// previous build still decode, instead of one failed key throwing
         /// away the whole cache on upgrade.
         let category: String?
+        /// Whether a closer read was worth running. Optional like `category`,
+        /// and for the same reason.
+        let extract: Bool?
         let storedAt: Date
     }
 
@@ -40,6 +43,7 @@ enum ClassificationCache {
             needsReply: classification.needsReply,
             summary: classification.summary,
             category: classification.category,
+            extract: classification.extract,
             storedAt: .now
         )
 
@@ -64,7 +68,8 @@ extension AIService.Classification {
             priority: entry.priority,
             needsReply: entry.needsReply,
             summary: entry.summary,
-            category: entry.category
+            category: entry.category,
+            extract: entry.extract
         )
     }
 }

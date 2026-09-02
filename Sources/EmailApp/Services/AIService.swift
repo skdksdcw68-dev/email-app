@@ -18,12 +18,17 @@ enum AIService {
         /// What sort of message this is. Optional so a response from an older
         /// deployment of the function still decodes.
         let category: String?
+        /// Whether the model thought a closer read would find something: an
+        /// ask, a promise, a date. The first tier deciding when the second
+        /// runs, rather than a word list. Optional for the same reason.
+        let extract: Bool?
 
-        init(priority: String, needsReply: Bool, summary: String, category: String? = nil) {
+        init(priority: String, needsReply: Bool, summary: String, category: String? = nil, extract: Bool? = nil) {
             self.priority = priority
             self.needsReply = needsReply
             self.summary = summary
             self.category = category
+            self.extract = extract
         }
 
         enum CodingKeys: String, CodingKey {
@@ -31,7 +36,10 @@ enum AIService {
             case needsReply = "needs_reply"
             case summary
             case category
+            case extract
         }
+
+        var wantsExtraction: Bool { extract == true }
 
         /// The model speaks in its own vocabulary; map it onto ours.
         var tag: AITag? {
@@ -71,6 +79,26 @@ enum AIService {
             [
                 "action": "classify",
                 "from": "\(message.sender.name) <\(message.sender.address)>",
+                "subject": message.subject,
+                "body": message.body,
+            ]
+        )
+    }
+
+    /// The second tier: what this message asks, promises, questions or dates.
+    ///
+    /// Only for messages the first tier flagged, and for mail the person sent
+    /// themselves, which is person-to-person by construction. The whole body
+    /// goes, within the server's limit, because an ask is usually at the end.
+    /// The result is from the email's point of view; `Extraction.facts(for:)`
+    /// turns it round to the reader's.
+    static func extract(_ message: Message) async throws -> Extraction {
+        try await call(
+            [
+                "action": "extract",
+                "from": "\(message.sender.name) <\(message.sender.address)>",
+                "to": message.recipients.map { "\($0.name) <\($0.address)>" }.joined(separator: ", "),
+                "date": message.fullDate,
                 "subject": message.subject,
                 "body": message.body,
             ]
@@ -241,6 +269,10 @@ enum AIService {
         signedInAs: String? = nil,
         tone: String? = nil,
         memories: String? = nil,
+        /// What the app has already read out of their mail: who is waiting
+        /// on whom, and for what. Numbered against `context`, so the model
+        /// can show the message a line points at.
+        facts: String? = nil,
         /// How many more times the model may ask to search instead of
         /// answering. Counts down each hop, so an investigation can take
         /// two or three passes and still cannot run forever.
@@ -280,6 +312,7 @@ enum AIService {
         if let signedInAs, !signedInAs.isEmpty { payload["user"] = signedInAs }
         if let tone, !tone.isEmpty { payload["tone"] = tone }
         if let memories, !memories.isEmpty { payload["memories"] = memories }
+        if let facts, !facts.isEmpty { payload["facts"] = facts }
         payload["hops_left"] = max(0, hopsLeft)
         payload["searched"] = hasSearched
 

@@ -328,20 +328,38 @@ struct MemorySettingsView: View {
                     )
                 }
             } else {
-                Section {
-                    ForEach(memory.facts) { fact in
-                        Text(fact.text)
-                            .font(.subheadline)
+                // Grouped the way the model reads them. A situation shows
+                // its last day, and greys out once it has passed: still
+                // here so you can see what Maily knew, no longer applied.
+                ForEach(AIMemory.Kind.allCases, id: \.self) { kind in
+                    let facts = memory.facts.filter { $0.kind == kind }
+                    if !facts.isEmpty {
+                        Section(kind.title) {
+                            ForEach(facts) { fact in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(fact.text)
+                                        .font(.subheadline)
+                                    if let until = fact.until {
+                                        Text(fact.isExpired()
+                                             ? "Ended \(until.formatted(.dateTime.day().month(.wide)))"
+                                             : "Until \(until.formatted(.dateTime.day().month(.wide)))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .foregroundStyle(fact.isExpired() ? .secondary : .primary)
+                            }
+                            .onDelete { offsets in
+                                for index in offsets { memory.forget(facts[index].id) }
+                            }
+                        }
                     }
-                    .onDelete { offsets in
-                        for index in offsets { memory.forget(memory.facts[index].id) }
-                    }
-                } footer: {
-                    Text("Swipe to remove one. These are sent with every question you ask.")
                 }
 
                 Section {
                     Button("Forget everything", role: .destructive) { showingClear = true }
+                } footer: {
+                    Text("Swipe to remove one. Maily decides which kind each is when you tell it, and stops applying a situation the day after it ends.")
                 }
             }
         }

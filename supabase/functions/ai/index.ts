@@ -4,8 +4,10 @@
 // the iOS app -- anyone can pull strings out of an .ipa, so a key shipped in
 // the binary is a published key.
 //
-// Two jobs, deliberately different models:
+// Three jobs, two models:
 //   classify  runs on every message, so it is the cheap fast one
+//   extract   runs only where classify said there was something to find; the
+//             same cheap model, reading more of the message for less often
 //   draft     runs only when a person asks for it, so it can afford quality
 //
 // Payload is kept deliberately small: headers plus the opening of the body,
@@ -63,7 +65,8 @@ Return JSON only, no prose:
   "priority": "urgent" | "very_important" | "important" | "normal",
   "needs_reply": boolean,
   "category": "meeting" | "finance" | "security" | "newsletter" | "promotion" | "other",
-  "summary": "one sentence, under 20 words, what this asks of the reader"
+  "summary": "one sentence, under 20 words, what this asks of the reader",
+  "extract": boolean
 }
 
 priority
@@ -85,7 +88,14 @@ it matters. A payment reminder due tomorrow is urgent AND finance.
   promotion   marketing: an offer, sale, discount or upsell
   other       anything else, including ordinary person-to-person mail
 
-Pick "other" rather than forcing a fit.`;
+Pick "other" rather than forcing a fit.
+
+extract is whether a closer read would find something worth remembering:
+a person asking the reader for something, promising something, putting a
+question to them, or naming a date that matters. True for mail written to
+the reader by a person, or by someone acting for one, that carries any of
+those. False for newsletters, promotions, receipts, alerts, notifications
+and anything that wants nothing from the reader. Most mail is false.`;
 
 async function classify(body: Record<string, string>) {
   const content = [
@@ -105,6 +115,88 @@ async function classify(body: Record<string, string>) {
   );
 
   return json({ ...JSON.parse(raw), model: CLASSIFY_MODEL });
+}
+
+// ----------------------------------------------------------------- extract
+//
+// The second tier. Classify runs on everything and is deliberately shallow;
+// this runs only where classify said there was something to find, and reads
+// the whole thing for what a person would want to be reminded of later.
+//
+// Written from the email's point of view -- writer and reader -- rather than
+// the app's. The same email is a request when it arrives and a promise when
+// it is the one you sent, and the app knows which of those it is looking at.
+// The model does not need to.
+
+/// More than classify sees. An ask is often in the last paragraph, after
+/// the context that explains it, and cutting there would keep the context
+/// and lose the ask.
+const EXTRACT_BODY_LIMIT = 2400;
+
+const EXTRACT_SYSTEM = `You read one email and write down what a person would want
+to be reminded of from it.
+
+Return JSON only, no prose:
+{
+  "requests":    [{ "what": "...", "due": "YYYY-MM-DD" | null }],
+  "commitments": [{ "what": "...", "due": "YYYY-MM-DD" | null }],
+  "questions":   ["..."],
+  "dates":       [{ "what": "...", "on": "YYYY-MM-DD" }]
+}
+
+requests     things the WRITER asks the READER to do or send
+commitments  things the WRITER says they themselves will do
+questions    open questions the writer puts to the reader that are not a
+             request to do something: "does Thursday work", "which plan"
+dates        anything with a date attached that is not already the due date
+             of a request or commitment: a meeting, a call, a renewal, a
+             trip, a launch, a deadline set by somebody else
+
+Rules:
+- Only what the email says. Never infer, never complete a thought for them.
+- "what" is a short phrase, under twelve words, opening with a verb for
+  requests and commitments: "Send the revised quote", "Book the venue for
+  the 14th". Name the thing, not the sentence it came in.
+- Dates are resolved against the email's own date, which you are given.
+  "By Friday" in an email written on Wednesday 2 September 2026 is
+  2026-09-04. "Next week" with no day is null. Never invent a date.
+- Most email has nothing in it. Empty lists are the right answer for a
+  receipt, a newsletter, a notification, a thank-you, a "sounds good".
+- Leave out pleasantries, sign-offs, "let me know if you have questions",
+  unsubscribe lines, legal footers and anything quoted from an earlier
+  message in the thread.
+- At most four items in each list. If there are more, keep the ones with
+  dates and the ones that sound like they matter.`;
+
+async function extract(body: Record<string, string>) {
+  const content = [
+    `From: ${body.from ?? ""}`,
+    `To: ${body.to ?? ""}`,
+    `Written on: ${body.date ?? ""}`,
+    `Subject: ${body.subject ?? ""}`,
+    "",
+    (body.body ?? "").slice(0, EXTRACT_BODY_LIMIT),
+  ].join("\n");
+
+  const raw = await openai(
+    CLASSIFY_MODEL,
+    [
+      { role: "system", content: EXTRACT_SYSTEM },
+      { role: "user", content },
+    ],
+    true,
+  );
+
+  const parsed = JSON.parse(raw);
+  // Whatever shape came back, the app gets the four lists, each a list.
+  const list = (value: unknown) => (Array.isArray(value) ? value : []);
+  return json({
+    requests: list(parsed.requests),
+    commitments: list(parsed.commitments),
+    questions: list(parsed.questions),
+    dates: list(parsed.dates),
+    model: CLASSIFY_MODEL,
+  });
 }
 
 // ------------------------------------------------------------------- draft
@@ -423,6 +515,30 @@ Rules:
   that block into a card the person can edit and send.
 - You may be given things they have asked you to remember. Honour them
   without mentioning them. If one contradicts another, the later one wins.
+- You may be given what the app has already read out of their mail: what
+  people asked them for, what they promised, questions left open, dates
+  coming up. Each line says whose move it is and points at a numbered
+  message where it has one. When they ask what is waiting on them, what
+  they owe, what somebody promised, what is due, or what is coming up,
+  answer from those first and show the messages they point at. Who, what
+  and when are the answer; a due date is part of it, not decoration. Say
+  when something is overdue. If the list is empty or does not cover what
+  they asked, fall back to the messages, and say so if there is nothing.
+- When they tell you something to keep from now on, keep it. That is:
+  how they like things done, a fact about themselves, who somebody is to
+  them, or a situation they are in for a while. Put it in a fenced block
+  that opens with a line of \`\`\`remember and closes with \`\`\`, with three
+  lines inside:
+    kind: preference | about_me | person | situation
+    until: YYYY-MM-DD
+    text: one sentence, in their words where you can
+  "until" is only for a situation with an end in it, like travelling until
+  the 12th; leave the line out otherwise. Then say in a few words outside
+  the block that you have it, and nothing else. Do this when they say
+  remember, keep in mind, note that, from now on, or plainly state a
+  standing fact about themselves for you to use. "Do you remember what Sara
+  said" is a question about their mail, not something to keep. "Remember to
+  reply to Sara" is a task, and you have nowhere to put a task: say so.
 - You cannot send, archive, delete or file anything yourself. Never claim to
   have done any of those things. The app can mark mail read when they ask it
   to, and it will tell them so itself; you do not need to.
@@ -501,6 +617,16 @@ function askMessages(question: string, body: Record<string, unknown>) {
   // reads as the last word on it.
   if (body.memories) {
     facts.push(`Things they have asked you to remember:\n${String(body.memories).slice(0, 2000)}`);
+  }
+  // What the second-tier read pulled out of their mail, already sorted into
+  // whose move it is. The app built this from messages it holds; the model
+  // reads it rather than re-deriving it from forty digests.
+  if (body.facts) {
+    facts.push(
+      `What you already know from reading their mail. "On you" means the person you are talking to owes it; "on them" means the other person does. "[3]" is the numbered message it came from:\n${
+        String(body.facts).slice(0, 4000)
+      }`,
+    );
   }
   const preamble = facts.length ? `${facts.join("\n")}\n\n` : "";
 
@@ -641,6 +767,8 @@ Deno.serve(async (request) => {
     switch (payload.action) {
       case "classify":
         return await classify(payload);
+      case "extract":
+        return await extract(payload);
       case "draft":
         return await draft(payload);
       case "refine":

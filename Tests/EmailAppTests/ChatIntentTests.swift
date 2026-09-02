@@ -145,37 +145,20 @@ final class ChatIntentTests: XCTestCase {
 
     // MARK: - Remembering
 
-    func testRememberStoresWhatFollowsIt() {
-        XCTAssertEqual(
-            ChatIntentParser.parse("Remember that I sign off as Abel", hasPendingDraft: false),
-            .remember("I sign off as Abel")
-        )
-        XCTAssertEqual(
-            ChatIntentParser.parse("keep in mind I hate exclamation marks", hasPendingDraft: false),
-            .remember("I hate exclamation marks")
-        )
-    }
-
-    func testARememberedFactKeepsItsCapitals() {
-        // It gets read back to the person in a card and in Settings, so it
-        // must not come back lowercased the way a parsed command would.
-        guard case .remember(let fact) = ChatIntentParser.parse(
-            "remember: Yohannes is my accountant", hasPendingDraft: false
-        ) else { return XCTFail("expected a memory") }
-        XCTAssertEqual(fact, "Yohannes is my accountant")
-    }
-
-    func testAskingWhetherItRemembersIsAQuestion() {
-        // "Do you remember what Sara said" must not be stored as a fact
-        // about the person.
-        XCTAssertEqual(
-            ChatIntentParser.parse("Do you remember what Sara said?", hasPendingDraft: false),
-            .question
-        )
-    }
-
-    func testRememberWithNothingAfterItIsAQuestion() {
-        XCTAssertEqual(ChatIntentParser.parse("remember", hasPendingDraft: false), .question)
+    func testRememberingGoesToTheModel() {
+        // There used to be a phrase list here that stored whatever followed
+        // "remember". It could not tell a fact from a task from a question,
+        // so the model decides now and answers with a fence the app keeps.
+        for line in [
+            "Remember that I sign off as Abel",
+            "keep in mind I hate exclamation marks",
+            "remember: Yohannes is my accountant",
+            "Do you remember what Sara said?",
+            "Remember to reply to Sara",
+            "remember",
+        ] {
+            XCTAssertEqual(ChatIntentParser.parse(line, hasPendingDraft: false), .question, line)
+        }
     }
 
 }

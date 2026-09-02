@@ -428,9 +428,6 @@ struct AIChatView: View {
         case .markRead(let request):
             markRead(request)
 
-        case .remember(let fact):
-            remember(fact)
-
         case .question:
             work = Task { await askModel(question) }
         }
@@ -520,28 +517,6 @@ struct AIChatView: View {
         }
     }
 
-    // MARK: - Remembering
-
-    /// Told once, kept from then on. Shown as a receipt rather than a
-    /// sentence, because "I'll remember that" with nothing behind it is the
-    /// oldest lie an assistant tells.
-    private func remember(_ fact: String) {
-        guard let saved = memory.remember(fact) else {
-            turns.append(.say("Already knew that one."))
-            return
-        }
-
-        Analytics.record(.memorySaved, ["length": .int(saved.text.count)])
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
-            turns.append(.did(ChatReceipt(
-                symbol: "brain",
-                title: saved.text,
-                detail: "I'll keep this in mind from now on. You can remove it in Settings.",
-                undo: []
-            )))
-        }
-    }
-
     private func undo(in turnID: ChatMessage.ID) {
         guard let index = turns.firstIndex(where: { $0.id == turnID }),
               let receipt = turns[index].receipt, !receipt.isUndone
@@ -581,6 +556,29 @@ struct AIChatView: View {
         // is agreeing to.
         var context = mail.context(for: question, following: history.last(where: { $0.role == "assistant" })?.content)
 
+        // What the app has already read out of their mail -- who is waiting
+        // on whom, and for what -- and the messages it read it from, so a
+        // fact the model leans on can be shown as a card rather than only
+        // described. Withheld with everything else when the question is not
+        // about mail. The messages stay through every trim below: a fact
+        // pointing at a message the model cannot see is a fact it cannot
+        // show.
+        let facts = context.isEmpty ? [] : mail.facts.forPrompt()
+        var pinned = Set<Message.ID>()
+        if !facts.isEmpty {
+            let wanted = Set(facts.map(\.messageID))
+            var known = Set(context.map(\.id))
+            let sources = mail.messages
+                .filter { message in
+                    guard let remoteID = message.remoteID, wanted.contains(remoteID) else { return false }
+                    return known.insert(message.id).inserted
+                }
+                .prefix(Self.factSources)
+            pinned = Set(sources.map(\.id))
+            context += sources
+            context.sort { $0.date > $1.date }
+        }
+
         // Filled as the investigation goes, and only by it.
         //
         // The app used to decide when to search from whether any word in the
@@ -616,6 +614,9 @@ struct AIChatView: View {
                     signedInAs: user.account?.displayName,
                     tone: user.tonePreference,
                     memories: memory.prompt,
+                    // Numbered against this hop's context, which a search may
+                    // have reordered since the last one.
+                    facts: FactStore.describe(facts, numbered: context),
                     hopsLeft: hopsLeft,
                     hasSearched: searchedFor != nil
                 ) { fragment in
@@ -703,6 +704,11 @@ struct AIChatView: View {
     /// this many and no more, so the app decides which ones rather than
     /// letting the cut fall wherever the list happened to end.
     static let contextCeiling = 40
+
+    /// The most messages carried along because a fact points at them. A
+    /// dozen: the facts the prompt gets are capped at thirty, and most of
+    /// them share a handful of threads.
+    static let factSources = 12
 
     /// The emails the model put on screen in this turn, if any.
     private func shown(in id: ChatMessage.ID?) -> [Message]? {
@@ -803,7 +809,7 @@ struct AIChatView: View {
         // which emails an answer is about. "The last email I got" used to be
         // a correct sentence with six unrelated rows under it, because the
         // app attached what it had rather than what was asked for.
-        let structured = AnswerFences.extract(from: text, messages: context)
+        let structured = AnswerFences.read(from: text, messages: context)
 
         close(&turns[index].steps)
         withAnimation(.easeOut(duration: 0.25)) {
@@ -816,6 +822,40 @@ struct AIChatView: View {
             // emails, and under "nothing matched" it looked like a lie.
             turns[index].sources = searchNote == nil ? [] : found
             turns[index].isPending = false
+        }
+
+        for note in structured.memories {
+            remember(note)
+        }
+    }
+
+    // MARK: - Remembering
+
+    /// The model said this was worth keeping, and which kind of thing it is.
+    /// Shown as a receipt rather than a sentence, because "I'll remember
+    /// that" with nothing behind it is the oldest lie an assistant tells.
+    /// A duplicate is dropped quietly: the model has already said it has it,
+    /// and it does.
+    private func remember(_ note: MemoryNote) {
+        guard let saved = memory.remember(note.text, kind: note.kind, until: note.until) else { return }
+
+        Analytics.record(.memorySaved, [
+            "length": .int(saved.text.count),
+            "kind": .string(saved.kind.rawValue),
+            "expires": .bool(saved.until != nil),
+        ])
+
+        var detail = "I'll keep this in mind. You can remove it in Settings."
+        if let until = saved.until {
+            detail = "I'll keep this in mind until \(until.formatted(.dateTime.day().month(.wide))). You can remove it in Settings."
+        }
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+            turns.append(.did(ChatReceipt(
+                symbol: "brain",
+                title: saved.text,
+                detail: detail,
+                undo: []
+            )))
         }
     }
 

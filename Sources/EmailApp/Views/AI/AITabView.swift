@@ -186,6 +186,73 @@ struct AITabView: View {
                 Text("You sent these and nobody came back. Swipe to have Maily write the chase, or to let it go.")
             }
         }
+
+        comingUpSection
+    }
+
+    /// Dated things read out of the mail: a deadline somebody set, a day
+    /// something happens, a promise with a Friday on it. Soonest first, the
+    /// overdue ones in orange, and gone the day after unless it was a
+    /// request that is still open. Swipe to cross one off.
+    @ViewBuilder
+    private var comingUpSection: some View {
+        let upcoming = mail.facts.upcoming()
+
+        if !upcoming.isEmpty {
+            Section {
+                ForEach(upcoming.prefix(6)) { fact in
+                    factRow(fact)
+                }
+            } header: {
+                Text("Coming up")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func factRow(_ fact: Fact) -> some View {
+        let message = mail.messages.first { $0.remoteID == fact.messageID }
+        let overdue = fact.isOverdue()
+        let who = fact.person.name.isEmpty ? fact.person.address : fact.person.name
+        let when = fact.due.map { Fact.dayPhrase($0) } ?? ""
+
+        NavigationLink(value: message?.id ?? UUID()) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol(for: fact))
+                    .font(.footnote)
+                    .foregroundStyle(overdue ? Color.orange : Color.secondary)
+                    .frame(width: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(fact.text)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(2)
+                    Text(overdue ? "\(who) · \(when) · overdue" : "\(who) · \(when)")
+                        .font(.caption)
+                        .foregroundStyle(overdue ? Color.orange : Color.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .disabled(message == nil)
+        .swipeActions(edge: .trailing) {
+            Button {
+                mail.facts.markDone(fact.id)
+            } label: {
+                Label("Done", systemImage: "checkmark")
+            }
+            .tint(.green)
+        }
+    }
+
+    private func symbol(for fact: Fact) -> String {
+        switch fact.kind {
+        case .request: fact.isOnMe ? "arrowshape.turn.up.left.fill" : "clock.arrow.circlepath"
+        case .commitment: fact.isOnMe ? "hand.raised.fill" : "clock.arrow.circlepath"
+        case .question: "questionmark.bubble.fill"
+        case .date: "calendar"
+        }
     }
 
     @ViewBuilder
@@ -203,7 +270,11 @@ struct AITabView: View {
                     Text(followUp.message.sender.name)
                         .font(.subheadline.weight(.medium))
                         .lineLimit(1)
-                    Text(followUp.message.subject)
+                    // What the thread is actually waiting for, when the app
+                    // has read it: "Send the revised quote" says more than
+                    // "Re: Re: Q3 pricing". The subject when it has not.
+                    Text(mail.facts.facts(inThread: followUp.message.threadID).first?.text
+                         ?? followUp.message.subject)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

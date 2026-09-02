@@ -73,6 +73,9 @@ enum Analytics {
         case markedRead = "marked_read"
         case markedReadUndone = "marked_read_undone"
         case memorySaved = "memory_saved"
+        /// The second tier found something in a message. Count and
+        /// direction only; never what it found.
+        case factsExtracted = "facts_extracted"
 
         case bulkReplyFinished = "bulk_reply_finished"
         case tagFiltered = "tag_filtered"
