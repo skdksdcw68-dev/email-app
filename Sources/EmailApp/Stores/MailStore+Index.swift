@@ -36,6 +36,9 @@ struct MailboxIndex {
     /// Conversations waiting on somebody, dismissals already taken out.
     var followUps: [FollowUp] = []
 
+    /// Everybody who has written or been written to, with their standing.
+    var people: [Person] = []
+
     init() {}
 
     init(_ messages: [Message], myAddress: String?) {
@@ -70,5 +73,9 @@ struct MailboxIndex {
         followUps = messages.followUps(myAddress: myAddress).filter {
             !FollowUpPreferences.isDismissed($0.id, lastActivity: $0.message.date)
         }
+        // Assembling these walks every message and then asks the person's
+        // preferences about each one. The People tab did that on every draw,
+        // which meant on every keystroke in its search field.
+        people = messages.people(myAddress: myAddress)
     }
 }

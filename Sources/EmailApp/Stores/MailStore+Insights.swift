@@ -105,12 +105,11 @@ extension MailStore {
 
     /// Correspondents assembled from their messages, busiest relationships,
     /// anyone marked important, and anyone left waiting first.
+    /// Built once per change in `MailboxIndex`, like the follow-ups, and for
+    /// the same reason: it walks the whole mailbox and the tab showing it
+    /// asked on every draw.
     var people: [Person] {
-        guard let account else { return [] }
-        // Read so that observation tracks it: a preference change re-derives
-        // the list.
-        _ = preferencesVersion
-        return messages.people(myAddress: account.email)
+        derived.people
     }
 }
 

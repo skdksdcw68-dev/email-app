@@ -193,6 +193,30 @@ final class MailboxIndexTests: XCTestCase {
         XCTAssertTrue(mail.followUps.filter { $0.direction == .waitingOnThem }.isEmpty)
     }
 
+    // MARK: - People
+
+    func testPeopleComeOffTheIndexAndFollowPreferences() {
+        PersonPreferences.clearAll()
+        defer { PersonPreferences.clearAll() }
+
+        let mail = store([
+            message("a", from: "sara@x.com"),
+            message("b", from: "sara@x.com", daysAgo: 2),
+            message("c", from: "tom@y.com"),
+        ])
+
+        XCTAssertEqual(mail.people.count, 2)
+        XCTAssertEqual(mail.people.first { $0.contact.address == "sara@x.com" }?.messageCount, 2)
+        XCTAssertFalse(mail.people.contains { $0.isImportant })
+
+        // A preference is not a change to the mail, so it has to invalidate
+        // the index on its own.
+        PersonPreferences.setImportant(true, for: "sara@x.com")
+        mail.notePreferencesChanged()
+
+        XCTAssertEqual(mail.people.filter(.isImportant).map(.contact.address), ["sara@x.com"])
+    }
+
     func testDismissingAFollowUpTakesItOutWithoutTheMailChanging() {
         FollowUpPreferences.clearAll()
         defer { FollowUpPreferences.clearAll() }

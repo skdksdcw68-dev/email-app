@@ -14,9 +14,27 @@ enum PersonPreferences {
 
     // MARK: - Important
 
+    // Every one of these is read per person while the People tab is being
+    // assembled -- and that assembly walks the whole mailbox. Reading them
+    // out of UserDefaults each time meant hundreds of fetches and hundreds of
+    // fresh Sets per draw, and again on every keystroke in the search field.
+    // Held in memory and written through instead.
+    nonisolated(unsafe) private static var importantCache: Set<String>?
+    nonisolated(unsafe) private static var mutedCache: Set<String>?
+    nonisolated(unsafe) private static var overridesCache: [String: String]?
+    nonisolated(unsafe) private static var relationshipsCache: [String: String]?
+
     static var important: Set<String> {
-        get { Set(UserDefaults.standard.stringArray(forKey: importantKey) ?? []) }
-        set { UserDefaults.standard.set(Array(newValue), forKey: importantKey) }
+        get {
+            if let importantCache { return importantCache }
+            let loaded = Set(UserDefaults.standard.stringArray(forKey: importantKey) ?? [])
+            importantCache = loaded
+            return loaded
+        }
+        set {
+            importantCache = newValue
+            UserDefaults.standard.set(Array(newValue), forKey: importantKey)
+        }
     }
 
     static func isImportant(_ address: String) -> Bool {
@@ -39,8 +57,16 @@ enum PersonPreferences {
     // MARK: - Muted
 
     static var muted: Set<String> {
-        get { Set(UserDefaults.standard.stringArray(forKey: mutedKey) ?? []) }
-        set { UserDefaults.standard.set(Array(newValue), forKey: mutedKey) }
+        get {
+            if let mutedCache { return mutedCache }
+            let loaded = Set(UserDefaults.standard.stringArray(forKey: mutedKey) ?? [])
+            mutedCache = loaded
+            return loaded
+        }
+        set {
+            mutedCache = newValue
+            UserDefaults.standard.set(Array(newValue), forKey: mutedKey)
+        }
     }
 
     static func isMuted(_ address: String) -> Bool {
@@ -61,8 +87,16 @@ enum PersonPreferences {
     // MARK: - Category
 
     private static var overrides: [String: String] {
-        get { UserDefaults.standard.dictionary(forKey: categoryKey) as? [String: String] ?? [:] }
-        set { UserDefaults.standard.set(newValue, forKey: categoryKey) }
+        get {
+            if let overridesCache { return overridesCache }
+            let loaded = UserDefaults.standard.dictionary(forKey: categoryKey) as? [String: String] ?? [:]
+            overridesCache = loaded
+            return loaded
+        }
+        set {
+            overridesCache = newValue
+            UserDefaults.standard.set(newValue, forKey: categoryKey)
+        }
     }
 
     static func category(for address: String) -> PersonCategory? {
@@ -88,8 +122,16 @@ enum PersonPreferences {
     private static let relationshipKey = "people.relationships"
 
     private static var relationships: [String: String] {
-        get { UserDefaults.standard.dictionary(forKey: relationshipKey) as? [String: String] ?? [:] }
-        set { UserDefaults.standard.set(newValue, forKey: relationshipKey) }
+        get {
+            if let relationshipsCache { return relationshipsCache }
+            let loaded = UserDefaults.standard.dictionary(forKey: relationshipKey) as? [String: String] ?? [:]
+            relationshipsCache = loaded
+            return loaded
+        }
+        set {
+            relationshipsCache = newValue
+            UserDefaults.standard.set(newValue, forKey: relationshipKey)
+        }
     }
 
     static func relationshipName(for address: String) -> String? {
@@ -120,6 +162,10 @@ enum PersonPreferences {
     }
 
     static func clearAll() {
+        importantCache = []
+        mutedCache = []
+        overridesCache = [:]
+        relationshipsCache = [:]
         UserDefaults.standard.removeObject(forKey: importantKey)
         UserDefaults.standard.removeObject(forKey: mutedKey)
         UserDefaults.standard.removeObject(forKey: categoryKey)
