@@ -207,8 +207,14 @@ extension MailStore {
             replyingTo: original
         )
 
+        // Whether they changed it before sending is the single most useful
+        // thing to know about how good these are, and it has to be read
+        // before the queue is updated. The reply itself never leaves the
+        // phone; only whether it was touched.
+        let asWritten = queue.log.first { $0.messageID == decision.messageID }?.reply
+
         markReplied(original.id)
         queue.markSent(decision.id)
-        Analytics.record(.autoReplySent, ["edited": .bool(false)])
+        Analytics.record(.autoReplySent, ["edited": .bool(asWritten != reply)])
     }
 }

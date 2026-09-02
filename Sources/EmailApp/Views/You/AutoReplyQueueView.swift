@@ -11,7 +11,6 @@ struct AutoReplyQueueView: View {
     @Environment(AutoReplyQueue.self) private var queue
     @Environment(AutoReplyStore.self) private var autoReply
 
-    @State private var open: AutoReplyDecision?
 
     /// How often it looks again while this screen is open. Somebody testing
     /// this sends themselves an email and watches -- half a minute is short
@@ -78,25 +77,20 @@ struct AutoReplyQueueView: View {
                 }
             } else {
                 Section {
+                    // The same card the assistant uses in chat, because it is
+                    // the same thing: an email Maily wrote, waiting on a
+                    // decision. Two different cards for one idea would be the
+                    // app forgetting what it is.
                     ForEach(queue.waiting) { decision in
-                        Button {
-                            open = decision
-                        } label: {
-                            row(decision)
-                        }
-                        .buttonStyle(.plain)
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                queue.discard(decision.id)
-                            } label: {
-                                Label("Bin it", systemImage: "trash")
-                            }
-                        }
+                        AutoReplyCard(decision: decision)
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                     }
                 } header: {
                     Text("Waiting for you")
                 } footer: {
-                    Text("Nothing here has been sent. Open one to read it, edit it, and send it — or bin it.")
+                    Text("Nothing here has been sent. Edit opens the full editor, where you can ask Maily to change it.")
                 }
             }
 
@@ -131,9 +125,6 @@ struct AutoReplyQueueView: View {
                 await check()
                 try? await Task.sleep(for: Self.refreshEvery)
             }
-        }
-        .sheet(item: $open) { decision in
-            AutoReplyDraftView(decision: decision)
         }
     }
 
@@ -207,158 +198,6 @@ struct AutoReplyQueueView: View {
         return "Maily has looked at your mail and didn't find anything it could answer on its own. What it decided is below."
     }
 
-    private func row(_ decision: AutoReplyDecision) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 8) {
-                Text(decision.from)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                Text(decision.decidedAt.formatted(.relative(presentation: .named)))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Text(decision.subject)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            if let reply = decision.reply {
-                Text(reply)
-                    .font(.footnote)
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .padding(.top, 2)
-            }
-            if !decision.withheld.isEmpty {
-                Label("\(decision.withheld.count) left for you", systemImage: "hand.raised.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                    .padding(.top, 2)
-            }
-        }
-        .padding(.vertical, 3)
-    }
-}
-
-/// One written reply, before it goes anywhere.
-///
-/// The reply is editable, because it is theirs. What it leaned on and what it
-/// refused to answer sit under it -- that second list is the important one,
-/// and burying it would turn a careful assistant into a confident one.
-struct AutoReplyDraftView: View {
-    let decision: AutoReplyDecision
-
-    @Environment(MailStore.self) private var mail
-    @Environment(AutoReplyQueue.self) private var queue
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var text: String
-    @State private var isSending = false
-    @State private var failure: String?
-
-    init(decision: AutoReplyDecision) {
-        self.decision = decision
-        _text = State(initialValue: decision.reply ?? "")
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(decision.from).font(.subheadline.weight(.semibold))
-                        Text(decision.subject).font(.caption).foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 2)
-                } header: {
-                    Text("Replying to")
-                }
-
-                Section {
-                    TextField("Reply", text: $text, axis: .vertical)
-                        .lineLimit(6...20)
-                        .font(.subheadline)
-                } header: {
-                    Text("Maily wrote")
-                } footer: {
-                    Text(decision.reason)
-                }
-
-                if !decision.evidence.isEmpty {
-                    Section {
-                        ForEach(decision.evidence, id: \.self) { fact in
-                            Label(fact, systemImage: "checkmark.circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } header: {
-                        Text("What it used")
-                    }
-                }
-
-                if !decision.withheld.isEmpty {
-                    Section {
-                        ForEach(decision.withheld, id: \.self) { item in
-                            Label(item, systemImage: "hand.raised.fill")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    } header: {
-                        Text("What it left for you")
-                    } footer: {
-                        Text("Maily didn't answer these because they're outside what you approved. Add them yourself before sending, if you want to.")
-                    }
-                }
-
-                Section {
-                    Button(role: .destructive) {
-                        queue.discard(decision.id)
-                        dismiss()
-                    } label: {
-                        Label("Bin this reply", systemImage: "trash")
-                    }
-                }
-            }
-            .navigationTitle("Reply")
-            .navigationBarTitleDisplayMode(.inline)
-            .keyboardDismissable()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task { await sendIt() }
-                    } label: {
-                        if isSending { ProgressView() } else { Text("Send").fontWeight(.semibold) }
-                    }
-                    .disabled(isSending || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-            .alert("Couldn't send", isPresented: .constant(failure != nil)) {
-                Button("OK") { failure = nil }
-            } message: {
-                Text(failure ?? "")
-            }
-        }
-    }
-
-    private func sendIt() async {
-        isSending = true
-        defer { isSending = false }
-
-        // Whatever is on screen is what goes, edits included. Sending the
-        // model's original after somebody changed it would be the worst
-        // possible bug in this feature.
-        var edited = decision
-        edited.reply = text
-        do {
-            try await mail.sendAutoReply(edited, queue: queue)
-            dismiss()
-        } catch {
-            failure = error.localizedDescription
-        }
-    }
 }
 
 /// Everything Auto-Reply looked at, and what it decided.
