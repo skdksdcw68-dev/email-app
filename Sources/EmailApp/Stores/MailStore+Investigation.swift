@@ -48,6 +48,10 @@ extension MailStore {
         switch request.kind {
         case .wording: await matching(request.queries, limit: limit)
         case .earliest: await earliest(request.queries)
+        // Opening a message is not an investigation: the app is already
+        // holding it, and the chat handles it without asking Gmail anything.
+        // Reaching here would mean a caller skipped `kind.needsGmail`.
+        case .opening: Investigation()
         }
     }
 
