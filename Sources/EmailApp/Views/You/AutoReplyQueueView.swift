@@ -315,83 +315,164 @@ extension AutoReplyQueueView {
     }
 }
 
+
 /// One reply Maily wrote, read back afterwards.
 ///
-/// Read-only on purpose. A reply that has gone cannot be unsent and a reply
-/// that was binned is not coming back, so offering an editor here would be
-/// offering something the app cannot honour. What it can do is show exactly
-/// what was said, what it leaned on, and what it refused -- which is the
-/// whole of what somebody deciding whether to trust this needs.
+/// Deliberately the same screen as the example at the end of the setup: the
+/// message on the left as it arrived, the reply below it in the tinted block,
+/// and underneath, small, what it leaned on and what it refused. Somebody who
+/// read the example during onboarding already knows how to read this, and it
+/// is the same claim being made -- here is what it said, here is why that was
+/// safe -- so it should not be a second design.
+///
+/// Read-only. A reply that has gone cannot be unsent and a binned one is not
+/// coming back, so an editor here would offer something the app cannot
+/// honour. What it can do is show exactly what was said.
 struct AutoReplyDetailView: View {
     let decision: AutoReplyDecision
 
+    @Environment(MailStore.self) private var mail
+
+    /// The message being answered, for the incoming block. Nil once the mail
+    /// has aged out of the archive, which is fine: the reply is the point.
+    private var original: Message? {
+        mail.messages.first { $0.remoteID == decision.messageID }
+    }
+
     var body: some View {
-        List {
-            Section {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(decision.from).font(.subheadline.weight(.semibold))
-                    Text(decision.subject).font(.caption).foregroundStyle(.secondary)
-                    Text(decision.decidedAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption2)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(decision.outcomeTitle.uppercased())
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(tint)
+                        .tracking(0.6)
+                    Text(decision.subject)
+                        .font(.title3.bold())
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("\(decision.from) · \(decision.decidedAt.formatted(.relative(presentation: .named)))")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 2)
-            } header: {
-                Text(decision.outcomeTitle)
-            } footer: {
-                Text(decision.reason)
-            }
 
-            if let reply = decision.reply, !reply.isEmpty {
-                Section {
-                    Text(reply)
-                        .font(.subheadline)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                } header: {
-                    Text("What Maily wrote")
+                if let body = original?.body, !body.isEmpty {
+                    block("Incoming", String(body.prefix(600)), isReply: false, footer: nil)
                 }
-            }
 
-            if !decision.evidence.isEmpty {
-                Section {
-                    ForEach(decision.evidence, id: \.self) { fact in
-                        Label(fact, systemImage: "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("What it used")
+                if let reply = decision.reply, !reply.isEmpty {
+                    // The status lives in the card's own footer rather than
+                    // as a banner of its own. It is a fact about this email,
+                    // not a headline.
+                    block("Maily's reply", reply, isReply: true, footer: decision.reason)
                 }
-            }
 
-            if !decision.withheld.isEmpty {
-                Section {
-                    ForEach(decision.withheld, id: \.self) { item in
-                        Label(item, systemImage: "hand.raised.fill")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                } header: {
-                    Text("What it left alone")
-                }
+                safety
             }
-
-            if let verification = decision.verification, verification.confidence > 0 {
-                Section {
-                    LabeledContent("How sure it was", value: "\(Int(verification.confidence * 100))%")
-                    ForEach(verification.problems, id: \.self) { problem in
-                        Label(problem, systemImage: "shield.lefthalf.filled")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                } header: {
-                    Text("The check")
-                }
-            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
         }
         .navigationTitle("Reply")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
+    }
+
+    private var tint: Color {
+        switch decision.outcome {
+        case .sent: .green
+        case .drafted: .accentColor
+        case .escalated: .orange
+        case .skipped: .secondary
+        case .failed: .red
+        }
+    }
+
+    private func block(_ title: String, _ text: String, isReply: Bool, footer: String?) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+                .tracking(0.6)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(text)
+                    .font(.subheadline)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+
+                if let footer, !footer.isEmpty {
+                    Divider().opacity(0.5)
+                    HStack(spacing: 6) {
+                        Image(systemName: decision.symbol)
+                            .font(.caption2)
+                        Text(footer)
+                            .font(.caption2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                }
+            }
+            .background {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(isReply
+                          ? Color.accentColor.opacity(0.10)
+                          : Color(uiColor: .secondarySystemBackground))
+            }
+        }
+    }
+
+    /// Small on purpose. These are the receipts, not the message: worth being
+    /// able to check, never worth reading before the reply itself.
+    @ViewBuilder
+    private var safety: some View {
+        let confidence = decision.verification?.confidence ?? 0
+        let problems = decision.verification?.problems ?? []
+
+        if !decision.evidence.isEmpty || !decision.withheld.isEmpty
+            || !problems.isEmpty || confidence > 0 {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text("WHY THIS WAS SAFE")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .tracking(0.6)
+                    Spacer(minLength: 0)
+                    if confidence > 0 {
+                        Text("\(Int(confidence * 100))% sure")
+                            .font(.caption2.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                ForEach(decision.evidence, id: \.self) { fact in
+                    line("checkmark", fact, .green)
+                }
+                ForEach(decision.withheld, id: \.self) { item in
+                    line("hand.raised", item, .orange)
+                }
+                ForEach(problems, id: \.self) { problem in
+                    line("shield.lefthalf.filled", problem, .orange)
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func line(_ symbol: String, _ text: String, _ tint: Color) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: symbol)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 12)
+                .padding(.top, 2)
+            Text(text)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

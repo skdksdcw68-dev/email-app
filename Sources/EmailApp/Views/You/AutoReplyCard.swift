@@ -64,39 +64,31 @@ struct AutoReplyCard: View {
     }
 
     /// Why this reply says what it says, and what it left alone.
+    ///
+    /// Small, and smaller than the reply. These are receipts: worth being
+    /// able to check, never worth reading before the email itself. They were
+    /// set in the same size as the card's own text, which made every draft
+    /// look like a form to work through rather than a message to send.
     @ViewBuilder
     private var reasoning: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            if !decision.reason.isEmpty {
-                Text(decision.reason)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(decision.evidence.prefix(3), id: \.self) { fact in
+                label("checkmark", fact, .green)
             }
-
-            ForEach(decision.evidence, id: \.self) { fact in
-                label("checkmark.circle.fill", fact, .green)
-            }
-
-            if !decision.withheld.isEmpty {
-                ForEach(decision.withheld, id: \.self) { item in
-                    label("hand.raised.fill", item, .orange)
-                }
-                Text("Maily left these for you. Add them yourself before sending, if you want to.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            ForEach(decision.withheld, id: \.self) { item in
+                label("hand.raised", item, .orange)
             }
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 6)
     }
 
     private func label(_ symbol: String, _ text: String, _ tint: Color) -> some View {
-        HStack(alignment: .top, spacing: 7) {
+        HStack(alignment: .top, spacing: 6) {
             Image(systemName: symbol)
-                .font(.caption2)
+                .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(tint)
-                .frame(width: 14)
+                .frame(width: 12)
+                .padding(.top, 2)
             Text(text)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
