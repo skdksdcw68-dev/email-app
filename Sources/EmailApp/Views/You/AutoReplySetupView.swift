@@ -154,7 +154,7 @@ struct AutoReplySetupView: View {
 
     private var buttonTitle: String? {
         if singleStep { return "Save" }
-        switch step {
+        return switch step {
         case .intro: "Set up Auto-Reply"
         case .checkpoint, .summary: "That looks right"
         case .example: "Looks good"
