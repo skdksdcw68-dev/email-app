@@ -89,3 +89,49 @@ final class ImportLedgerTests: XCTestCase {
         XCTAssertEqual(ledger.nextChunk(50), ["a"])
     }
 }
+
+/// The trap that let a mailbox stay permanently short.
+///
+/// `hasImported` was set the moment anything landed, so the import never ran
+/// again; and the ledger that knew what was still owed was thrown away the
+/// moment its ids aged out of the window. Between the two, an account that
+/// lost most of a first import stayed that way for good -- and the assistant
+/// was then asked to search a mailbox with the evidence removed.
+final class ImportAuditTests: XCTestCase {
+
+    func testAnAuditReportsWhatIsHeldAgainstWhatGmailHas() {
+        let audit = MailStore.ImportAudit(expected: 1580, missing: 1300)
+        XCTAssertEqual(audit.held, 280)
+        XCTAssertFalse(audit.isComplete)
+    }
+
+    func testNothingMissingReadsAsComplete() {
+        let audit = MailStore.ImportAudit(expected: 1580, missing: 0)
+        XCTAssertEqual(audit.held, 1580)
+        XCTAssertTrue(audit.isComplete)
+    }
+
+    func testALedgerBuiltFromWhatIsMissingCountsTheWholeWindow() {
+        // What `verifyAgainstGmail` builds: the denominator is everything
+        // Gmail listed, not just the shortfall, so the screen reads
+        // "280 of 1,580" rather than "0 of 1,300".
+        let ledger = ImportLedger(pending: Array(repeating: "id", count: 1300), done: 280, total: 1580)
+        XCTAssertEqual(ledger.total, 1580)
+        XCTAssertEqual(ledger.done, 280)
+        XCTAssertFalse(ledger.isComplete)
+    }
+
+    func testAStaleLedgerIsNoLongerTheEndOfTheStory() {
+        // Stale still means its ids cannot be trusted -- the window moved --
+        // but the response is now to re-count against Gmail rather than to
+        // clear it and stop.
+        let old = ImportLedger(
+            pending: ["a"], done: 0, total: 1,
+            startedAt: Date.now.addingTimeInterval(-8 * 24 * 60 * 60)
+        )
+        XCTAssertTrue(old.isStale)
+
+        let fresh = ImportLedger(pending: ["a"], done: 0, total: 1)
+        XCTAssertFalse(fresh.isStale)
+    }
+}

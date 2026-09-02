@@ -380,6 +380,7 @@ struct StorageSettingsView: View {
     @Environment(MailStore.self) private var mail
 
     @State private var archiveSize = "Calculating…"
+    @State private var isChecking = false
 
     private var appVersion: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -398,6 +399,36 @@ struct StorageSettingsView: View {
                 }
             } header: {
                 Text("Storage")
+            }
+
+            // What Gmail says is in the window against what is actually here.
+            // Without this the app could be missing most of three months and
+            // the only symptom was an assistant that could not find things.
+            Section {
+                if let audit = mail.importAudit {
+                    LabeledContent("Last 3 months") {
+                        Text("\(audit.held) of \(audit.expected)")
+                            .foregroundStyle(audit.isComplete ? Color.green : Color.orange)
+                    }
+                    if !audit.isComplete {
+                        LabeledContent("Still to fetch", value: "\(audit.missing)")
+                    }
+                } else {
+                    LabeledContent("Last 3 months", value: isChecking ? "Checking…" : "Not checked yet")
+                }
+
+                Button(isChecking ? "Checking…" : "Check against Gmail") {
+                    isChecking = true
+                    Task {
+                        await mail.verifyAgainstGmail(force: true)
+                        isChecking = false
+                    }
+                }
+                .disabled(isChecking || !mail.isConnected)
+            } header: {
+                Text("Sync")
+            } footer: {
+                Text("Maily counts what Gmail holds for the last three months and fetches anything it is missing. It checks once a day on its own.")
             }
 
             Section {

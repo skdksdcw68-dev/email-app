@@ -68,6 +68,10 @@ struct EmailAppApp: App {
                         // once per connection.
                         if mail.syncCursor == nil { await mail.rememberCursor() }
 
+                        // And whether the three months it claims to hold are
+                        // actually here. Once a day, in the background.
+                        await mail.verifyAgainstGmail()
+
                         // Asked here, after `restore()`, because there has to
                         // be a mailbox before "let Maily notify you" means
                         // anything. Asking at cold launch, before the account

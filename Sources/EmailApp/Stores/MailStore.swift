@@ -325,18 +325,89 @@ final class MailStore {
     /// then asked to search.
     func topUpIfNeeded() async {
         guard isConnected, hasImported, !isToppingUp else { return }
-        guard let ledger = ImportLedger.load(), !ledger.isComplete else { return }
         isToppingUp = true
         defer { isToppingUp = false }
 
-        // The window has moved on since this was written down, so the ids in
-        // it are the wrong ids. Drop it and let a refresh carry the mailbox.
-        guard !ledger.isStale else {
-            ImportLedger.clear()
+        // A ledger whose ids are still inside the window is the cheap path:
+        // it already knows exactly what is owed.
+        if let ledger = ImportLedger.load(), !ledger.isComplete, !ledger.isStale {
+            await drain(ledger, quietly: true)
             return
         }
 
+        // No ledger, or one written so long ago that the window has moved
+        // past its ids. Either way the app no longer knows whether it has the
+        // three months it claims to, so it asks rather than assuming.
+        //
+        // This used to clear the ledger and return, which is how a mailbox
+        // could stay permanently short: `hasImported` was set the moment
+        // anything landed, so the import never ran again, and the only thing
+        // that knew mail was missing had just been thrown away. An account
+        // that lost most of a first import stayed that way for good, and the
+        // assistant was asked to search a mailbox with the evidence removed.
+        ImportLedger.clear()
+        await verifyAgainstGmail()
+    }
+
+    /// What Gmail says is in the three month window, against what is actually
+    /// here -- and fetches the difference.
+    ///
+    /// Ids are cheap: the whole window is four requests of five hundred, and
+    /// bodies are only asked for where one is genuinely missing. Run at
+    /// launch, at most once a day, so a mailbox cannot drift short without
+    /// anything noticing.
+    func verifyAgainstGmail(force: Bool = false) async {
+        guard isConnected else { return }
+        if !force, let last = lastVerifiedAt,
+           Date.now.timeIntervalSince(last) < Self.verifyInterval { return }
+
+        guard let token = try? await AuthService.currentGmailAccessToken() else { return }
+        guard let ids = await Self.retrying({
+            try await GmailService.allMessageIDs(
+                matching: GmailService.importWindow, accessToken: token
+            )
+        }) else { return }
+        guard !ids.isEmpty else { return }
+
+        let held = Set(messages.compactMap(\.remoteID))
+        let missing = ids.filter { !held.contains($0) }
+        lastVerifiedAt = .now
+        importAudit = ImportAudit(expected: ids.count, missing: missing.count)
+
+        guard !missing.isEmpty else { return }
+
+        let ledger = ImportLedger(
+            pending: missing, done: ids.count - missing.count, total: ids.count
+        )
+        ledger.save()
         await drain(ledger, quietly: true)
+
+        // What the top-up actually recovered, so the storage screen is not
+        // still reporting the shortfall it just fixed.
+        let after = Set(messages.compactMap(\.remoteID))
+        importAudit = ImportAudit(
+            expected: ids.count, missing: ids.filter { !after.contains($0) }.count
+        )
+    }
+
+    /// Gmail's count for the window against ours, for the storage screen.
+    struct ImportAudit: Equatable {
+        let expected: Int
+        let missing: Int
+        var held: Int { expected - missing }
+        var isComplete: Bool { missing == 0 }
+    }
+
+    private(set) var importAudit: ImportAudit?
+
+    /// Once a day. The check is four requests; doing it on every launch would
+    /// be four requests nobody asked for, and mail does not fall out of a
+    /// mailbox that fast.
+    static let verifyInterval: TimeInterval = 24 * 60 * 60
+
+    private var lastVerifiedAt: Date? {
+        get { UserDefaults.standard.object(forKey: "mail.lastVerifiedAt") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "mail.lastVerifiedAt") }
     }
 
     /// How much of the mailbox is still owed, for the settings screen.
@@ -993,6 +1064,8 @@ final class MailStore {
         // The next mailbox owes nothing on this one's behalf.
         ImportLedger.clear()
         importProgress = .idle
+        importAudit = nil
+        lastVerifiedAt = nil
         connectionError = nil
         persistAccount()
         ClassificationCache.clear()
