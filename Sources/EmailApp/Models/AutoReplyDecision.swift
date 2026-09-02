@@ -95,12 +95,15 @@ enum AutoReplyEligibility {
         "automated", "auto-reply", "autoreply", "support@zendesk", "mailchimp",
     ]
 
-    /// Headers that say a machine wrote it, or that it is a list. RFC 3834
-    /// exists precisely so automatic responders can recognise each other and
-    /// shut up.
+    /// Headers whose mere presence means leave it alone.
+    ///
+    /// `auto-submitted` is deliberately not here: it is the one header with a
+    /// value that matters. RFC 3834 has ordinary mail from a person carry
+    /// `Auto-Submitted: no`, so treating its presence as a machine would make
+    /// every well-behaved mail client look like a robot.
     private static let machineHeaders = [
-        "auto-submitted", "x-auto-response-suppress", "list-id",
-        "list-unsubscribe", "precedence", "x-autoreply", "x-autorespond",
+        "x-auto-response-suppress", "list-id", "list-unsubscribe",
+        "precedence", "x-autoreply", "x-autorespond",
     ]
 
     /// The one call the runtime makes before spending anything.
