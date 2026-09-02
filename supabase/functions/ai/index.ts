@@ -4,7 +4,7 @@
 // the iOS app -- anyone can pull strings out of an .ipa, so a key shipped in
 // the binary is a published key.
 //
-// Three jobs, two models:
+// Five jobs, two models:
 //   classify  runs on every message, so it is the cheap fast one
 //   extract   runs only where classify said there was something to find; the
 //             same cheap model, reading more of the message for less often
@@ -197,6 +197,156 @@ async function extract(body: Record<string, string>) {
     dates: list(parsed.dates),
     model: CLASSIFY_MODEL,
   });
+}
+
+// -------------------------------------------------------------- auto-reply
+//
+// Two jobs, both about the person's own setup rather than their mail. Nothing
+// here ever sees an email: the input is what they chose and typed in the
+// Auto-Reply wizard, which is theirs and which they are about to read back.
+//
+// The point of both is that a person can check them. A summary the app
+// assembled from its own fields could never be wrong, and an example reply
+// built from a template would prove nothing about what the real thing will
+// do. Both are written by the model from the actual state, so getting one
+// wrong is a signal rather than a bug in a mockup.
+
+const UNDERSTANDING_SYSTEM = `You are being shown what somebody told an email
+assistant about their work, so it can answer routine mail for them. Write back
+what you understood, for them to check.
+
+Return JSON only, no prose:
+{
+  "role": "one sentence: who they are and what they do",
+  "work": "one or two sentences on the work itself",
+  "audience": "one sentence on who writes to them",
+  "commonRequests": ["short phrases, what people ask them for"],
+  "canHandle": ["short phrases, what they said you may answer"],
+  "alwaysAsks": ["short phrases, what must go back to them"],
+  "whenUnsure": "one sentence on what you do when you are not sure",
+  "style": "one sentence on how they want you to sound",
+  "rules": ["their own rules, in their words, unchanged"]
+}
+
+Rules:
+- Only what they actually told you. Never fill a gap with a guess, and never
+  flatter them. If they said little, say little.
+- Write it to them, as "you". Plain, warm, no marketing language.
+- Under twenty words a sentence. Under eight words a list item.
+- Keep their own words for the rules. They wrote those deliberately.
+- An empty list is the right answer when they chose nothing.`;
+
+async function autoReplyUnderstanding(body: Record<string, string>) {
+  const raw = await openai(
+    DRAFT_MODEL,
+    [
+      { role: "system", content: UNDERSTANDING_SYSTEM },
+      { role: "user", content: setupLines(body) },
+    ],
+    true,
+  );
+
+  const parsed = JSON.parse(raw);
+  const list = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+  const line = (value: unknown) => (typeof value === "string" ? value : "");
+
+  return json({
+    role: line(parsed.role),
+    work: line(parsed.work),
+    audience: line(parsed.audience),
+    commonRequests: list(parsed.commonRequests),
+    canHandle: list(parsed.canHandle),
+    alwaysAsks: list(parsed.alwaysAsks),
+    whenUnsure: line(parsed.whenUnsure),
+    style: line(parsed.style),
+    rules: list(parsed.rules),
+    model: DRAFT_MODEL,
+  });
+}
+
+const EXAMPLE_SYSTEM = `Write one realistic example of the email assistant at
+work, from the setup you are given.
+
+First invent a plausible incoming email: something this person would actually
+receive, given who writes to them and what those people ask about. Ordinary
+and specific. No placeholders, no "Lorem", no [brackets].
+
+Then write the reply the assistant would send, obeying the setup exactly.
+
+Return JSON only, no prose:
+{
+  "incoming": "the email, as it would arrive",
+  "reply": "the reply, ready to send",
+  "evidenceUsed": ["which approved facts the reply leans on"],
+  "rulesFollowed": ["which of their own rules you obeyed, and how"],
+  "blockedFacts": ["what you deliberately did not answer, and why"],
+  "safety": "one or two sentences: what you answered, what you left for them"
+}
+
+Rules that decide the reply:
+- You may state ONLY the facts given to you under "What they may state". If
+  an answer needs anything else -- a price, a date, a policy, a promise --
+  you do not have it. Say you will come back to them, or ask, according to
+  what they chose for when you are unsure. Never invent one to make a
+  better example.
+- Anything on the "must come back to them" list is not yours to answer, even
+  if you were given a fact that would cover it. Say so in blockedFacts.
+- Their own rules shape how you write. They never let you state something
+  you were not given, and they never override the list above.
+- Write in the style described. Sign off as an assistant writing on their
+  behalf would.
+- Make the example one where something is deliberately left for them, where
+  the setup allows it. That is the honest picture, and it is the half that
+  shows the thing works.`;
+
+async function autoReplyExample(body: Record<string, string>) {
+  const raw = await openai(
+    DRAFT_MODEL,
+    [
+      { role: "system", content: EXAMPLE_SYSTEM },
+      { role: "user", content: setupLines(body) },
+    ],
+    true,
+  );
+
+  const parsed = JSON.parse(raw);
+  const list = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+
+  return json({
+    incoming: typeof parsed.incoming === "string" ? parsed.incoming : "",
+    reply: typeof parsed.reply === "string" ? parsed.reply : "",
+    evidenceUsed: list(parsed.evidenceUsed),
+    rulesFollowed: list(parsed.rulesFollowed),
+    blockedFacts: list(parsed.blockedFacts),
+    safety: typeof parsed.safety === "string" ? parsed.safety : "",
+    model: DRAFT_MODEL,
+  });
+}
+
+/// The setup as labelled lines. Both jobs read the same picture, so the
+/// summary can never describe a setup the example did not use.
+function setupLines(body: Record<string, string>) {
+  const fields: [string, string][] = [
+    ["They are", body.persona],
+    ["Their work is about", body.work],
+    ["People who write to them", body.audience],
+    ["What those people usually ask about", body.inbound],
+    ["What they may state as fact", body.facts],
+    ["Their written policies", body.policies],
+    ["How to handle pricing questions", body.pricing],
+    ["How to handle availability questions", body.availability],
+    ["You may answer these without asking", body.allowed],
+    ["These must always come back to them", body.boundaries],
+    ["When you are not sure", body.unsure],
+    ["How they want you to sound", body.style],
+    ["Their own rules for you", body.rules],
+  ];
+  return fields
+    .filter(([, value]) => value && value.trim().length > 0)
+    .map(([label, value]) => `${label}:\n${value}`)
+    .join("\n\n");
 }
 
 // ------------------------------------------------------------------- draft
@@ -767,6 +917,10 @@ Deno.serve(async (request) => {
     switch (payload.action) {
       case "classify":
         return await classify(payload);
+      case "autoreply_understanding":
+        return await autoReplyUnderstanding(payload);
+      case "autoreply_example":
+        return await autoReplyExample(payload);
       case "extract":
         return await extract(payload);
       case "draft":

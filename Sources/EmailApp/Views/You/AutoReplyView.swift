@@ -31,7 +31,9 @@ struct AutoReplyView: View {
         .navigationTitle("Auto-Reply")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
-        .sheet(isPresented: $isSettingUp) {
+        // A page, not a sheet. This is a setup, not a detail to glance at,
+        // and a sheet says the opposite of what it is.
+        .navigationDestination(isPresented: $isSettingUp) {
             AutoReplySetupView(editing: config.isSetUp ? config : nil)
         }
         .alert("Turn off Auto-Reply?", isPresented: $isConfirmingOff) {

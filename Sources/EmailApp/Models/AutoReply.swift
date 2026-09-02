@@ -26,7 +26,28 @@ struct AutoReplyConfig: Codable, Equatable {
     var mode: RunMode = .draft
 
     var persona: Persona?
+
+    // What they picked rather than typed. Ids from `AutoReplyOptions`, which
+    // offers a different set per persona -- so these are only ever read
+    // alongside the persona that produced them.
+    var workTopics: Set<String> = []
+    var audience: Set<String> = []
+    var inbound: Set<String> = []
+    /// Which policies they said they have, and the one line each. Only the
+    /// ones they ticked are ever asked about.
+    var policies: [String: String] = [:]
+
+    var pricing: PricingMode = .ask
+    var availability: AvailabilityMode = .ask
+    var style = Style()
+
     var business = BusinessKnowledge()
+
+    /// What the model said it understood, kept so the Auto-Reply screen can
+    /// show it without paying to work it out again. Cleared whenever an
+    /// answer changes, because a summary of the old answers is worse than
+    /// none.
+    var understanding: AutoReplyUnderstanding?
     /// What it may answer without asking.
     var allowed: Set<Category> = []
     /// What must always come back, whatever else says otherwise.
@@ -345,4 +366,172 @@ struct BusinessKnowledge: Codable, Equatable {
     }
 
     var isEmpty: Bool { filled.isEmpty }
+}
+
+extension AutoReplyConfig {
+
+    /// How pricing questions are handled. Asked as a behaviour rather than a
+    /// number, because most people's answer is "it depends" and forcing a
+    /// figure would put a price in Maily's mouth that they never agreed to.
+    enum PricingMode: String, Codable, CaseIterable, Identifiable {
+        case standard, range, depends, ask, never
+
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .standard: "Share my standard price"
+            case .range: "Share a starting range"
+            case .depends: "Say it depends on scope"
+            case .ask: "Ask me first"
+            case .never: "Never answer pricing"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .standard: "tag.fill"
+            case .range: "arrow.left.and.right"
+            case .depends: "questionmark.circle.fill"
+            case .ask: "hand.raised.fill"
+            case .never: "xmark.circle.fill"
+            }
+        }
+
+        /// Whether Maily needs an actual figure from them. Only these two
+        /// ask for one, so nobody types a price the app will never use.
+        var needsDetail: Bool { self == .standard || self == .range }
+    }
+
+    enum AvailabilityMode: String, Codable, CaseIterable, Identifiable {
+        case general, window, ask, never
+
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .general: "Say whether I'm generally free"
+            case .window: "Share my usual availability"
+            case .ask: "Ask me before committing"
+            case .never: "Never answer automatically"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .general: "checkmark.circle.fill"
+            case .window: "calendar.badge.clock"
+            case .ask: "hand.raised.fill"
+            case .never: "xmark.circle.fill"
+            }
+        }
+
+        var needsDetail: Bool { self == .window }
+    }
+
+    /// How it sounds. Controls rather than a paragraph, because "professional
+    /// but warm, fairly short" is four decisions and a text box turns them
+    /// into one sentence the model has to unpick.
+    struct Style: Codable, Equatable {
+        var tone: Tone = .natural
+        var length: Length = .short
+        var warmth: Warmth = .warm
+        var formality: Formality = .balanced
+        var emojis: Emojis = .never
+        /// The one thing the controls could not say.
+        var customRule = ""
+        var learnFromEdits = true
+
+        enum Tone: String, Codable, CaseIterable, Identifiable {
+            case natural, professional, friendly, concise, confident
+            var id: Self { self }
+            var title: String {
+                switch self {
+                case .natural: "My natural style"
+                case .professional: "Professional"
+                case .friendly: "Friendly"
+                case .concise: "Concise"
+                case .confident: "Confident"
+                }
+            }
+        }
+
+        enum Length: String, Codable, CaseIterable, Identifiable {
+            case veryShort, short, balanced, detailed
+            var id: Self { self }
+            var title: String {
+                switch self {
+                case .veryShort: "Very short"
+                case .short: "Short"
+                case .balanced: "Balanced"
+                case .detailed: "Detailed"
+                }
+            }
+        }
+
+        enum Warmth: String, Codable, CaseIterable, Identifiable {
+            case cool, neutral, warm
+            var id: Self { self }
+            var title: String { rawValue.capitalized }
+        }
+
+        enum Formality: String, Codable, CaseIterable, Identifiable {
+            case casual, balanced, formal
+            var id: Self { self }
+            var title: String { rawValue.capitalized }
+        }
+
+        enum Emojis: String, Codable, CaseIterable, Identifiable {
+            case never, sometimes, often
+            var id: Self { self }
+            var title: String { rawValue.capitalized }
+        }
+
+        /// One line for the model, so the five controls arrive as a sentence
+        /// rather than five fields it has to interpret.
+        var described: String {
+            var parts = [
+                "Tone: \(tone.title.lowercased())",
+                "Length: \(length.title.lowercased())",
+                "Warmth: \(warmth.title.lowercased())",
+                "Formality: \(formality.title.lowercased())",
+                "Emojis: \(emojis.title.lowercased())",
+            ]
+            let rule = customRule.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !rule.isEmpty { parts.append("Also: \(rule)") }
+            return parts.joined(separator: ". ")
+        }
+    }
+
+    /// Everything the model is given to work from, as flat text. Used for
+    /// both the understanding summary and the example, so the two can never
+    /// be built from different pictures of the same setup.
+    ///
+    /// Only the person's own answers go in here. No mail content, ever.
+    func payload(labels: (Set<String>) -> [String]) -> [String: String] {
+        var out: [String: String] = [
+            "persona": persona?.title ?? "",
+            "work": labels(workTopics).joined(separator: ", "),
+            "audience": labels(audience).joined(separator: ", "),
+            "inbound": labels(inbound).joined(separator: ", "),
+            "allowed": AutoReplyConfig.Category.allCases
+                .filter(allowed.contains).map(\.title).joined(separator: ", "),
+            "boundaries": AutoReplyConfig.Boundary.allCases
+                .filter(mustAsk.contains).map(\.title).joined(separator: ", "),
+            "unsure": whenUnsure.title,
+            "pricing": pricing.title,
+            "availability": availability.title,
+            "style": style.described,
+            "rules": activeInstructions.map(\.text).joined(separator: "\n"),
+        ]
+        let facts = business.filled.map { "\($0.label): \($0.value)" }.joined(separator: "\n")
+        if !facts.isEmpty { out["facts"] = facts }
+        let written = policies
+            .filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { "\(AutoReplyOptions.policyLabel($0.key)): \($0.value)" }
+            .sorted()
+            .joined(separator: "\n")
+        if !written.isEmpty { out["policies"] = written }
+        return out.filter { !$0.value.isEmpty }
+    }
 }

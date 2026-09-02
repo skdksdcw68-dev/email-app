@@ -1,298 +1,443 @@
 import SwiftUI
+import UIKit
 
 /// Teaching Maily to answer mail on your behalf.
 ///
-/// Deliberately long. Everything else in the app is one tap; this is the one
-/// place where a person hands over authority, and a flow that took ten
-/// seconds would be telling them it does not matter much. Each step asks one
-/// thing, and what it asks depends on what they said they do -- a student and
-/// a founder are not given the same twelve questions.
+/// A page, not a sheet, and built from the same parts as the onboarding
+/// questions: progress at the top, the question big and left-aligned, the
+/// answers as cards you tap, and Continue pinned to the bottom. The only
+/// thing that should feel different from signing up is that it is longer,
+/// because this is where somebody hands over authority.
 ///
-/// Nothing is saved until the last screen. Opening it again with a setup
-/// already in place starts from those answers rather than from nothing.
+/// Selection first. Typing is asked for exactly where a card cannot say it --
+/// a price, a policy, a rule in their own words -- and never before Maily
+/// knows enough to ask about the right ones. The step list is conditional:
+/// what you picked decides what you are asked next, and a step with nothing
+/// to ask is skipped rather than shown empty.
+///
+/// Twice along the way Maily stops asking and says what it understood, in the
+/// model's words rather than the app's. Those screens are the point: a
+/// summary the app assembled from its own fields could never be wrong, and so
+/// would check nothing.
 struct AutoReplySetupView: View {
     @Environment(AutoReplyStore.self) private var autoReply
     @Environment(\.dismiss) private var dismiss
 
     @State private var config: AutoReplyConfig
-    @State private var step: Step = .intro
+    @State private var index = 0
+    @State private var understanding: AutoReplyUnderstanding?
+    @State private var example: AutoReplyExample?
+    @State private var isThinking = false
+    @State private var failure: String?
     @State private var draftInstruction = ""
 
     init(editing existing: AutoReplyConfig? = nil) {
         _config = State(initialValue: existing ?? AutoReplyConfig())
+        _understanding = State(initialValue: existing?.understanding)
     }
 
-    private enum Step: Int, CaseIterable {
-        case intro, persona, work, knowledge, allowed, boundaries
-        case unsure, instructions, review, preview, done
+    // MARK: - The step graph
 
-        /// How far along the bar is. The intro is not progress and the last
-        /// screen is not a step, so neither moves it.
-        var fraction: Double {
-            guard self != .intro else { return 0 }
-            let steps = Double(Step.allCases.count - 2)
-            return min(1, Double(rawValue) / steps)
+    enum Step: String, CaseIterable {
+        case intro, persona, work, audience, checkpoint, inbound
+        case knowledge, pricing, availability, policies
+        case allowed, boundaries, unsure, style, instructions
+        case summary, example, done
+    }
+
+    /// The steps this particular setup asks for, in order. Conditional, so
+    /// nobody is asked for a price they said Maily should never quote.
+    private var steps: [Step] {
+        Step.allCases.filter { step in
+            switch step {
+            case .pricing:
+                config.allowed.contains(.pricing) || config.inbound.contains("pricing")
+            case .availability:
+                config.allowed.contains(.availability) || config.inbound.contains("availability")
+            default:
+                true
+            }
         }
     }
+
+    private var step: Step { steps[min(index, steps.count - 1)] }
+
+    private var progress: Double {
+        guard index > 0 else { return 0 }
+        return min(1, Double(index) / Double(max(1, steps.count - 2)))
+    }
+
+    private var canGoBack: Bool { index > 0 && step != .done }
+
+    // MARK: - Body
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                if step != .intro && step != .done {
-                    ProgressView(value: step.fraction)
-                        .tint(.accentColor)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 4)
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            if step != .intro && step != .done {
+                ProgressView(value: progress)
+                    .tint(Color.accentColor)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 10)
+            }
 
-                ScrollView {
-                    content
-                        .padding(.horizontal, 20)
-                        .padding(.top, 8)
-                        .padding(.bottom, 32)
-                }
-                .scrollDismissesKeyboard(.interactively)
+            ScrollView {
+                content
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    if step != .done {
-                        Button("Cancel") { dismiss() }
+            .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+
+            if let button = buttonTitle {
+                Button(action: advance) {
+                    Group {
+                        if isThinking {
+                            ProgressView().tint(.white)
+                        } else {
+                            Text(button).fontWeight(.semibold)
+                        }
                     }
+                    .frame(maxWidth: .infinity, minHeight: 30)
                 }
-                ToolbarItem(placement: .principal) {
-                    if step != .intro && step != .done {
-                        Text("Auto-Reply")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!canContinue || isThinking)
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
             }
-            .animation(.snappy(duration: 0.28), value: step)
         }
-        .interactiveDismissDisabled(step != .intro)
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        switch step {
-        case .intro:        intro
-        case .persona:      personaStep
-        case .work:         workStep
-        case .knowledge:    knowledgeStep
-        case .allowed:      allowedStep
-        case .boundaries:   boundariesStep
-        case .unsure:       unsureStep
-        case .instructions: instructionsStep
-        case .review:       reviewStep
-        case .preview:      previewStep
-        case .done:         doneStep
+        .navigationTitle(step == .intro || step == .done ? "" : "Auto-Reply")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                if canGoBack {
+                    Button {
+                        withAnimation(.snappy(duration: 0.22)) { index -= 1 }
+                    } label: {
+                        Image(systemName: "chevron.left").fontWeight(.semibold)
+                    }
+                    .accessibilityLabel("Back")
+                } else if step == .intro {
+                    Button("Not now") { dismiss() }
+                }
+            }
+        }
+        .keyboardDismissable()
+        .hidesTabBar()
+        .animation(.snappy(duration: 0.25), value: index)
+        .alert("That didn't work", isPresented: .constant(failure != nil)) {
+            Button("OK") { failure = nil }
+        } message: {
+            Text(failure ?? "")
         }
     }
 
     // MARK: - Moving
 
-    private func go(_ next: Step) {
-        step = next
-    }
-
-    private var afterPersona: Step { .work }
-
-    // MARK: - Steps
-
-    private var intro: some View {
-        StepShell(
-            eyebrow: nil,
-            title: "Let Maily handle the routine replies.",
-            subtitle: "Tell it what you do, what it may answer, and what should always come back to you.",
-            button: "Set up Auto-Reply",
-            action: { go(.persona) }
-        ) {
-            VStack(alignment: .leading, spacing: 14) {
-                introPoint("checkmark.shield.fill", "It only answers what you allow",
-                           "Everything else comes to you, untouched.")
-                introPoint("square.and.pencil", "It writes, you send",
-                           "Maily starts by drafting. Sending on its own is a switch you throw later, not something it decides.")
-                introPoint("lock.fill", "It never invents anything",
-                           "It can only state facts you gave it. If it needs something it does not have, it asks you.")
-            }
-            .padding(.top, 4)
-
-            Button("Not now") { dismiss() }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 8)
+    private var buttonTitle: String? {
+        switch step {
+        case .intro: "Set up Auto-Reply"
+        case .checkpoint, .summary: "That looks right"
+        case .example: "Looks good"
+        case .done: "Complete setup"
+        default: "Continue"
         }
     }
 
-    private func introPoint(_ symbol: String, _ title: String, _ detail: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol)
-                .font(.footnote)
-                .foregroundStyle(.tint)
-                .frame(width: 22)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+    private var canContinue: Bool {
+        switch step {
+        case .persona: config.persona != nil
+        case .work: !config.workTopics.isEmpty
+        case .allowed: !config.allowed.isEmpty
+        case .checkpoint, .summary: understanding != nil
+        case .example: example != nil
+        default: true
+        }
+    }
+
+    private func advance() {
+        if step == .done {
+            finish()
+            return
+        }
+        withAnimation(.snappy(duration: 0.25)) { index += 1 }
+        prepareIfNeeded()
+    }
+
+    /// The two screens that need the model run themselves as they arrive,
+    /// rather than making somebody tap to find out what Maily thinks.
+    private func prepareIfNeeded() {
+        switch step {
+        case .checkpoint, .summary:
+            guard understanding == nil else { return }
+            Task { await loadUnderstanding() }
+        case .example:
+            guard example == nil else { return }
+            Task { await loadExample() }
+        default:
+            break
+        }
+    }
+
+    private func labels(_ ids: Set<String>) -> [String] {
+        guard let persona = config.persona else { return Array(ids).sorted() }
+        let all = AutoReplyOptions.work(for: persona)
+            + AutoReplyOptions.audience(for: persona)
+            + AutoReplyOptions.inbound(for: persona)
+            + AutoReplyOptions.policies(for: persona)
+        return ids.compactMap { id in all.first { $0.id == id }?.label }.sorted()
+    }
+
+    private func loadUnderstanding() async {
+        isThinking = true
+        defer { isThinking = false }
+        do {
+            let result = try await AIService.autoReplyUnderstanding(config.payload(labels: labels))
+            understanding = result
+            config.understanding = result
+        } catch {
+            failure = error.localizedDescription
+        }
+    }
+
+    private func loadExample() async {
+        isThinking = true
+        defer { isThinking = false }
+        do {
+            example = try await AIService.autoReplyExample(config.payload(labels: labels))
+        } catch {
+            failure = error.localizedDescription
+        }
+    }
+
+    /// Any answer changing makes the summary stale, and a summary of the old
+    /// answers is worse than none.
+    private func invalidateUnderstanding() {
+        understanding = nil
+        example = nil
+        config.understanding = nil
+    }
+
+    /// Jumps back to the step a summary section came from, so Edit lands on
+    /// the question rather than on a wall of everything.
+    private func edit(_ named: String) {
+        guard let target = Step(rawValue: named),
+              let position = steps.firstIndex(of: target)
+        else { return }
+        invalidateUnderstanding()
+        withAnimation(.snappy(duration: 0.25)) { index = position }
+    }
+
+    private func finish() {
+        autoReply.complete(config)
+        Analytics.record(.autoReplySetUp, [
+            "persona": .string(config.persona?.rawValue ?? "none"),
+            "allowed": .int(config.allowed.count),
+            "boundaries": .int(config.mustAsk.count),
+            "instructions": .int(config.activeInstructions.count),
+            "facts": .int(config.business.filled.count),
+        ])
+        dismiss()
+    }
+
+    // MARK: - Content
+
+    @ViewBuilder
+    private var content: some View {
+        switch step {
+        case .intro:        AutoReplyIntroStep()
+        case .persona:      personaStep
+        case .work:         workStep
+        case .audience:     audienceStep
+        case .checkpoint:   understandingStep("Here's what I've understood so far.")
+        case .inbound:      inboundStep
+        case .knowledge:    knowledgeStep
+        case .pricing:      pricingStep
+        case .availability: availabilityStep
+        case .policies:     policiesStep
+        case .allowed:      allowedStep
+        case .boundaries:   boundariesStep
+        case .unsure:       unsureStep
+        case .style:        styleStep
+        case .instructions: instructionsStep
+        case .summary:      understandingStep("Here's what Maily knows about you.")
+        case .example:      exampleStep
+        case .done:         doneStep
         }
     }
 
     private var personaStep: some View {
-        StepShell(
-            eyebrow: "About you",
-            title: "What best describes your work?",
-            subtitle: "This decides what Maily asks you next, so it is worth getting roughly right.",
-            button: config.persona == nil ? nil : "Continue",
-            action: { go(afterPersona) }
-        ) {
-            VStack(spacing: 8) {
-                ForEach(AutoReplyConfig.Persona.allCases) { persona in
-                    ChoiceRow(
-                        title: persona.title,
-                        symbol: persona.symbol,
-                        isOn: config.persona == persona
-                    ) {
-                        config.persona = persona
-                    }
-                }
+        StepHeader("What best describes what you do?",
+                   "This decides what Maily asks you next.") {
+            OptionGrid(
+                options: AutoReplyConfig.Persona.allCases.map {
+                    AutoReplyOptions.Option($0.rawValue, $0.title, $0.symbol)
+                },
+                selected: Set([config.persona?.rawValue].compactMap { $0 })
+            ) { id in
+                config.persona = AutoReplyConfig.Persona(rawValue: id)
+                config.workTopics = []
+                config.audience = []
+                config.inbound = []
+                config.policies = [:]
+                invalidateUnderstanding()
             }
         }
     }
 
     private var workStep: some View {
-        StepShell(
-            eyebrow: config.persona?.title,
-            title: config.persona?.prompt ?? "Tell Maily about your work.",
-            subtitle: "These become the only facts Maily may state on your behalf. Leave anything blank that does not apply.",
-            button: "Continue",
-            action: { go(.knowledge) }
-        ) {
-            VStack(spacing: 14) {
-                ForEach(workFields, id: \.label) { field in
-                    FieldBlock(label: field.label, hint: field.hint, text: field.text)
-                }
+        let persona = config.persona ?? .other
+        return StepHeader(AutoReplyOptions.workTitle(for: persona),
+                          "Pick everything that applies.") {
+            OptionGrid(options: AutoReplyOptions.work(for: persona), selected: config.workTopics) { id in
+                toggle(id, in: \.workTopics)
             }
         }
     }
 
-    /// The questions that belong to this persona, and only those.
-    private var workFields: [(label: String, hint: String, text: Binding<String>)] {
-        let business = Binding(get: { config.business }, set: { config.business = $0 })
-        return switch config.persona {
-        case .founder:
-            [("Company name", "Acme", business.brand),
-             ("What does it do?", "In your own words.", business.whatItDoes),
-             ("Who are your customers?", "Types or industries.", business.customers),
-             ("What do you sell?", "Products or services.", business.offering)]
-        case .freelancer:
-            [("Your name or brand", "How clients know you.", business.brand),
-             ("What do you offer?", "What people hire you for.", business.offering),
-             ("Typical clients", "Startups, agencies, founders…", business.customers),
-             ("What work do you take?", "And what you turn down.", business.acceptedWork)]
-        case .agency:
-            [("Studio name", "Brand name.", business.brand),
-             ("What do you provide?", "Main services.", business.offering),
-             ("Industries you serve", "Who you work with.", business.customers),
-             ("How a new project starts", "Brief, call, qualification…", business.acceptedWork)]
-        case .sales:
-            [("What are you selling?", "Product or service.", business.offering),
-             ("Ideal customers", "Who it is for.", business.customers),
-             ("What qualifies a lead?", "Budget, timeline, need.", business.acceptedWork)]
-        case .support:
-            [("Product name", "What customers call it.", business.brand),
-             ("What does it do?", "Short description.", business.whatItDoes),
-             ("Top support questions", "Paste your FAQs.", business.faq)]
-        case .manager:
-            [("Team or organisation", "Name.", business.brand),
-             ("What do you coordinate?", "Scheduling, projects, people…", business.whatItDoes),
-             ("What can Maily coordinate?", "The routine parts.", business.acceptedWork)]
-        case .developer:
-            [("What do you build?", "Apps, SaaS, integrations…", business.offering),
-             ("Technical scope", "Languages, platforms, areas.", business.whatItDoes),
-             ("What requests do you take?", "And what you decline.", business.acceptedWork)]
-        case .creator:
-            [("Brand or creator name", "How people know you.", business.brand),
-             ("What is your niche?", "Content or business focus.", business.whatItDoes),
-             ("Collaboration types", "Sponsorships, UGC, partnerships…", business.offering)]
-        case .student, .personal, .other, .none:
-            [("What is your email mostly?", "Applications, projects, admin…", business.whatItDoes),
-             ("What can Maily help with?", "The low-risk, repetitive parts.", business.acceptedWork)]
+    private var audienceStep: some View {
+        let persona = config.persona ?? .other
+        return StepHeader("Who writes to you?",
+                          "Maily uses this to judge who a message is from.") {
+            OptionGrid(options: AutoReplyOptions.audience(for: persona), selected: config.audience) { id in
+                toggle(id, in: \.audience)
+            }
+        }
+    }
+
+    private var inboundStep: some View {
+        let persona = config.persona ?? .other
+        return StepHeader("What do they usually ask about?",
+                          "The things you find yourself answering again and again.") {
+            OptionGrid(options: AutoReplyOptions.inbound(for: persona), selected: config.inbound) { id in
+                toggle(id, in: \.inbound)
+            }
         }
     }
 
     private var knowledgeStep: some View {
-        StepShell(
-            eyebrow: "What Maily may say",
-            title: "Anything it should be able to state?",
-            subtitle: "Only fill in what you are happy for Maily to tell somebody. Everything you leave blank, it will bring back to you instead of guessing.",
-            button: "Continue",
-            action: { go(.allowed) }
-        ) {
+        StepHeader("Anything Maily should be able to state?",
+                   "Only what you're happy for it to tell somebody. Everything you leave blank, it brings back to you instead of guessing.") {
             VStack(spacing: 14) {
-                FieldBlock(label: "Pricing", hint: "Only what you would say out loud.", text: $config.business.pricing)
-                FieldBlock(label: "Availability", hint: "Taking work? Booked until when?", text: $config.business.availability)
-                FieldBlock(label: "Hours", hint: "Mon–Fri, 9–6.", text: $config.business.hours)
-                FieldBlock(label: "Where you work", hint: "Regions or time zones.", text: $config.business.regions)
-                FieldBlock(label: "Policies", hint: "Refunds, cancellations, terms.", text: $config.business.policies)
+                FieldBlock(label: "Your name or brand", hint: "How people know you.", text: $config.business.brand)
+                FieldBlock(label: "What you do", hint: "One or two lines.", text: $config.business.whatItDoes)
                 FieldBlock(label: "Common questions", hint: "Paste the ones you answer constantly.", text: $config.business.faq)
                 FieldBlock(label: "Links", hint: "Site, booking page, docs.", text: $config.business.links)
-                FieldBlock(label: "Escalate to", hint: "Who a hard one should go to.", text: $config.business.escalationContact)
-                FieldBlock(label: "Anything else", hint: "Whatever else Maily should know.", text: $config.business.notes)
+                FieldBlock(label: "Anything else", hint: "Optional.", text: $config.business.notes)
             }
         }
     }
 
-    private var allowedStep: some View {
-        StepShell(
-            eyebrow: "Permission",
-            title: "What should Maily handle?",
-            subtitle: "Pick the kinds of mail you are tired of answering yourself.",
-            button: config.allowed.isEmpty ? nil : "Continue",
-            action: { go(.boundaries) }
-        ) {
-            VStack(spacing: 8) {
-                ForEach(AutoReplyConfig.Category.allCases) { category in
-                    CheckRow(
-                        title: category.title,
-                        symbol: category.symbol,
-                        isOn: config.allowed.contains(category)
-                    ) {
-                        if config.allowed.contains(category) {
-                            config.allowed.remove(category)
-                        } else {
-                            config.allowed.insert(category)
-                        }
+    private var pricingStep: some View {
+        StepHeader("How should Maily handle pricing?",
+                   "Most people's answer is \"it depends\", and that is a real answer here.") {
+            VStack(spacing: 9) {
+                ForEach(AutoReplyConfig.PricingMode.allCases) { mode in
+                    OptionRowCard(label: mode.title, symbol: mode.symbol, isSelected: config.pricing == mode) {
+                        config.pricing = mode
+                        invalidateUnderstanding()
                     }
                 }
+                if config.pricing.needsDetail {
+                    FieldBlock(
+                        label: config.pricing == .range ? "Your starting range" : "Your standard price",
+                        hint: "Exactly as you'd say it out loud.",
+                        text: $config.business.pricing
+                    )
+                    .padding(.top, 4)
+                }
+            }
+        }
+    }
 
-                if config.allowed.isEmpty {
-                    Text("Pick at least one, or there is nothing for Maily to do.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+    private var availabilityStep: some View {
+        StepHeader("How should Maily handle availability?",
+                   "Committing your time is the easiest thing to get wrong.") {
+            VStack(spacing: 9) {
+                ForEach(AutoReplyConfig.AvailabilityMode.allCases) { mode in
+                    OptionRowCard(label: mode.title, symbol: mode.symbol, isSelected: config.availability == mode) {
+                        config.availability = mode
+                        invalidateUnderstanding()
+                    }
+                }
+                if config.availability.needsDetail {
+                    FieldBlock(label: "Your usual availability",
+                               hint: "e.g. Taking new work from March.",
+                               text: $config.business.availability)
                         .padding(.top, 4)
                 }
             }
         }
     }
 
+    private var policiesStep: some View {
+        let persona = config.persona ?? .other
+        return StepHeader("Any rules Maily should know?",
+                          "Pick the ones you actually have. You'll write each in one line.") {
+            VStack(spacing: 9) {
+                ForEach(AutoReplyOptions.policies(for: persona)) { option in
+                    OptionRowCard(
+                        label: option.label,
+                        symbol: option.symbol,
+                        isSelected: config.policies[option.id] != nil
+                    ) {
+                        if config.policies[option.id] == nil {
+                            config.policies[option.id] = ""
+                        } else {
+                            config.policies.removeValue(forKey: option.id)
+                        }
+                        invalidateUnderstanding()
+                    }
+
+                    if config.policies[option.id] != nil {
+                        FieldBlock(
+                            label: AutoReplyOptions.policyLabel(option.id),
+                            hint: AutoReplyOptions.policyHint(option.id),
+                            text: Binding(
+                                get: { config.policies[option.id] ?? "" },
+                                set: { config.policies[option.id] = $0 }
+                            )
+                        )
+                        .padding(.bottom, 4)
+                    }
+                }
+            }
+        }
+    }
+
+    private var allowedStep: some View {
+        StepHeader("Which of these can Maily answer without you?",
+                   "Only what you pick here is ever eligible for an automatic reply.") {
+            VStack(spacing: 9) {
+                ForEach(AutoReplyConfig.Category.allCases) { category in
+                    OptionRowCard(
+                        label: category.title,
+                        symbol: category.symbol,
+                        isSelected: config.allowed.contains(category)
+                    ) {
+                        if config.allowed.contains(category) {
+                            config.allowed.remove(category)
+                        } else {
+                            config.allowed.insert(category)
+                        }
+                        invalidateUnderstanding()
+                    }
+                }
+            }
+        }
+    }
+
     private var boundariesStep: some View {
-        StepShell(
-            eyebrow: "Boundaries",
-            title: "What should always come back to you?",
-            subtitle: "These beat everything else. Even if a message looks like something Maily may answer, anything on this list stops and waits for you.",
-            button: "Continue",
-            action: { go(.unsure) }
-        ) {
-            VStack(spacing: 8) {
+        StepHeader("What should always come back to you?",
+                   "These beat everything else. Even where a message looks answerable, anything here stops and waits.") {
+            VStack(spacing: 9) {
                 ForEach(AutoReplyConfig.Boundary.allCases) { boundary in
-                    CheckRow(
-                        title: boundary.title,
+                    OptionRowCard(
+                        label: boundary.title,
                         symbol: nil,
-                        isOn: config.mustAsk.contains(boundary),
+                        isSelected: config.mustAsk.contains(boundary),
                         note: boundary.isRecommended ? "Recommended" : nil
                     ) {
                         if config.mustAsk.contains(boundary) {
@@ -300,6 +445,7 @@ struct AutoReplySetupView: View {
                         } else {
                             config.mustAsk.insert(boundary)
                         }
+                        invalidateUnderstanding()
                     }
                 }
             }
@@ -307,194 +453,100 @@ struct AutoReplySetupView: View {
     }
 
     private var unsureStep: some View {
-        StepShell(
-            eyebrow: "Uncertainty",
-            title: "When Maily isn't sure, what should it do?",
-            subtitle: "This is what happens whenever a message is close to the line rather than clearly inside it.",
-            button: "Continue",
-            action: { go(.instructions) }
-        ) {
-            VStack(spacing: 8) {
+        StepHeader("When Maily isn't sure, what should it do?",
+                   "This is what happens whenever a message is near the line rather than clearly inside it.") {
+            VStack(spacing: 9) {
                 ForEach(AutoReplyConfig.Escalation.allCases) { option in
-                    ChoiceRow(
-                        title: option.title,
+                    OptionRowCard(
+                        label: option.title,
                         detail: option.detail,
                         symbol: nil,
-                        isOn: config.whenUnsure == option
+                        isSelected: config.whenUnsure == option
                     ) {
                         config.whenUnsure = option
+                        invalidateUnderstanding()
                     }
                 }
             }
         }
     }
 
-    // MARK: - Custom instructions
+    private var styleStep: some View {
+        StepHeader("How should it sound?",
+                   "Maily already knows your writing style. This is for the replies it sends on your behalf.") {
+            VStack(alignment: .leading, spacing: 18) {
+                PickerRow("Tone", AutoReplyConfig.Style.Tone.allCases, selection: $config.style.tone)
+                PickerRow("Length", AutoReplyConfig.Style.Length.allCases, selection: $config.style.length)
+                PickerRow("Warmth", AutoReplyConfig.Style.Warmth.allCases, selection: $config.style.warmth)
+                PickerRow("Formality", AutoReplyConfig.Style.Formality.allCases, selection: $config.style.formality)
+                PickerRow("Emojis", AutoReplyConfig.Style.Emojis.allCases, selection: $config.style.emojis)
+
+                Toggle("Learn from my edits", isOn: $config.style.learnFromEdits)
+                    .font(.subheadline)
+            }
+        }
+    }
 
     private var instructionsStep: some View {
-        StepShell(
-            eyebrow: "Your rules",
-            title: "Custom instructions",
-            subtitle: "Give Maily any specific rules you want it to follow when replying.",
-            button: "Review setup",
-            action: {
-                config.instructions = AutoReplyStore.tidied(config.instructions)
-                go(.review)
-            }
-        ) {
-            InstructionEditor(
-                instructions: $config.instructions,
-                draft: $draftInstruction
-            )
-
-            // The distinction that keeps a rule from becoming a claim.
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("These change how Maily writes, not what it knows. A price or a policy belongs in the questions above, where Maily is allowed to state it as fact.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.top, 12)
-
-            Text("Optional. You can add these later, and change them any time.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 6)
-        }
-    }
-
-    // MARK: - Review
-
-    private var reviewStep: some View {
-        StepShell(
-            eyebrow: "Review",
-            title: "Here's what Maily learned.",
-            subtitle: "Check it before switching it on. Maily will only use what is here, plus the email it is answering.",
-            button: "See an example",
-            action: { go(.preview) }
-        ) {
-            VStack(spacing: 10) {
-                ReviewCard("You", config.persona?.title ?? "Not set", "person.fill") { go(.persona) }
-                ReviewCard("Facts it may state",
-                           config.business.isEmpty
-                             ? "Nothing yet — it will ask you about everything"
-                             : "\(config.business.filled.count) things you told it",
-                           "brain.head.profile") { go(.work) }
-                ReviewCard("It may answer", "\(config.allowed.count) kinds of mail", "checkmark.circle.fill") { go(.allowed) }
-                ReviewCard("Always ask you", "\(config.mustAsk.count) boundaries", "hand.raised.fill") { go(.boundaries) }
-                ReviewCard("When unsure", config.whenUnsure.title, "questionmark.circle.fill") { go(.unsure) }
-                ReviewCard("Your rules",
-                           config.activeInstructions.isEmpty
-                             ? "None"
-                             : "\(config.activeInstructions.count) active",
-                           "list.bullet.rectangle.fill") { go(.instructions) }
-            }
-        }
-    }
-
-    // MARK: - Preview
-
-    private var previewStep: some View {
-        StepShell(
-            eyebrow: "Example",
-            title: "This is how it would reply.",
-            subtitle: "Written from what you just told it. A real reply also reads the message and the thread it belongs to.",
-            button: "Looks right",
-            action: { go(.done) }
-        ) {
+        StepHeader("Any specific rules for Auto-Reply?",
+                   "Give Maily rules about how you want your replies to behave. Optional, and you can change them any time.") {
             VStack(alignment: .leading, spacing: 12) {
-                PreviewBlock(title: "If somebody wrote", text: AutoReplyPreview.incoming(for: config))
-                PreviewBlock(title: "Maily would answer", text: AutoReplyPreview.reply(for: config), isReply: true)
+                InstructionEditor(instructions: $config.instructions, draft: $draftInstruction)
 
-                if !config.activeInstructions.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Following your rules")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        ForEach(config.activeInstructions) { instruction in
-                            Label(instruction.text, systemImage: "checkmark")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.top, 2)
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("These change how Maily writes, not what it knows. A price or a policy belongs in the earlier questions, where Maily is allowed to state it as fact.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                Button("Change the rules") { go(.instructions) }
-                    .font(.subheadline)
-                    .padding(.top, 2)
             }
         }
     }
 
-    // MARK: - Done
+    private func understandingStep(_ title: String) -> some View {
+        StepHeader(title, "Everything here comes from what you chose. Read it and correct anything that isn't you.") {
+            AutoReplyUnderstandingView(
+                understanding: understanding,
+                isThinking: isThinking,
+                onEdit: edit
+            )
+        }
+    }
+
+    private var exampleStep: some View {
+        StepHeader("This is how it would reply.",
+                   "Written from your setup, for a message you'd actually get.") {
+            AutoReplyExampleView(
+                example: example,
+                isThinking: isThinking,
+                onRegenerate: {
+                    example = nil
+                    Task { await loadExample() }
+                },
+                onEditRules: { edit("instructions") }
+            )
+        }
+    }
 
     private var doneStep: some View {
         AutoReplyDoneView(
-            handled: config.allowed.count,
-            onFinish: {
-                autoReply.complete(config)
-                Analytics.record(.autoReplySetUp, [
-                    "persona": .string(config.persona?.rawValue ?? "none"),
-                    "allowed": .int(config.allowed.count),
-                    "boundaries": .int(config.mustAsk.count),
-                    "instructions": .int(config.activeInstructions.count),
-                    "facts": .int(config.business.filled.count),
-                ])
-                dismiss()
-            }
+            allowed: config.allowed.count,
+            boundaries: config.mustAsk.count,
+            escalation: config.whenUnsure.title
         )
     }
-}
 
-// MARK: - The one screen that is not a form
-
-/// The end of the setup. A tick that draws itself, and nothing else moving.
-private struct AutoReplyDoneView: View {
-    let handled: Int
-    let onFinish: () -> Void
-
-    @State private var isShown = false
-
-    var body: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(.tint)
-                .scaleEffect(isShown ? 1 : 0.6)
-                .opacity(isShown ? 1 : 0)
-
-            Text("Auto-Reply is ready.")
-                .font(.title2.weight(.bold))
-                .multilineTextAlignment(.center)
-
-            Text("Maily knows what it can handle and when to bring you in. It will write the replies and leave them for you — nothing is sent until you say so.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text("\(handled) kinds of mail")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tint)
-
-            Button(action: onFinish) {
-                Text("Done")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
+    private func toggle(_ id: String, in path: WritableKeyPath<AutoReplyConfig, Set<String>>) {
+        withAnimation(.snappy(duration: 0.18)) {
+            if config[keyPath: path].contains(id) {
+                config[keyPath: path].remove(id)
+            } else {
+                config[keyPath: path].insert(id)
             }
-            .buttonStyle(.borderedProminent)
-            .padding(.top, 6)
         }
-        .padding(.top, 48)
-        .opacity(isShown ? 1 : 0)
-        .onAppear {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { isShown = true }
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-        }
+        invalidateUnderstanding()
     }
 }

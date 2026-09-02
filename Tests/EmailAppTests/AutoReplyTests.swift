@@ -251,36 +251,30 @@ final class AutoReplyTests: XCTestCase {
         XCTAssertEqual(store().briefing(), "")
     }
 
-    // MARK: - The example reply
+    // MARK: - What the model is asked to work from
 
-    func testThePreviewOnlyStatesWhatTheyApproved() {
+    func testThePayloadCarriesEveryAnswerAndNoBlanks() {
         var config = setUpConfig()
-        config.allowed = [.pricing]
-        config.business.availability = "Booked until March."
+        config.workTopics = ["dev"]
+        config.inbound = ["pricing"]
+        config.instructions = [AutoReplyConfig.Instruction(text: "Keep it under 80 words.")]
 
-        let reply = AutoReplyPreview.reply(for: config)
+        let payload = config.payload { ids in ids.map { $0.capitalized }.sorted() }
 
-        XCTAssertTrue(reply.contains("Projects start at $1,000."))
-        // Availability was filled in, but they did not allow Maily to answer
-        // availability questions -- so it stays out.
-        XCTAssertFalse(reply.contains("Booked until March."))
+        XCTAssertEqual(payload["persona"], "Freelancer / Consultant")
+        XCTAssertEqual(payload["work"], "Dev")
+        XCTAssertEqual(payload["rules"], "Keep it under 80 words.")
+        XCTAssertTrue(payload["facts"]?.contains("Projects start at $1,000.") == true)
+        // Nothing was said about policies, so the model is not sent an
+        // empty heading to read meaning into.
+        XCTAssertNil(payload["policies"])
+        XCTAssertFalse(payload.values.contains(""))
     }
 
-    func testThePreviewHandsBackWhenItWasGivenNothingToSay() {
-        var config = AutoReplyConfig()
-        config.persona = .founder
-        config.allowed = [.pricing]
-
-        let reply = AutoReplyPreview.reply(for: config)
-        XCTAssertTrue(reply.contains("come back to you"), reply)
-    }
-
-    func testThePreviewAsksWhenThatIsWhatTheyChose() {
-        var config = AutoReplyConfig()
-        config.persona = .founder
-        config.whenUnsure = .askSender
-
-        XCTAssertTrue(AutoReplyPreview.reply(for: config).contains("tell me a little more"))
+    func testASwitchedOffRuleIsNotSentToTheModel() {
+        var config = setUpConfig()
+        config.instructions = [AutoReplyConfig.Instruction(text: "Never mention discounts.", isOn: false)]
+        XCTAssertNil(config.payload { Array($0) }["rules"])
     }
 
     // MARK: - Knowledge
