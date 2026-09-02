@@ -153,7 +153,7 @@ extension MailStore {
                 return
             }
 
-            queue.record(decision(
+            var written = decision(
                 for: message,
                 outcome: .drafted,
                 reason: result.reason.isEmpty ? "Answered from what you approved." : result.reason,
@@ -161,13 +161,46 @@ extension MailStore {
                 evidence: result.evidence,
                 withheld: result.withheld,
                 verification: verified
-            ))
+            )
 
             Analytics.record(.autoReplyDrafted, [
                 "category": .string(result.category),
                 "confidence": .int(Int(result.confidence * 100)),
                 "withheld": .int(result.withheld.count),
             ])
+
+            // The only place in the app where something leaves without a
+            // person touching it. Everything above had to pass first, and
+            // everything below is a reason not to.
+            guard let refusal = reasonNotToSend(
+                result: result, config: config, message: message, queue: queue
+            ) else {
+                queue.record(written)
+                do {
+                    try await send(
+                        subject: replySubject(for: message),
+                        to: message.sender.address,
+                        body: result.reply,
+                        replyingTo: message
+                    )
+                    markReplied(message.id)
+                    queue.markAutoSent(written.id)
+                    await AutoReplyNotice.post(to: message.sender.name, subject: message.subject)
+                    Analytics.record(.autoReplySent, ["edited": .bool(false), "auto": .bool(true)])
+                } catch {
+                    // It did not go. It stays a draft, which is the safe
+                    // half of the two outcomes.
+                    queue.record(written)
+                }
+                return
+            }
+
+            // Held as a draft, with the reason it was not sent, so the log
+            // says why rather than leaving them to guess.
+            if config.mode == .send {
+                written.reason += " Not sent: \(refusal)"
+            }
+            queue.record(written)
         } catch {
             // Left retryable: the service being down is not a decision about
             // this message, and pretending otherwise would silently skip it
@@ -234,5 +267,65 @@ extension MailStore {
         markReplied(original.id)
         queue.markSent(decision.id)
         Analytics.record(.autoReplySent, ["edited": .bool(asWritten != reply)])
+    }
+}
+
+extension MailStore {
+
+    /// Why this reply must not go on its own, or nil when nothing stands in
+    /// the way.
+    ///
+    /// Written as a list of refusals rather than a list of permissions, on
+    /// purpose. A permission check that gains a bug lets something through;
+    /// a refusal check that gains a bug holds something back. Only one of
+    /// those failure modes emails a stranger.
+    func reasonNotToSend(
+        result: AIService.AutoReplyResult,
+        config: AutoReplyConfig,
+        message: Message,
+        queue: AutoReplyQueue,
+        now: Date = .now
+    ) -> String? {
+        guard config.mode == .send else {
+            return "Auto-Reply is set to write, not send."
+        }
+        guard config.isRunning else {
+            return "Auto-Reply isn't running."
+        }
+        // A higher bar than a draft. Something a person is going to read
+        // before it goes can afford to be a good guess; something that
+        // leaves on its own cannot.
+        guard result.confidence >= Self.autoSendConfidenceFloor else {
+            return "Maily was only \(Int(result.confidence * 100))% sure."
+        }
+        // Anything it could not fully answer is a conversation, not a
+        // transaction, and conversations are the person's.
+        guard result.withheld.isEmpty else {
+            return "Part of it needed you."
+        }
+        guard !queue.hasAutoSent(inThread: message.threadID) else {
+            return "Maily has already answered in this conversation."
+        }
+        let recent = queue.autoSentInLastHour(now: now)
+        guard recent < Self.autoSendPerHour else {
+            return "That's \(Self.autoSendPerHour) sent in an hour already."
+        }
+        return nil
+    }
+
+    /// The bar for leaving without a person. Deliberately well above the
+    /// bar for writing a draft.
+    static let autoSendConfidenceFloor = 0.9
+
+    /// The most Maily will send by itself in an hour. A bad setup should
+    /// cost somebody a handful of awkward emails, not a mailing list's
+    /// worth -- and anybody legitimately receiving more than this an hour
+    /// should be reading them.
+    static let autoSendPerHour = 5
+
+    func replySubject(for message: Message) -> String {
+        message.subject.lowercased().hasPrefix("re:")
+            ? message.subject
+            : "Re: \(message.subject)"
     }
 }

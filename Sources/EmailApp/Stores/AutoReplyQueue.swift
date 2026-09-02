@@ -113,7 +113,7 @@ final class AutoReplyQueue {
         persist()
     }
 
-    private func update(_ id: AutoReplyDecision.ID, _ change: (inout AutoReplyDecision) -> Void) {
+    fileprivate func update(_ id: AutoReplyDecision.ID, _ change: (inout AutoReplyDecision) -> Void) {
         guard let index = decisions.firstIndex(where: { $0.id == id }) else { return }
         change(&decisions[index])
         persist()
@@ -157,5 +157,41 @@ final class AutoReplyQueue {
         handled = []
         lastCheckedAt = nil
         try? FileManager.default.removeItem(at: fileURL)
+    }
+}
+
+extension AutoReplyQueue {
+
+    /// How many replies Maily has sent on its own in the last hour.
+    ///
+    /// The rate limit is the difference between one bad setup being a
+    /// mistake and it being forty messages to forty strangers. It counts
+    /// only autonomous sends: a person pressing send forty times is a person
+    /// answering their mail, which is the point of the app.
+    func autoSentInLastHour(now: Date = .now) -> Int {
+        let cutoff = now.addingTimeInterval(-3600)
+        return decisions.filter { $0.outcome == .sent && $0.wasAutoSent && $0.decidedAt > cutoff }.count
+    }
+
+    /// Whether Maily has already answered this conversation on its own.
+    ///
+    /// Once per thread, ever. A thread where somebody keeps writing back is
+    /// a conversation, and a conversation is a person's job -- the value here
+    /// is answering the first "what do you charge", not conducting the
+    /// negotiation that follows.
+    func hasAutoSent(inThread threadID: String?) -> Bool {
+        guard let threadID else { return false }
+        return decisions.contains {
+            $0.threadID == threadID && $0.outcome == .sent && $0.wasAutoSent
+        }
+    }
+
+    /// Records a reply Maily sent itself.
+    func markAutoSent(_ id: AutoReplyDecision.ID) {
+        update(id) {
+            $0.outcome = .sent
+            $0.wasAutoSent = true
+            $0.reason = "Maily sent this for you."
+        }
     }
 }

@@ -44,6 +44,10 @@ struct AutoReplyDecision: Identifiable, Codable, Equatable {
     var withheld: [String] = []
     /// What the device check made of it, once there was a reply to check.
     var verification: AutoReplyVerification?
+    /// Sent by Maily rather than by the person. The one bit that separates
+    /// "you approved this" from "it went on its own", and the thing the
+    /// rate limit counts.
+    var wasAutoSent = false
     var decidedAt = Date.now
 
     /// Still waiting on the person: written, not yet sent or thrown away.
@@ -62,7 +66,7 @@ struct AutoReplyDecision: Identifiable, Codable, Equatable {
     var outcomeTitle: String {
         switch outcome {
         case .drafted: "Written for you"
-        case .sent: "Sent"
+        case .sent: wasAutoSent ? "Sent by Maily" : "Sent"
         case .escalated: "Brought to you"
         case .skipped: "Left alone"
         case .failed: "Couldn't write it"

@@ -217,6 +217,8 @@ final class AutoReplyStore {
         config = stored
     }
 
+    fileprivate func persistNow() { persist() }
+
     private func persist() {
         do {
             try FileManager.default.createDirectory(
@@ -230,5 +232,21 @@ final class AutoReplyStore {
             // is bad enough to be worth knowing about -- but not worth
             // interrupting the setup they are in the middle of.
         }
+    }
+}
+
+extension AutoReplyStore {
+
+    /// Stops everything, at once.
+    ///
+    /// Off and back to drafting, in one call, because the person reaching for
+    /// this is not in a mood to work out which of two switches does what.
+    /// The setup survives -- panicking about one bad reply should not cost
+    /// somebody the afternoon they spent teaching Maily their business.
+    func stopEverything() {
+        config.isOn = false
+        config.mode = .draft
+        config.updatedAt = .now
+        persistNow()
     }
 }

@@ -14,6 +14,7 @@ struct AutoReplyView: View {
     @State private var isSettingUp = false
     @State private var isConfirmingOff = false
     @State private var isConfirmingForget = false
+    @State private var isConfirmingSend = false
 
     private var config: AutoReplyConfig { autoReply.config }
 
@@ -43,6 +44,12 @@ struct AutoReplyView: View {
             Button("Turn off") { autoReply.setOn(false) }
         } message: {
             Text("Your setup is saved. You can turn it back on any time without answering anything again.")
+        }
+        .alert("Let Maily send on its own?", isPresented: $isConfirmingSend) {
+            Button("Cancel", role: .cancel) {}
+            Button("Let it send") { autoReply.setMode(.send) }
+        } message: {
+            Text("Replies will go without you seeing them first. Only ones Maily is sure about, that answered the whole message and passed the check against what you approved — never twice in one conversation, never more than \(MailStore.autoSendPerHour) an hour. You'll get a notification for each, and you can stop it at any time.")
         }
         .alert("Delete this setup?", isPresented: $isConfirmingForget) {
             Button("Cancel", role: .cancel) {}
@@ -162,46 +169,58 @@ struct AutoReplyView: View {
 
     private var whatItDoesSection: some View {
         Section {
-            // Draft is the only mode offered today. Sending on somebody's
-            // behalf waits on the verification layer -- the checks that a
-            // reply is inside its permissions, that every fact in it came
-            // from the person, and that it is not answering a machine. An
-            // option that quietly skipped those would be the one mistake
-            // this whole feature cannot afford.
-            HStack(spacing: 12) {
-                Image(systemName: "square.and.pencil")
-                    .font(.footnote)
-                    .foregroundStyle(.tint)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(AutoReplyConfig.RunMode.draft.title)
-                        .font(.subheadline.weight(.medium))
-                    Text(AutoReplyConfig.RunMode.draft.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            ForEach(AutoReplyConfig.RunMode.allCases) { mode in
+                Button {
+                    if mode == .send && config.mode != .send {
+                        isConfirmingSend = true
+                    } else {
+                        autoReply.setMode(mode)
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: mode == .draft ? "square.and.pencil" : "paperplane.fill")
+                            .font(.footnote)
+                            .foregroundStyle(config.mode == mode ? Color.accentColor : .secondary)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(mode.title)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text(mode.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                        if config.mode == mode {
+                            Image(systemName: "checkmark")
+                                .font(.footnote.weight(.bold))
+                                .foregroundStyle(.tint)
+                        }
+                    }
+                    .padding(.vertical, 2)
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.vertical, 2)
 
-            HStack(spacing: 12) {
-                Image(systemName: "paperplane")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(AutoReplyConfig.RunMode.send.title)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    Text("Not yet. Maily has to be able to check its own work first — that a reply is inside what you allowed, that every fact in it came from you, and that it isn't answering a machine.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            // The one control that has to work when somebody is panicking.
+            // It stops everything and puts the mode back, so getting out is
+            // one tap and does not depend on remembering which switch did
+            // what.
+            if config.mode == .send {
+                Button(role: .destructive) {
+                    autoReply.stopEverything()
+                } label: {
+                    Label("Stop sending now", systemImage: "hand.raised.fill")
+                        .font(.subheadline.weight(.semibold))
                 }
             }
-            .padding(.vertical, 2)
         } header: {
             Text("What Maily does with a reply")
+        } footer: {
+            Text(config.mode == .send
+                 ? "Maily only sends when it's over \(Int(MailStore.autoSendConfidenceFloor * 100))% sure, answered the whole message, and the reply passed the check against what you approved. Never twice in one conversation, never more than \(MailStore.autoSendPerHour) an hour, and you get a notification for each one."
+                 : "Every reply waits for you. Nothing leaves on its own.")
         }
     }
 

@@ -217,7 +217,7 @@ struct AutoReplyLogView: View {
                 )
             } else {
                 ForEach(queue.log) { decision in
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
                             Image(systemName: decision.symbol)
                                 .font(.caption)
@@ -226,6 +226,14 @@ struct AutoReplyLogView: View {
                             Text(decision.outcomeTitle)
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(tint(for: decision.outcome))
+                            // How sure it was, where it got far enough to be
+                            // sure of anything. This is the number to watch
+                            // before trusting it to send.
+                            if let confidence = decision.verification?.confidence, confidence > 0 {
+                                Text("\(Int(confidence * 100))%")
+                                    .font(.caption2.weight(.semibold).monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
                             Spacer(minLength: 0)
                             Text(decision.decidedAt.formatted(.relative(presentation: .named)))
                                 .font(.caption2)
@@ -238,6 +246,21 @@ struct AutoReplyLogView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+
+                        // What the device check caught, which is a different
+                        // thing from what the model chose not to answer, and
+                        // the more interesting of the two.
+                        ForEach(decision.verification?.problems ?? [], id: \.self) { problem in
+                            HStack(alignment: .top, spacing: 6) {
+                                Image(systemName: "shield.lefthalf.filled")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                                Text(problem)
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
                     }
                     .padding(.vertical, 3)
                 }
