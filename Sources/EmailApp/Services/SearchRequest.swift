@@ -83,8 +83,12 @@ struct SearchRequest: Equatable {
                 }
                 .filter { candidate in
                     // Two characters is the shortest thing worth asking Gmail
-                    // about, and a repeat costs a request for nothing.
-                    candidate.count >= 2 && seen.insert(candidate.lowercased()).inserted
+                    // about, and a repeat costs a request for nothing. That
+                    // floor is about queries, though: "OPEN: 3" is a message
+                    // number and a perfectly good one character long.
+                    let floor = kind.needsGmail ? 2 : 1
+                    return candidate.count >= floor
+                        && seen.insert(candidate.lowercased()).inserted
                 }
                 .prefix(maxHypotheses)
                 .map { String($0.prefix(200)) }
