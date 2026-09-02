@@ -58,14 +58,14 @@ final class MailboxIndexTests: XCTestCase {
     func testTagCountsMatchWhatTheListShows() {
         let mail = store([
             message("a", tags: [.urgent]),
-            message("b", tags: [.urgent], isRead: true),
+            message("b", isRead: true, tags: [.urgent]),
             message("c", tags: [.needsReply]),
         ])
 
         XCTAssertEqual(mail.count(of: .urgent, in: .inbox), 2)
         XCTAssertEqual(mail.unreadCount(of: .urgent, in: .inbox), 1)
         XCTAssertEqual(mail.messages(in: .inbox, tag: .urgent).count, 2)
-        XCTAssertEqual(Set(mail.availableTags(in: .inbox)), [.urgent, .needsReply])
+        XCTAssertEqual(Set(mail.availableTags(in: .inbox)), Set<AITag>([.urgent, .needsReply]))
     }
 
     func testThreadCountIsTheWholeThread() {
