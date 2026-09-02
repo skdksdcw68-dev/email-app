@@ -39,6 +39,8 @@ struct EmailAppApp: App {
     /// Permission, the device token, and keeping Gmail's seven day watch
     /// from lapsing.
     @State private var push = PushService()
+    /// What Maily has been authorised to answer on the person's behalf.
+    @State private var autoReply = AutoReplyStore()
 
     var body: some Scene {
         WindowGroup {
@@ -50,6 +52,7 @@ struct EmailAppApp: App {
                 .environment(searches)
                 .environment(attachments)
                 .environment(push)
+                .environment(autoReply)
                 // Google redirects back through the reversed-client-id URL
                 // scheme declared in Info.plist; the SDK completes the flow.
                 .onOpenURL { url in

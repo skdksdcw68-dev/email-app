@@ -10,6 +10,7 @@ import UIKit
 struct YouView: View {
     @Environment(UserStore.self) private var user
     @Environment(MailStore.self) private var mail
+    @Environment(AutoReplyStore.self) private var autoReply
 
     @State private var isEditingProfile = false
 
@@ -31,7 +32,7 @@ struct YouView: View {
                     NavigationLink { LanguageView() } label: {
                         row("Language", "globe")
                     }
-                    NavigationLink { NotificationsView() } label: {
+                    NavigationLink { NotificationSettingsView() } label: {
                         row("Notifications", "bell.badge")
                     }
                     NavigationLink { WritingStyleView() } label: {
@@ -45,8 +46,14 @@ struct YouView: View {
                     NavigationLink { AIPreferencesView() } label: {
                         row("AI preferences", "sparkles")
                     }
+                    NavigationLink { AutoReplyView() } label: {
+                        autoReplyRow
+                    }
+                    NavigationLink { MemorySettingsView() } label: {
+                        row("Memory", "brain")
+                    }
                 } header: {
-                    Text("AI")
+                    Text("Maily AI")
                 }
 
                 Section {
@@ -144,6 +151,40 @@ struct YouView: View {
         }
     }
 
+    /// Auto-Reply carries its own state on the row, because whether Maily is
+    /// answering mail on your behalf is not something you should have to open
+    /// a screen to find out.
+    private var autoReplyRow: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "arrowshape.turn.up.left.2.fill")
+                .font(.body)
+                .foregroundStyle(.tint)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Auto-Reply")
+                    .font(.subheadline)
+                Text(autoReplyDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if autoReply.config.isSetUp {
+                Text(autoReply.config.isOn ? "On" : "Off")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(autoReply.config.isOn ? Color.green : Color.secondary)
+            }
+        }
+        .padding(.vertical, 1)
+    }
+
+    private var autoReplyDetail: String {
+        let config = autoReply.config
+        guard config.isSetUp else { return "Let Maily handle the routine replies" }
+        guard config.isOn else { return "Setup saved" }
+        return "\(config.handledCount) kinds of mail handled"
+    }
+
     private func row(_ title: String, _ symbol: String) -> some View {
         HStack(spacing: 14) {
             Image(systemName: symbol)
@@ -161,4 +202,5 @@ struct YouView: View {
     YouView()
         .environment(MailStore.connected())
         .environment(UserStore(defaults: .previews, startAt: .finished))
+        .environment(AutoReplyStore(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-autoreply.json")))
 }

@@ -254,49 +254,6 @@ struct LanguageView: View {
     }
 }
 
-/// Notifications.
-///
-/// Deliberately not a page of switches that do nothing. Maily cannot deliver
-/// notifications at all yet: that needs Gmail push through a server, which is
-/// the one piece of architecture this app has avoided. Saying so is better
-/// than storing preferences for a feature that does not exist.
-struct NotificationsView: View {
-    var body: some View {
-        List {
-            Section {
-                Label {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Not available yet")
-                            .font(.subheadline.weight(.semibold))
-                        Text("Maily reads your mail directly from Gmail to this phone, with no server in between. Push notifications need one, so they are not built yet.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "bell.slash")
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4)
-            }
-
-            Section {
-                Label("Urgent mail", systemImage: "bolt.fill")
-                Label("Needs a reply", systemImage: "arrowshape.turn.up.left.fill")
-                Label("Follow-up reminders", systemImage: "clock.arrow.circlepath")
-                Label("Daily briefing", systemImage: "sun.max.fill")
-            } header: {
-                Text("Planned")
-            } footer: {
-                Text("These are what Maily will be able to tell you about once notifications are built.")
-            }
-            .foregroundStyle(.secondary)
-        }
-        .navigationTitle("Notifications")
-        .navigationBarTitleDisplayMode(.inline)
-        .hidesTabBar()
-    }
-}
-
 /// The plan. There is no subscription, and pretending otherwise would be a
 /// sales page for a product that does not exist.
 struct PlanView: View {

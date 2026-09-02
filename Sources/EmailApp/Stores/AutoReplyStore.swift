@@ -1,0 +1,230 @@
+import Foundation
+import Observation
+
+/// Owns the Auto-Reply setup: what Maily may answer, what it must bring back,
+/// and the rules the person wrote for their own agent.
+///
+/// One JSON file in Application Support, like the other stores. Deliberately
+/// **not** cleared on `.mailboxDisconnected`: this is what somebody taught
+/// Maily about their own business, not content read out of their mail, and
+/// making them teach it again because they reconnected a mailbox would be the
+/// worst possible moment to lose it. Signing out clears it.
+@Observable
+@MainActor
+final class AutoReplyStore {
+
+    private(set) var config = AutoReplyConfig()
+
+    let fileURL: URL
+
+    init(fileURL: URL? = nil) {
+        self.fileURL = fileURL ?? Self.defaultURL
+        load()
+    }
+
+    private static var defaultURL: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return support.appending(path: "Maily", directoryHint: .isDirectory)
+            .appending(path: "autoreply.json")
+    }
+
+    // MARK: - Setting up
+
+    /// Saves a setup that has been through to the end and switches it on.
+    ///
+    /// Draft mode whatever the previous mode was, on a first setup: sending
+    /// on somebody's behalf is a decision they make deliberately, from the
+    /// Auto-Reply screen, after they have watched it write a few.
+    func complete(_ config: AutoReplyConfig) {
+        var value = config
+        value.instructions = Self.tidied(value.instructions)
+        value.isSetUp = true
+        value.isOn = true
+        value.knowledgeConfirmed = true
+        if !self.config.isSetUp { value.mode = .draft }
+        value.updatedAt = .now
+        self.config = value
+        persist()
+    }
+
+    /// Keeps everything and stops acting on it. The setup survives, because
+    /// switching off for a week and being asked twenty questions again is
+    /// how a feature gets switched off for good.
+    func setOn(_ isOn: Bool) {
+        guard config.isSetUp else { return }
+        config.isOn = isOn
+        config.updatedAt = .now
+        persist()
+    }
+
+    /// The one that matters. Only a person can call this, only from the
+    /// Auto-Reply screen, and the UI will not offer `.send` until the
+    /// verification layer is in place.
+    func setMode(_ mode: AutoReplyConfig.RunMode) {
+        guard config.isSetUp else { return }
+        config.mode = mode
+        config.updatedAt = .now
+        persist()
+    }
+
+    /// Wipes the setup entirely. Asked for explicitly, and confirmed.
+    func forgetSetup() {
+        config = AutoReplyConfig()
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    // MARK: - Custom instructions
+    //
+    // Editable on their own, without walking back through the setup. That is
+    // the point of them: they are the thing a person tunes after watching a
+    // few replies come out slightly wrong.
+
+    /// Adds a rule, unless it is empty or one they already wrote. Returns
+    /// false when nothing was added, so the screen can say so rather than
+    /// silently doing nothing.
+    @discardableResult
+    func addInstruction(_ text: String) -> Bool {
+        guard let instruction = AutoReplyConfig.Instruction(cleaning: text) else { return false }
+        guard !config.instructions.contains(where: { $0.matches(instruction.text) }) else { return false }
+        guard config.instructions.count < Self.instructionLimit else { return false }
+
+        config.instructions.append(instruction)
+        touch()
+        return true
+    }
+
+    @discardableResult
+    func updateInstruction(_ id: AutoReplyConfig.Instruction.ID, text: String) -> Bool {
+        guard let index = config.instructions.firstIndex(where: { $0.id == id }) else { return false }
+        guard let cleaned = AutoReplyConfig.Instruction(cleaning: text) else { return false }
+        guard !config.instructions.contains(where: { $0.id != id && $0.matches(cleaned.text) }) else { return false }
+
+        config.instructions[index].text = cleaned.text
+        touch()
+        return true
+    }
+
+    func setInstruction(_ id: AutoReplyConfig.Instruction.ID, isOn: Bool) {
+        guard let index = config.instructions.firstIndex(where: { $0.id == id }) else { return }
+        config.instructions[index].isOn = isOn
+        touch()
+    }
+
+    func removeInstructions(at offsets: IndexSet) {
+        config.instructions.remove(atOffsets: offsets)
+        touch()
+    }
+
+    func moveInstructions(from source: IndexSet, to destination: Int) {
+        config.instructions.move(fromOffsets: source, toOffset: destination)
+        touch()
+    }
+
+    /// More than this and nobody can hold their own rules in their head, and
+    /// the prompt starts arguing with itself.
+    static let instructionLimit = 25
+
+    /// Empty ones dropped, whitespace trimmed, duplicates collapsed, and
+    /// capped. Run on the way in from the setup flow, where a person may
+    /// have typed several at once.
+    static func tidied(_ instructions: [AutoReplyConfig.Instruction]) -> [AutoReplyConfig.Instruction] {
+        var kept: [AutoReplyConfig.Instruction] = []
+        for instruction in instructions {
+            guard let cleaned = AutoReplyConfig.Instruction(cleaning: instruction.text) else { continue }
+            guard !kept.contains(where: { $0.matches(cleaned.text) }) else { continue }
+            kept.append(
+                AutoReplyConfig.Instruction(id: instruction.id, text: cleaned.text, isOn: instruction.isOn)
+            )
+        }
+        return Array(kept.prefix(instructionLimit))
+    }
+
+    // MARK: - What the model is told
+
+    /// The setup as prompt text, in the order that decides what wins.
+    ///
+    /// Safety first, then the boundaries, then the person's own rules, then
+    /// the facts they approved. An instruction can shape how Maily writes; it
+    /// can never widen what Maily is allowed to say or claim. That ordering
+    /// is the whole safety model, so it is built here rather than assembled
+    /// ad hoc at each call site.
+    func briefing(now: Date = .now) -> String {
+        guard config.isSetUp else { return "" }
+        var parts: [String] = []
+
+        if let persona = config.persona {
+            parts.append("They are a \(persona.title.lowercased()).")
+        }
+
+        if !config.allowed.isEmpty {
+            let list = AutoReplyConfig.Category.allCases
+                .filter(config.allowed.contains)
+                .map { "- \($0.title)" }
+                .joined(separator: "\n")
+            parts.append("You may answer these on their behalf:\n\(list)")
+        }
+
+        let boundaries = AutoReplyConfig.Boundary.allCases
+            .filter(config.mustAsk.contains)
+            .map { "- \($0.title)" }
+            .joined(separator: "\n")
+        if !boundaries.isEmpty {
+            parts.append(
+                "You may NOT answer any of these. They go back to the person, whatever else you have been told:\n\(boundaries)"
+            )
+        }
+
+        let rules = config.activeInstructions.map { "- \($0.text)" }.joined(separator: "\n")
+        if !rules.isEmpty {
+            parts.append(
+                """
+                Their own rules for how you write. Follow them, unless one would break something above or would have you state a fact you were not given:
+                \(rules)
+                """
+            )
+        }
+
+        let facts = config.business.filled.map { "- \($0.label): \($0.value)" }.joined(separator: "\n")
+        if !facts.isEmpty {
+            parts.append(
+                """
+                The only facts you may state about their work. If an answer needs something that is not here, you do not have it:
+                \(facts)
+                """
+            )
+        }
+
+        parts.append("When you are not sure: \(config.whenUnsure.title.lowercased()).")
+        return parts.joined(separator: "\n\n")
+    }
+
+    // MARK: - Disk
+
+    private func touch() {
+        config.updatedAt = .now
+        persist()
+    }
+
+    private func load() {
+        guard let data = try? Data(contentsOf: fileURL),
+              let stored = try? JSONDecoder().decode(AutoReplyConfig.self, from: data)
+        else { return }
+        config = stored
+    }
+
+    private func persist() {
+        do {
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try JSONEncoder().encode(config)
+            try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
+        } catch {
+            // Losing this would mean asking them to teach Maily again, which
+            // is bad enough to be worth knowing about -- but not worth
+            // interrupting the setup they are in the middle of.
+        }
+    }
+}
