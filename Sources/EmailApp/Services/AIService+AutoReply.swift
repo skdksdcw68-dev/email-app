@@ -31,3 +31,58 @@ extension AIService {
         return try await call(body)
     }
 }
+
+extension AIService {
+
+    /// One reply, written from the setup and the message.
+    ///
+    /// The model may refuse, and refusing is a real answer: `handled` comes
+    /// back false with a reason, and the app escalates rather than treating
+    /// it as a failure. An assistant that cannot decline will answer
+    /// everything, which is the failure that matters here.
+    struct AutoReplyResult: Decodable {
+        let handled: Bool
+        let reply: String
+        let reason: String
+        let category: String
+        let evidence: [String]
+        let withheld: [String]
+        let confidence: Double
+
+        private enum CodingKeys: String, CodingKey {
+            case handled, reply, reason, category, evidence, withheld, confidence
+        }
+
+        /// Every field optional on the way in: a reply that arrives without
+        /// its explanation is still a reply, and a malformed one must fail
+        /// closed rather than throw away the whole response.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            handled = try container.decodeIfPresent(Bool.self, forKey: .handled) ?? false
+            reply = try container.decodeIfPresent(String.self, forKey: .reply) ?? ""
+            reason = try container.decodeIfPresent(String.self, forKey: .reason) ?? ""
+            category = try container.decodeIfPresent(String.self, forKey: .category) ?? ""
+            evidence = try container.decodeIfPresent([String].self, forKey: .evidence) ?? []
+            withheld = try container.decodeIfPresent([String].self, forKey: .withheld) ?? []
+            confidence = try container.decodeIfPresent(Double.self, forKey: .confidence) ?? 0
+        }
+    }
+
+    static func autoReply(
+        message: Message,
+        briefing: String,
+        thread: String
+    ) async throws -> AutoReplyResult {
+        var payload: [String: String] = [
+            "action": "autoreply",
+            "briefing": briefing,
+            "from": "\(message.sender.name) <\(message.sender.address)>",
+            "date": message.fullDate,
+            "subject": message.subject,
+            "body": message.body,
+            "today": Self.todayLine,
+        ]
+        if !thread.isEmpty { payload["thread"] = thread }
+        return try await call(payload)
+    }
+}

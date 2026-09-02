@@ -41,6 +41,8 @@ struct EmailAppApp: App {
     @State private var push = PushService()
     /// What Maily has been authorised to answer on the person's behalf.
     @State private var autoReply = AutoReplyStore()
+    /// The replies Auto-Reply has written, and every decision behind them.
+    @State private var autoReplyQueue = AutoReplyQueue()
 
     var body: some Scene {
         WindowGroup {
@@ -53,6 +55,7 @@ struct EmailAppApp: App {
                 .environment(attachments)
                 .environment(push)
                 .environment(autoReply)
+                .environment(autoReplyQueue)
                 // Google redirects back through the reversed-client-id URL
                 // scheme declared in Info.plist; the SDK completes the flow.
                 .onOpenURL { url in
@@ -74,6 +77,15 @@ struct EmailAppApp: App {
                         // And whether the three months it claims to hold are
                         // actually here. Once a day, in the background.
                         await mail.verifyAgainstGmail()
+
+                        // Then whatever Auto-Reply has been authorised to
+                        // answer. After the mail is in, so it is looking at
+                        // what actually arrived.
+                        await mail.runAutoReply(
+                            config: autoReply.config,
+                            briefing: autoReply.briefing(),
+                            queue: autoReplyQueue
+                        )
 
                         // Asked here, after `restore()`, because there has to
                         // be a mailbox before "let Maily notify you" means
@@ -116,7 +128,14 @@ struct EmailAppApp: App {
                     // otherwise lose the last few and pay for them again.
                     if phase != .active { ClassificationCache.flush() }
                     guard phase == .active else { return }
-                    Task { await mail.catchUp() }
+                    Task {
+                        await mail.catchUp()
+                        await mail.runAutoReply(
+                            config: autoReply.config,
+                            briefing: autoReply.briefing(),
+                            queue: autoReplyQueue
+                        )
+                    }
                 }
         }
     }

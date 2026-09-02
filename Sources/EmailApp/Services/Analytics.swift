@@ -76,6 +76,10 @@ enum Analytics {
         /// Auto-Reply setup finished. Shape of the setup only -- never the
         /// business facts, which are the person's own and stay on the phone.
         case autoReplySetUp = "auto_reply_set_up"
+        /// Auto-Reply wrote one. Shape only: never the reply, never who it
+        /// was to, never what it said.
+        case autoReplyDrafted = "auto_reply_drafted"
+        case autoReplySent = "auto_reply_sent"
         /// The second tier found something in a message. Count and
         /// direction only; never what it found.
         case factsExtracted = "facts_extracted"

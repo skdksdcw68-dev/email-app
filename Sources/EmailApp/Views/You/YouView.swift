@@ -11,6 +11,7 @@ struct YouView: View {
     @Environment(UserStore.self) private var user
     @Environment(MailStore.self) private var mail
     @Environment(AutoReplyStore.self) private var autoReply
+    @Environment(AutoReplyQueue.self) private var autoReplyQueue
 
     @State private var isEditingProfile = false
 
@@ -169,7 +170,14 @@ struct YouView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
-            if autoReply.config.isSetUp {
+            if !autoReplyQueue.waiting.isEmpty {
+                Text("\(autoReplyQueue.waiting.count)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.accentColor))
+            } else if autoReply.config.isSetUp {
                 Text(autoReply.config.isOn ? "On" : "Off")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(autoReply.config.isOn ? Color.green : Color.secondary)
@@ -182,6 +190,8 @@ struct YouView: View {
         let config = autoReply.config
         guard config.isSetUp else { return "Let Maily handle the routine replies" }
         guard config.isOn else { return "Setup saved" }
+        let waiting = autoReplyQueue.waiting.count
+        if waiting > 0 { return waiting == 1 ? "1 reply waiting" : "\(waiting) replies waiting" }
         return "\(config.handledCount) kinds of mail handled"
     }
 
@@ -203,4 +213,5 @@ struct YouView: View {
         .environment(MailStore.connected())
         .environment(UserStore(defaults: .previews, startAt: .finished))
         .environment(AutoReplyStore(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-autoreply.json")))
+        .environment(AutoReplyQueue(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-autoreply-queue.json")))
 }

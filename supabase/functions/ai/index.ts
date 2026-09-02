@@ -903,6 +903,102 @@ async function ask(body: Record<string, unknown>) {
   return json({ answer: answer.trim(), model: DRAFT_MODEL });
 }
 
+// ------------------------------------------------------- auto-reply runtime
+//
+// Writing one real reply on somebody's behalf.
+//
+// The whole safety model is the order of what follows. The boundaries are
+// read before the person's own rules, and the rules carry the caveat that
+// they cannot license a claim. An instruction can say how to write; it can
+// never widen what may be said. Everything else is a consequence of that.
+//
+// The model is also allowed to refuse. `handled: false` with a reason is a
+// first-class answer, and the app treats it as an escalation rather than a
+// failure -- an assistant that cannot say "not this one" will answer
+// everything, which is the failure mode that matters.
+
+const AUTOREPLY_SYSTEM = `You are writing one reply on somebody's behalf, from
+a setup they approved. You are not them; you write as their assistant.
+
+Return JSON only, no prose:
+{
+  "handled": boolean,
+  "reply": "the reply, ready to send, or empty when handled is false",
+  "reason": "one sentence: why you answered, or why you did not",
+  "category": "which of the kinds of mail they allowed this was",
+  "evidence": ["the approved facts you used"],
+  "withheld": ["what you did not answer, and why"],
+  "confidence": 0.0
+}
+
+Answer only when ALL of these hold. Otherwise handled is false.
+- The message is one of the kinds they allowed you to answer.
+- Nothing in it touches anything on their "must come back to them" list. If
+  any part does, the whole message goes back to them, even if you could have
+  answered the rest.
+- Every fact your reply states appears in what they told you. A price, a
+  date, a policy, a promise, a name, an availability -- if it is not there,
+  you do not have it and you may not produce it. Not from the email you are
+  answering, not from what is usual in their industry, not from anywhere.
+
+Writing it:
+- Follow their rules for how you write. Those shape the wording only; they
+  never let you state something you were not given, and they never override
+  the two lists above.
+- Answer what was actually asked. Do not add a sales pitch, do not invite
+  further questions unless that is their style, and do not restate their
+  question back at them.
+- Where you can answer part of it and not the rest, answer the part and say
+  plainly that you will come back on the rest. Put the rest in withheld.
+- No subject line, no quoted original, no signature block beyond a short
+  sign-off. Plain text.
+
+confidence is how sure you are that this reply is correct and inside what
+they allowed. Be honest and be harsh: 0.9 and above only when the message is
+squarely one of their allowed kinds and every fact you used was handed to
+you. Anything you had to interpret belongs below 0.7.`;
+
+async function autoReply(body: Record<string, string>) {
+  const content = [
+    `Their setup:\n${body.briefing ?? ""}`,
+    body.thread ? `\nEarlier in this conversation:\n${body.thread}` : "",
+    `\nThe message to answer:\nFrom: ${body.from ?? ""}\nDate: ${body.date ?? ""}\nSubject: ${body.subject ?? ""}\n\n${(body.body ?? "").slice(0, AUTOREPLY_BODY_LIMIT)}`,
+    body.today ? `\nToday is ${body.today}.` : "",
+  ].join("\n");
+
+  const raw = await openai(
+    DRAFT_MODEL,
+    [
+      { role: "system", content: AUTOREPLY_SYSTEM },
+      { role: "user", content },
+    ],
+    true,
+  );
+
+  const parsed = JSON.parse(raw);
+  const list = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+  const reply = typeof parsed.reply === "string" ? parsed.reply.trim() : "";
+  // A reply that came back empty is a refusal however the flag was set.
+  const handled = parsed.handled === true && reply.length > 0;
+
+  return json({
+    handled,
+    reply: handled ? reply : "",
+    reason: typeof parsed.reason === "string" ? parsed.reason : "",
+    category: typeof parsed.category === "string" ? parsed.category : "",
+    evidence: list(parsed.evidence),
+    withheld: list(parsed.withheld),
+    confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0,
+    model: DRAFT_MODEL,
+  });
+}
+
+/// More than the classifier reads. A request is often qualified halfway down
+/// -- "and we'd need it before the 14th" -- and answering the top of an email
+/// while missing that is exactly the mistake this must not make.
+const AUTOREPLY_BODY_LIMIT = 3000;
+
 // ------------------------------------------------------------------ router
 
 Deno.serve(async (request) => {
@@ -917,6 +1013,8 @@ Deno.serve(async (request) => {
     switch (payload.action) {
       case "classify":
         return await classify(payload);
+      case "autoreply":
+        return await autoReply(payload);
       case "autoreply_understanding":
         return await autoReplyUnderstanding(payload);
       case "autoreply_example":

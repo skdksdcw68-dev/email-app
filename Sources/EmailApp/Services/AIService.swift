@@ -356,7 +356,9 @@ enum AIService {
 
     /// "Monday, 1 September 2026" -- the device's own date, in the device's
     /// own locale.
-    private static var todayLine: String {
+    /// Also read by the Auto-Reply runtime, which has the same problem: a
+    /// model that does not know the date cannot resolve "by Friday".
+    static var todayLine: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "EEEE, d MMMM yyyy"
         return formatter.string(from: .now)

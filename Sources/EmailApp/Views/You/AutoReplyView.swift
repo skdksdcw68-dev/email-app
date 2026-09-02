@@ -9,6 +9,7 @@ import SwiftUI
 /// questions again because they went on holiday.
 struct AutoReplyView: View {
     @Environment(AutoReplyStore.self) private var autoReply
+    @Environment(AutoReplyQueue.self) private var queue
 
     @State private var isSettingUp = false
     @State private var isConfirmingOff = false
@@ -20,6 +21,7 @@ struct AutoReplyView: View {
         List {
             if config.isSetUp {
                 statusSection
+                queueSection
                 whatItDoesSection
                 instructionsSection
                 knowledgeSection
@@ -112,6 +114,50 @@ struct AutoReplyView: View {
                  ? "Turning it off keeps everything you taught it."
                  : "Nothing is being answered while this is off.")
         }
+    }
+
+    /// What Maily has actually done, above what it is allowed to do. The
+    /// count is the first thing worth knowing when you open this screen.
+    private var queueSection: some View {
+        Section {
+            NavigationLink {
+                AutoReplyQueueView()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "tray.full.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.tint)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Replies")
+                            .font(.subheadline.weight(.medium))
+                        Text(queueSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    if !queue.waiting.isEmpty {
+                        Text("\(queue.waiting.count)")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.accentColor))
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        } footer: {
+            Text("Nothing Maily writes is sent until you send it.")
+        }
+    }
+
+    private var queueSummary: String {
+        let waiting = queue.waiting.count
+        if waiting == 0 {
+            return queue.log.isEmpty ? "Nothing yet" : "Nothing waiting"
+        }
+        return waiting == 1 ? "1 reply waiting for you" : "\(waiting) replies waiting for you"
     }
 
     private var whatItDoesSection: some View {
