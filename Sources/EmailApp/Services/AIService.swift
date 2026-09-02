@@ -364,7 +364,9 @@ enum AIService {
 
     // MARK: - Transport
 
-    private static func call<T: Decodable>(_ payload: [String: String]) async throws -> T {
+    /// Not private: the Auto-Reply calls live in their own file, because
+    /// they are about the person's setup rather than their mail.
+    static func call<T: Decodable>(_ payload: [String: String]) async throws -> T {
         var request = URLRequest(url: SupabaseConfig.url.appending(path: "functions/v1/ai"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

@@ -296,8 +296,8 @@ struct AutoReplyUnderstandingView: View {
     var body: some View {
         if let understanding {
             VStack(spacing: 10) {
-                ForEach(understanding.sections, id: \.title) { section in
-                    section(section.title, section.body, section.step)
+                ForEach(understanding.sections, id: \.title) { part in
+                    card(part.title, part.body, part.step)
                 }
 
                 Text("Everything here comes from the choices and information you provided.")
@@ -322,7 +322,7 @@ struct AutoReplyUnderstandingView: View {
         }
     }
 
-    private func section(_ title: String, _ body: String, _ step: String) -> some View {
+    private func card(_ title: String, _ body: String, _ step: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(title.uppercased())
