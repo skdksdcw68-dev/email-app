@@ -22,17 +22,32 @@ struct TaskTrail: View {
                     marker(for: step)
                         .frame(width: 14, height: 14)
 
-                    Text(step.detail)
-                        .font(.caption)
-                        .foregroundStyle(step.isDone ? .secondary : .primary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .multilineTextAlignment(.leading)
+                    // Thinking, while it is still thinking, is the dot on its
+                    // own. "Working out what would answer this" is the app
+                    // narrating that it has not started yet -- and it sat
+                    // above the answer for the whole time the answer was
+                    // being written. The steps that report real work still
+                    // say what they did, and this one says so once it is
+                    // done and the trail is being read back.
+                    if !isThinkingNow(step) {
+                        Text(step.detail)
+                            .font(.caption)
+                            .foregroundStyle(step.isDone ? .secondary : .primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .multilineTextAlignment(.leading)
+                    }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+    }
+
+    /// A thinking step that has not finished. There is nothing to report yet,
+    /// so the pulse reports it.
+    private func isThinkingNow(_ step: TaskStep) -> Bool {
+        step.kind == .understanding && !step.isDone
     }
 
     @ViewBuilder

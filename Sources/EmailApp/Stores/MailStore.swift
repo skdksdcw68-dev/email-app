@@ -833,12 +833,23 @@ final class MailStore {
         // Anything already classified comes back from the cache for free.
         // Without this a pull-to-refresh discards every tag and pays to derive
         // them all over again.
-        for message in messages {
-            guard message.aiSummary == nil,
-                  let remoteID = message.remoteID,
-                  let cached = ClassificationCache.entry(for: remoteID)
-            else { continue }
-            apply(AIService.Classification(cached), to: message.id)
+        //
+        // One write for the lot. Applied one at a time, a launch with a full
+        // cache was five hundred redraws of every screen before the first
+        // request had even gone out.
+        let answered = locallyReplied
+        write { list in
+            for index in list.indices {
+                guard list[index].aiSummary == nil,
+                      let remoteID = list[index].remoteID,
+                      let cached = ClassificationCache.entry(for: remoteID)
+                else { continue }
+                Self.applying(
+                    AIService.Classification(cached),
+                    to: &list[index],
+                    hasReplied: answered.contains(remoteID)
+                )
+            }
         }
 
         var budget = Self.enhancePassLimit
@@ -871,6 +882,11 @@ final class MailStore {
                 for await ok in group where ok { count += 1 }
                 return count
             }
+            // Written once per batch. Per message it was an encode of five
+            // hundred entries and a UserDefaults write each time, which cost
+            // more than the classification it was saving.
+            ClassificationCache.flush()
+
             // A batch where nothing came back is the service being down, not
             // the mail being hard. The same fifteen would be sent again
             // until the budget ran out; stop and let the next refresh try.
@@ -925,31 +941,38 @@ final class MailStore {
         // that an answered email needs answering. What the person did here
         // outranks what the model thinks.
         let answered = message(id).map { hasReplied(to: $0) } ?? false
+        update(id) { Self.applying(classification, to: &$0, hasReplied: answered) }
+    }
 
-        update(id) { message in
-            message.aiSummary = classification.summary
+    /// The rules themselves, on a message rather than on an id, so a whole
+    /// cached backlog can go on in one write instead of one write each.
+    private static func applying(
+        _ classification: AIService.Classification,
+        to message: inout Message,
+        hasReplied: Bool
+    ) {
+        message.aiSummary = classification.summary
 
-            if let tag = classification.tag {
-                message.tags.subtract([.urgent, .veryImportant, .important])
-                message.tags.insert(tag)
-            }
-
-            if classification.needsReply && !answered {
-                message.tags.insert(.needsReply)
-            } else {
-                message.tags.remove(.needsReply)
-            }
-
-            // What sort of thing it is, independent of how much it matters.
-            // At most one, so clear any previous kind before setting.
-            if let kind = classification.kindTag {
-                message.tags.subtract(Set(AITag.kinds))
-                message.tags.insert(kind)
-            }
-
-            // Never leave a message untagged; it would appear in no filter.
-            if message.tags.isEmpty { message.tags.insert(.noReplyNeeded) }
+        if let tag = classification.tag {
+            message.tags.subtract([.urgent, .veryImportant, .important])
+            message.tags.insert(tag)
         }
+
+        if classification.needsReply && !hasReplied {
+            message.tags.insert(.needsReply)
+        } else {
+            message.tags.remove(.needsReply)
+        }
+
+        // What sort of thing it is, independent of how much it matters.
+        // At most one, so clear any previous kind before setting.
+        if let kind = classification.kindTag {
+            message.tags.subtract(Set(AITag.kinds))
+            message.tags.insert(kind)
+        }
+
+        // Never leave a message untagged; it would appear in no filter.
+        if message.tags.isEmpty { message.tags.insert(.noReplyNeeded) }
     }
 
     func disconnect() {
@@ -959,6 +982,8 @@ final class MailStore {
         account = nil
         write { $0 = [] }
         MessageArchive.clear()
+        readCache = []
+        repliedCache = []
         UserDefaults.standard.removeObject(forKey: Self.readKey)
         UserDefaults.standard.removeObject(forKey: Self.repliedKey)
         // The next mailbox starts its own history, and resuming from the
@@ -1057,9 +1082,22 @@ final class MailStore {
     /// reading stick, and it is why `merge` prefers this over what Gmail says.
     private static let readKey = "mail.readLocally"
 
+    /// Kept in memory, like the classification cache and for the same
+    /// reason: this is read once per message inside loops over the whole
+    /// mailbox, and each read was a UserDefaults fetch and a fresh Set.
+    @ObservationIgnored private var readCache: Set<String>?
+
     private var locallyRead: Set<String> {
-        get { Set(UserDefaults.standard.stringArray(forKey: Self.readKey) ?? []) }
-        set { UserDefaults.standard.set(Array(newValue), forKey: Self.readKey) }
+        get {
+            if let readCache { return readCache }
+            let loaded = Set(UserDefaults.standard.stringArray(forKey: Self.readKey) ?? [])
+            readCache = loaded
+            return loaded
+        }
+        set {
+            readCache = newValue
+            UserDefaults.standard.set(Array(newValue), forKey: Self.readKey)
+        }
     }
 
     /// Messages answered inside Maily.
@@ -1071,9 +1109,19 @@ final class MailStore {
     /// trick as `readKey` -- remember it here, because Gmail cannot be told.
     private static let repliedKey = "mail.repliedLocally"
 
+    @ObservationIgnored private var repliedCache: Set<String>?
+
     private var locallyReplied: Set<String> {
-        get { Set(UserDefaults.standard.stringArray(forKey: Self.repliedKey) ?? []) }
-        set { UserDefaults.standard.set(Array(newValue), forKey: Self.repliedKey) }
+        get {
+            if let repliedCache { return repliedCache }
+            let loaded = Set(UserDefaults.standard.stringArray(forKey: Self.repliedKey) ?? [])
+            repliedCache = loaded
+            return loaded
+        }
+        set {
+            repliedCache = newValue
+            UserDefaults.standard.set(Array(newValue), forKey: Self.repliedKey)
+        }
     }
 
     /// The reply has gone, so this no longer needs one. Answering something

@@ -1,8 +1,21 @@
 import SwiftUI
 import GoogleSignIn
+import UIKit
 
 @main
 struct EmailAppApp: App {
+
+    init() {
+        // The tab badge is drawn by UIKit, not SwiftUI, so its text cannot be
+        // styled where it is set. The default size is heavy beside the tab
+        // labels. Set through the appearance proxy instead, which the system
+        // is free to ignore on a version that draws its own badge -- and
+        // does no harm where it does.
+        UITabBarItem.appearance().setBadgeTextAttributes(
+            [.font: UIFont.systemFont(ofSize: 11, weight: .semibold)], for: .normal
+        )
+    }
+
     @Environment(\.scenePhase) private var scenePhase
     /// Registering for push, receiving the token and being woken by one are
     /// all UIKit delegate callbacks with no SwiftUI equivalent.
@@ -91,6 +104,10 @@ struct EmailAppApp: App {
                 // listing the inbox and fetching twenty-five messages to
                 // find that out.
                 .onChange(of: scenePhase) { _, phase in
+                    // Classifications are written a batch at a time rather
+                    // than a message at a time, so leaving mid-pass would
+                    // otherwise lose the last few and pay for them again.
+                    if phase != .active { ClassificationCache.flush() }
                     guard phase == .active else { return }
                     Task { await mail.catchUp() }
                 }
