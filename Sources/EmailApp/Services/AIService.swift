@@ -112,17 +112,31 @@ enum AIService {
     /// `message` is optional so the writer also works on a new email, where
     /// there is no thread to answer and the instruction is all the context
     /// there is.
-    static func draft(replyingTo message: Message?, instruction: String, tone: String) async throws -> Draft {
+    /// `standing` is where things stand with whoever is being written to,
+    /// and `thread` the last few messages of the conversation. Both are
+    /// background: they stop a reply contradicting what was said last week,
+    /// or asking for something already promised.
+    static func draft(
+        replyingTo message: Message?,
+        instruction: String,
+        tone: String,
+        thread: String = "",
+        standing: String = "",
+        knowledge: String = ""
+    ) async throws -> Draft {
         var payload = [
             "action": "draft",
             "instruction": instruction,
             "tone": tone,
         ]
         if let message {
-            payload["from"] = "\(message.sender.name) <\(message.sender.address)>"
+            payload["from"] = "(message.sender.name) <(message.sender.address)>"
             payload["subject"] = message.subject
             payload["body"] = message.body
         }
+        if !thread.isEmpty { payload["thread"] = thread }
+        if !standing.isEmpty { payload["standing"] = standing }
+        if !knowledge.isEmpty { payload["knowledge"] = knowledge }
         return try await call(payload)
     }
 
@@ -276,6 +290,9 @@ enum AIService {
         /// Messages the model asked to read properly. These go at length;
         /// everything else keeps the opening that says what it is.
         inFull: Set<Message.ID> = [],
+        /// Where things stand with whoever the question is about. Saves the
+        /// model working it out from a dozen of their emails.
+        people: String? = nil,
         /// How many more times the model may ask to search instead of
         /// answering. Counts down each hop, so an investigation can take
         /// two or three passes and still cannot run forever.
@@ -322,6 +339,7 @@ enum AIService {
         if let tone, !tone.isEmpty { payload["tone"] = tone }
         if let memories, !memories.isEmpty { payload["memories"] = memories }
         if let facts, !facts.isEmpty { payload["facts"] = facts }
+        if let people, !people.isEmpty { payload["people"] = people }
         payload["hops_left"] = max(0, hopsLeft)
         payload["searched"] = hasSearched
 

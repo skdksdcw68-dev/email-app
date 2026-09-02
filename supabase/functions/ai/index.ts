@@ -370,6 +370,16 @@ ${emojiRule}
 
 Rules:
 - Reply to the message shown. Do not invent facts, names, dates or commitments.
+- You may be told where things stand with the person being written to: what
+  is outstanding either way, what was promised, when you last spoke. Use it
+  so the reply does not contradict what was said last week, ask for
+  something already sent, or thank somebody for something they never did.
+  Do not recite it back at them.
+- You may be told facts about the user's own work that they approved. Those
+  you may state. Anything a reply needs that is not in them, and not in the
+  message or the thread, you do not have -- say you will confirm it rather
+  than producing a number, a date or a policy that nobody gave you. A wrong
+  price in a reply is worse than a slower reply.
 - If the instruction is vague, write the shortest reply that honours it.
 - No subject line, no "Dear", no signature block. Body text only.
 - Match the length of the original. A two-line email gets a two-line reply.
@@ -381,6 +391,9 @@ Rules:
   "at your earliest convenience". Nobody talks like that.`;
 
   const content = [
+    body.standing ? `Where things stand with them:\n${body.standing.slice(0, 1200)}\n` : "",
+    body.knowledge ? `Facts about the user's work they approved:\n${body.knowledge.slice(0, 1200)}\n` : "",
+    body.thread ? `Earlier in this conversation:\n${body.thread.slice(0, 1600)}\n` : "",
     `The message being replied to:`,
     `From: ${body.from ?? ""}`,
     `Subject: ${body.subject ?? ""}`,
@@ -388,7 +401,7 @@ Rules:
     "",
     `What the user said to write, spoken aloud and transcribed:`,
     body.instruction ?? "",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   const reply = await openai(
     DRAFT_MODEL,
@@ -476,6 +489,19 @@ async function revise(body: Record<string, string>) {
 nothing else.
 
 Tone: ${tone}.
+
+The facts are locked. The style is yours.
+
+Every number, date, name, price, commitment and decision in the draft is a
+fact somebody has already checked. "Make it warmer" is an instruction about
+tone; it is not permission to round a figure, move a date, soften a refusal
+into a maybe, or add a promise to make the warmth land. If a change cannot
+be made without altering one of those, make the part that can be and leave
+the fact exactly as it was written.
+
+The one exception is a change that is explicitly about a fact -- "change the
+date to Friday", "make it two thousand". Then that fact changes, and only
+that one.
 
 Rules:
 - Keep the meaning, the facts, the names and the decision exactly as they
@@ -781,7 +807,18 @@ function askMessages(question: string, body: Record<string, unknown>) {
       }`,
     );
   }
-  const preamble = facts.length ? `${facts.join("\n")}\n\n` : "";
+  // Where things stand with whoever they asked about: who the person is,
+  // what is outstanding either way, and whose move it is. The app worked
+  // this out from what it holds, so the model does not have to derive it
+  // from a dozen of their emails.
+  if (body.people) {
+    facts.push(`What you know about the people they asked about:
+${String(body.people).slice(0, 2500)}`);
+  }
+  const preamble = facts.length ? `${facts.join("
+")}
+
+` : "";
 
   // The model may ask to look further rather than answer.
   //

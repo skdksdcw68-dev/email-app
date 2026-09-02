@@ -564,6 +564,11 @@ struct AIChatView: View {
         // pointing at a message the model cannot see is a fact it cannot
         // show.
         let facts = context.isEmpty ? [] : mail.facts.forPrompt()
+        // Who the question is plainly about, and where things stand with
+        // them. "What is happening with Sara" used to mean handing over a
+        // dozen of Sara's emails and hoping; the app already knows the
+        // answer and can just say it.
+        let standings = context.isEmpty ? [] : mail.peopleMentioned(in: question)
         var pinned = Set<Message.ID>()
         if !facts.isEmpty {
             let wanted = Set(facts.map(\.messageID))
@@ -621,6 +626,7 @@ struct AIChatView: View {
                     // have reordered since the last one.
                     facts: FactStore.describe(facts, numbered: context),
                     inFull: opened,
+                    people: standings.map { $0.described() }.joined(separator: "\n\n"),
                     hopsLeft: hopsLeft,
                     hasSearched: searchedFor != nil
                 ) { fragment in
@@ -976,10 +982,16 @@ struct AIChatView: View {
         defer { isWorking = false }
 
         do {
+            // Everything the app already knows about this conversation and
+            // the person on the other end of it. A reply that asks for
+            // something they sent last week, or repeats a promise already
+            // made, is the app knowing less than the person reading it.
             let result = try await AIService.draft(
                 replyingTo: original,
                 instruction: instruction,
-                tone: user.tonePreference
+                tone: user.tonePreference,
+                thread: original.map { mail.threadSummary(for: $0) } ?? "",
+                standing: original.flatMap { mail.standing(for: $0.sender.address) }?.described() ?? ""
             )
 
             let subject: String

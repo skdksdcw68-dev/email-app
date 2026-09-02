@@ -107,12 +107,7 @@ extension MailStore {
         config: AutoReplyConfig,
         queue: AutoReplyQueue
     ) async {
-        let thread = messages
-            .filter { $0.threadID != nil && $0.threadID == message.threadID && $0.id != message.id }
-            .sorted { $0.date < $1.date }
-            .suffix(3)
-            .map { "\($0.sender.name.isEmpty ? $0.sender.address : $0.sender.name) wrote on \($0.fullDate):\n\($0.body.prefix(400))" }
-            .joined(separator: "\n\n")
+        let thread = threadSummary(for: message)
 
         do {
             let result = try await AIService.autoReply(
