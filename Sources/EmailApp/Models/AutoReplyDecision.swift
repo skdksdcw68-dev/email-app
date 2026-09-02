@@ -109,15 +109,21 @@ enum AutoReplyEligibility {
     /// The one call the runtime makes before spending anything.
     ///
     /// `alreadyHandled` is the set of message ids Auto-Reply has already
-    /// decided about, and `repliedThreads` the threads that already have a
-    /// reply from this person -- either one means leaving it alone.
+    /// decided about. `myLatestReply` is, per thread, the most recent thing
+    /// this person wrote in it -- which only rules a message out when it came
+    /// *after* the message being considered.
+    ///
+    /// That date matters. Checking merely whether the thread contains
+    /// anything from them meant a conversation they answered in March was
+    /// dead to Auto-Reply for ever, and it meant a message they had just
+    /// sent themselves blocked its own reply.
     static func check(
         _ message: Message,
         config: AutoReplyConfig,
         myAddress: String,
         headers: [String: String] = [:],
         alreadyHandled: Set<String>,
-        repliedThreads: Set<String>,
+        myLatestReply: [String: Date],
         now: Date = .now
     ) -> Verdict {
         guard config.isRunning else {
@@ -138,10 +144,13 @@ enum AutoReplyEligibility {
             return .ineligible("You wrote this.")
         }
 
-        // A thread this person has already answered themselves is finished
-        // as far as Auto-Reply is concerned.
-        if let thread = message.threadID, repliedThreads.contains(thread) {
-            return .ineligible("You've already replied in this thread.")
+        // A thread they have picked up themselves, since this message
+        // arrived, is theirs. Anything they wrote before it is history and
+        // does not stop Maily answering what came after.
+        if let thread = message.threadID,
+           let latest = myLatestReply[thread],
+           latest > message.date {
+            return .ineligible("You've already answered this yourself.")
         }
 
         // Machines. Checked before anything else costs money, and checked

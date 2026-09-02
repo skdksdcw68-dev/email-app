@@ -47,7 +47,7 @@ final class AutoReplyRuntimeTests: XCTestCase {
         config: AutoReplyConfig? = nil,
         headers: [String: String] = [:],
         handled: Set<String> = [],
-        replied: Set<String> = []
+        replied: [String: Date] = [:]
     ) -> AutoReplyEligibility.Verdict {
         AutoReplyEligibility.check(
             message,
@@ -55,7 +55,7 @@ final class AutoReplyRuntimeTests: XCTestCase {
             myAddress: me,
             headers: headers,
             alreadyHandled: handled,
-            repliedThreads: replied
+            myLatestReply: replied
         )
     }
 
@@ -130,10 +130,21 @@ final class AutoReplyRuntimeTests: XCTestCase {
         XCTAssertFalse(check(message(remoteID: "m1"), handled: ["m1"]).isEligible)
     }
 
-    func testAThreadYouAlreadyAnsweredIsLeftAlone() {
-        let verdict = check(message(thread: "t9"), replied: ["t9"])
+    func testAThreadYouPickedUpAfterwardsIsLeftAlone() {
+        let incoming = message(thread: "t9", daysAgo: 2)
+        let verdict = check(incoming, replied: ["t9": .now])
         XCTAssertFalse(verdict.isEligible)
-        XCTAssertEqual(verdict.reason, "You've already replied in this thread.")
+        XCTAssertEqual(verdict.reason, "You've already answered this yourself.")
+    }
+
+    func testSomethingYouWroteBeforeItDoesNotBlockTheReply() {
+        // The old rule checked only whether the thread contained anything
+        // from them, so a conversation answered in March was dead to
+        // Auto-Reply for ever -- and a mail they had just sent themselves
+        // blocked its own reply.
+        let incoming = message(thread: "t9", daysAgo: 0)
+        let longAgo = Calendar.current.date(byAdding: .day, value: -30, to: .now)!
+        XCTAssertTrue(check(incoming, replied: ["t9": longAgo]).isEligible)
     }
 
     // MARK: - Scope

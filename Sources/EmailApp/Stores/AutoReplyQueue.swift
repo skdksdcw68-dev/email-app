@@ -21,6 +21,19 @@ final class AutoReplyQueue {
     /// Message ids already decided about, so nothing is considered twice.
     private(set) var handled: Set<String> = []
 
+    /// A pass is running. Drives the skeleton, so "nothing happened" and
+    /// "still looking" are never the same screen.
+    private(set) var isChecking = false
+    /// When a pass last finished, so the screen can say how fresh it is.
+    private(set) var lastCheckedAt: Date?
+
+    func beginCheck() { isChecking = true }
+
+    func endCheck() {
+        isChecking = false
+        lastCheckedAt = .now
+    }
+
     let fileURL: URL
     nonisolated(unsafe) private var disconnectObserver: NSObjectProtocol?
 
@@ -142,6 +155,7 @@ final class AutoReplyQueue {
     func clearAll() {
         decisions = []
         handled = []
+        lastCheckedAt = nil
         try? FileManager.default.removeItem(at: fileURL)
     }
 }

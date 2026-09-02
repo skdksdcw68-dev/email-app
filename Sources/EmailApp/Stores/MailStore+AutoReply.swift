@@ -31,14 +31,27 @@ extension MailStore {
         limit: Int = 5
     ) async {
         guard config.isRunning, isConnected, let account else { return }
+        guard !queue.isChecking else { return }
+        queue.beginCheck()
+        defer { queue.endCheck() }
 
-        // Threads this person has already answered themselves, so Auto-Reply
-        // never writes into a conversation they have picked up.
+        // Fresh mail first. A pass that looks at what was already on the
+        // phone will keep reporting that nothing arrived, which is exactly
+        // what it looks like when this is broken.
+        await catchUp()
+
+
+        // The last thing this person wrote in each conversation, so
+        // Auto-Reply never writes into one they have picked up since. The
+        // date is the whole point: anything they wrote *before* the message
+        // being considered is history, not an answer to it.
         let mine = account.email.lowercased()
-        var answered: Set<String> = []
+        var myLatestReply: [String: Date] = [:]
         for message in messages where message.mailbox == .sent
             || message.sender.address.lowercased() == mine {
-            if let thread = message.threadID { answered.insert(thread) }
+            guard let thread = message.threadID else { continue }
+            if let known = myLatestReply[thread], known >= message.date { continue }
+            myLatestReply[thread] = message.date
         }
 
         let candidates = messages(in: .inbox)
@@ -58,7 +71,7 @@ extension MailStore {
                 myAddress: account.email,
                 headers: [:],
                 alreadyHandled: queue.handled,
-                repliedThreads: answered
+                myLatestReply: myLatestReply
             )
 
             guard verdict.isEligible else {

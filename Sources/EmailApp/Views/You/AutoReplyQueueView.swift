@@ -9,18 +9,72 @@ import SwiftUI
 struct AutoReplyQueueView: View {
     @Environment(MailStore.self) private var mail
     @Environment(AutoReplyQueue.self) private var queue
+    @Environment(AutoReplyStore.self) private var autoReply
 
     @State private var open: AutoReplyDecision?
 
+    /// How often it looks again while this screen is open. Somebody testing
+    /// this sends themselves an email and watches -- half a minute is short
+    /// enough to feel alive and long enough not to hammer Gmail.
+    private static let refreshEvery: Duration = .seconds(30)
+
     var body: some View {
         List {
-            if queue.waiting.isEmpty {
+            statusRow
+
+            if queue.isChecking && queue.waiting.isEmpty {
+                Section {
+                    ForEach(0..<2, id: \.self) { _ in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Somebody")
+                                .font(.subheadline.weight(.semibold))
+                            Text("A subject line goes here")
+                                .font(.caption)
+                            Text("And the reply Maily wrote for it, two lines long.")
+                                .font(.footnote)
+                        }
+                        .padding(.vertical, 3)
+                    }
+                    .redacted(reason: .placeholder)
+                } header: {
+                    Text("Looking")
+                }
+            } else if queue.waiting.isEmpty {
                 Section {
                     ContentUnavailableView(
                         "Nothing waiting",
                         systemImage: "tray",
-                        description: Text("When something arrives that Maily can answer, the reply will be here for you to look over.")
+                        description: Text(emptyExplanation)
                     )
+                }
+
+                // What it decided most recently, right here rather than one
+                // screen away. "It did nothing" and "it deliberately left
+                // these alone, here's why" look identical otherwise, and only
+                // one of them is a bug.
+                if !queue.log.isEmpty {
+                    Section {
+                        ForEach(queue.log.prefix(4)) { decision in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 7) {
+                                    Image(systemName: decision.symbol)
+                                        .font(.caption2)
+                                        .foregroundStyle(decision.outcome == .escalated
+                                                         ? Color.orange : Color.secondary)
+                                    Text(decision.subject)
+                                        .font(.caption.weight(.medium))
+                                        .lineLimit(1)
+                                }
+                                Text(decision.reason)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    } header: {
+                        Text("Most recently")
+                    }
                 }
             } else {
                 Section {
@@ -58,9 +112,99 @@ struct AutoReplyQueueView: View {
         .navigationTitle("Replies")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
+        .refreshable { await check() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    Task { await check() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(queue.isChecking)
+            }
+        }
+        // Looks again while this screen is open, then leaves it alone. A
+        // screen somebody is watching should not need a pull to prove the
+        // feature is alive.
+        .task {
+            while !Task.isCancelled {
+                await check()
+                try? await Task.sleep(for: Self.refreshEvery)
+            }
+        }
         .sheet(item: $open) { decision in
             AutoReplyDraftView(decision: decision)
         }
+    }
+
+    private func check() async {
+        await mail.runAutoReply(
+            config: autoReply.config,
+            briefing: autoReply.briefing(),
+            queue: queue
+        )
+    }
+
+    /// The state of the thing, said plainly. Orange when Auto-Reply is not
+    /// actually running, because the commonest reason for an empty screen is
+    /// that it is switched off and nothing else says so.
+    @ViewBuilder
+    private var statusRow: some View {
+        let config = autoReply.config
+        Section {
+            HStack(spacing: 11) {
+                Image(systemName: statusSymbol)
+                    .font(.footnote)
+                    .foregroundStyle(config.isRunning ? Color.green : Color.orange)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(statusTitle)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(config.isRunning ? .primary : Color.orange)
+                    Text(statusDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                if queue.isChecking { ProgressView() }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private var statusSymbol: String {
+        if !autoReply.config.isRunning { return "exclamationmark.triangle.fill" }
+        return queue.isChecking ? "arrow.triangle.2.circlepath" : "checkmark.circle.fill"
+    }
+
+    private var statusTitle: String {
+        let config = autoReply.config
+        if !config.isSetUp { return "Not set up" }
+        if !config.isOn { return "Auto-Reply is off" }
+        if !config.knowledgeConfirmed { return "Setup isn't finished" }
+        return queue.isChecking ? "Looking at your mail" : "Watching your inbox"
+    }
+
+    private var statusDetail: String {
+        let config = autoReply.config
+        if !config.isSetUp { return "Set it up first and Maily will start watching." }
+        if !config.isOn { return "Nothing is being answered. Turn it on from the Auto-Reply screen." }
+        if queue.isChecking { return "Checking for anything new." }
+        guard let last = queue.lastCheckedAt else { return "Checks every 30 seconds while you're here." }
+        return "Last checked \(last.formatted(.relative(presentation: .named))). Checks every 30 seconds while you're here."
+    }
+
+    /// Why there is nothing, in the words of the thing that actually decided.
+    private var emptyExplanation: String {
+        let config = autoReply.config
+        if !config.isRunning {
+            return "Auto-Reply isn't running, so nothing is being answered yet."
+        }
+        if queue.log.isEmpty {
+            return "Maily hasn't found anything it can answer yet. It only replies to the kinds of mail you allowed, from real people — not newsletters, no-reply addresses, or mail you sent yourself."
+        }
+        return "Maily has looked at your mail and didn't find anything it could answer on its own. What it decided is below."
     }
 
     private func row(_ decision: AutoReplyDecision) -> some View {
