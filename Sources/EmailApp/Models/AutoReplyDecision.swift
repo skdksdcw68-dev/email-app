@@ -38,12 +38,12 @@ struct AutoReplyDecision: Identifiable, Codable, Equatable {
     var reason: String
     /// The reply itself, when there is one to look at.
     var reply: String?
-    /// What the device check made of it, once there was a reply to check.
-    var verification: AutoReplyVerification?
     /// Which of their approved facts it leaned on, from the model.
     var evidence: [String] = []
     /// What it deliberately did not answer. The half that builds trust.
     var withheld: [String] = []
+    /// What the device check made of it, once there was a reply to check.
+    var verification: AutoReplyVerification?
     var decidedAt = Date.now
 
     /// Still waiting on the person: written, not yet sent or thrown away.
