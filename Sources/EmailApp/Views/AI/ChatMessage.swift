@@ -53,7 +53,7 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     }
 
     static func working(_ step: TaskStep) -> ChatMessage {
-        ChatMessage(role: .assistant, text: "", steps: [step], isPending: true)
+        ChatMessage(role: .assistant, text: "", isPending: true, steps: [step])
     }
 
     static func say(_ text: String) -> ChatMessage {
