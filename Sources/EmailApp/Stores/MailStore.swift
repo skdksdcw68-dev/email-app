@@ -78,6 +78,10 @@ final class MailStore {
     /// and waiting, so throughput matters more than responsiveness.
     static let importPageSize = 50
 
+    /// True while a background top-up is fetching what a previous import
+    /// could not, so a second launch trigger does not start a second one.
+    private var isToppingUp = false
+
     /// Where the one-time import has got to. Drives the import screen.
     private(set) var importProgress: ImportProgress = .idle
     /// Set once the three-month import has completed, so it never runs twice.
@@ -146,6 +150,11 @@ final class MailStore {
             Task { await MessageArchive.save(snapshot) }
             Task { await enhanceWithAI() }
         }
+
+        // Anything a previous import could not get. Detached so a mailbox
+        // that is 900 messages short does not hold the app on its launch
+        // screen while they come down.
+        Task { await topUpIfNeeded() }
     }
 
     // MARK: - Connection
@@ -199,87 +208,219 @@ final class MailStore {
         }
     }
 
-    /// Pulls three months of mail, page by page, reporting real progress.
+    /// Pulls the window of mail, and can be picked up where it stopped.
     ///
-    /// Runs once, when a mailbox is first connected. After this the archive on
-    /// disk is the starting point and refresh only tops it up.
+    /// The shape that matters is the ledger. Gmail is asked for every id in
+    /// the window first -- ids are cheap, 500 to a request, no bodies -- so
+    /// the denominator is real before a single message is downloaded. Bodies
+    /// come after, in chunks, and an id is crossed off only once the message
+    /// behind it is on disk.
+    ///
+    /// What this replaces: a loop that broke out of the whole import on the
+    /// first failed request and wrote `hasImported = true` regardless. One
+    /// dropped request at page six left 300 messages of 1,580 and a flag
+    /// saying the mailbox was complete, which nothing ever revisited. Now a
+    /// failed chunk goes to the back of the queue, the rest carries on, and
+    /// whatever is still owed is finished by `topUpIfNeeded()` on a later
+    /// launch.
     func importRecentMail() async {
         guard isConnected else { return }
+
+        guard let ledger = await openLedger() else {
+            // Gmail could not even be asked what is there. Nothing is marked
+            // done, so the next launch starts this again.
+            importProgress = .idle
+            return
+        }
+
+        guard !ledger.isComplete else {
+            hasImported = true
+            importProgress = .finished(count: messages.count, missing: 0)
+            return
+        }
+
+        await drain(ledger, quietly: false)
+    }
+
+    /// Fetches whatever a previous run could not, with no progress screen.
+    ///
+    /// Called at launch. An import that lost pages to a bad connection is
+    /// finished here -- a day later if that is what it takes -- rather than
+    /// leaving the mailbox permanently short of the mail the assistant is
+    /// then asked to search.
+    func topUpIfNeeded() async {
+        guard isConnected, hasImported, !isToppingUp else { return }
+        guard let ledger = ImportLedger.load(), !ledger.isComplete else { return }
+        isToppingUp = true
+        defer { isToppingUp = false }
+
+        // The window has moved on since this was written down, so the ids in
+        // it are the wrong ids. Drop it and let a refresh carry the mailbox.
+        guard !ledger.isStale else {
+            ImportLedger.clear()
+            return
+        }
+
+        await drain(ledger, quietly: true)
+    }
+
+    /// How much of the mailbox is still owed, for the settings screen.
+    var importShortfall: Int {
+        ImportLedger.load()?.pending.count ?? 0
+    }
+
+    /// An unfinished ledger to resume, or a fresh one counted from Gmail.
+    private func openLedger() async -> ImportLedger? {
+        if let saved = ImportLedger.load(), !saved.isComplete, !saved.isStale {
+            return saved
+        }
+
         importProgress = .counting
+        guard let token = try? await AuthService.currentGmailAccessToken() else { return nil }
 
-        var collected: [Message] = []
-        var seen = Set<String>()
-        var token: String?
-        // Gmail does not report a total up front, so the denominator only
-        // becomes real once a page comes back short -- until then the count
-        // is honest about being a running tally rather than a fraction.
-        var knownTotal = 0
+        guard let ids = await Self.retrying({
+            try await GmailService.allMessageIDs(
+                matching: GmailService.importWindow, accessToken: token
+            )
+        }) else { return nil }
 
-        repeat {
-            do {
-                let accessToken = try await AuthService.currentGmailAccessToken()
-                let page = try await GmailService.fetchInbox(
-                    accessToken: accessToken,
-                    limit: Self.importPageSize,
-                    pageToken: token,
-                    query: GmailService.importWindow
-                )
+        let ledger = ImportLedger(pending: ids)
+        ledger.save()
+        return ledger
+    }
 
-                for message in page.messages {
-                    guard let remoteID = message.remoteID else {
-                        collected.append(message)
-                        continue
-                    }
-                    if seen.insert(remoteID).inserted { collected.append(message) }
-                }
+    /// Works the ledger down to nothing, or to what will not come today.
+    private func drain(_ start: ImportLedger, quietly: Bool) async {
+        var ledger = start
+        // A resume builds on the mail already here rather than fetching it
+        // twice.
+        var collected = messages
+        // Fetched, not yet written. These stay uncrossed in the ledger until
+        // they are, so being killed here costs a re-fetch and not a hole.
+        var held: [Message] = []
+        var heldIDs: [String] = []
+        // Chunks that refused this run. They stay pending for a later launch.
+        var refused = Set<String>()
 
-                token = page.nextPageToken
-                // On the last page the total is known exactly. Before that,
-                // assume at least one more page so the bar never sits at 100%
-                // with work still to do.
-                knownTotal = token == nil ? collected.count : collected.count + Self.importPageSize
-                importProgress = .importing(done: collected.count, total: knownTotal)
+        if !quietly {
+            importProgress = .importing(done: ledger.done, total: ledger.total)
+        }
 
-                // Deliberately NOT publishing `messages` here. Assigning the
-                // growing array every page made the list rebuild itself at 50,
-                // 100, 500, 1000 rows while the import was still running, and
-                // on a real mailbox that locks the phone up. The counter is
-                // the live feedback; the mail lands once, at the end.
-            } catch {
-                connectionError = error.localizedDescription
-                break
+        while let chunk = ledger.nextChunk(Self.importPageSize) {
+            // Back round to chunks already tried and failed: everything left
+            // has had its turn, so stop rather than spin.
+            if chunk.allSatisfy(refused.contains) { break }
+
+            guard let token = try? await AuthService.currentGmailAccessToken() else { break }
+
+            guard let fetched = await Self.retrying({
+                try await GmailService.messages(ids: chunk, accessToken: token)
+            }) else {
+                refused.formUnion(chunk)
+                ledger.postpone(chunk)
+                continue
             }
-        } while token != nil
 
-        // Sent mail, in one page rather than the full window. It is not for
-        // reading -- it is what makes "waiting on their reply" answerable at
-        // all, since that means a message you sent that nobody came back on.
-        // gmail.readonly already covers SENT, so this costs no new scope.
-        if let accessToken = try? await AuthService.currentGmailAccessToken(),
-           let sent = try? await GmailService.fetchInbox(
-               accessToken: accessToken,
-               limit: Self.importPageSize,
-               query: GmailService.importWindow,
-               label: "SENT"
-           ) {
-            for message in sent.messages {
-                guard let remoteID = message.remoteID else { continue }
-                if seen.insert(remoteID).inserted { collected.append(message) }
+            held += fetched
+            heldIDs += chunk
+
+            if !quietly {
+                importProgress = .importing(
+                    done: ledger.done + heldIDs.count, total: ledger.total
+                )
+            }
+
+            // Write, then cross off. That order is the whole guarantee.
+            if heldIDs.count >= Self.importFlushEvery {
+                collected = Self.folding(held, into: collected)
+                await MessageArchive.save(collected)
+                ledger.complete(heldIDs)
+                ledger.save()
+                held = []
+                heldIDs = []
             }
         }
 
-        importProgress = .saving
+        if !quietly { importProgress = .saving }
+
+        // Keyed on the ids, not the messages. A chunk Gmail answered with
+        // nothing still has to be crossed off, or pending never shrinks and
+        // the loop has nothing to end it.
+        if !heldIDs.isEmpty {
+            collected = Self.folding(held, into: collected)
+            ledger.complete(heldIDs)
+        }
         await MessageArchive.save(collected)
 
-        // Everything arrives at once, after the progress screen has said it is
-        // finishing. One layout pass instead of twenty.
+        // Everything arrives at once, after the progress screen has said it
+        // is finishing. One layout pass instead of twenty.
         messages = collected
         applyLocalReadState()
         nextPageToken = nil
-        importProgress = .finished(count: collected.count)
-        hasImported = true
+
+        if ledger.isComplete {
+            ImportLedger.clear()
+        } else {
+            ledger.save()
+        }
+
+        // The screen is done with once the bulk is here; the remainder is
+        // topped up quietly on a later launch. Nothing at all, though, is a
+        // failed import, and saying otherwise is what caused this.
+        if !collected.isEmpty { hasImported = true }
+
+        if !quietly {
+            importProgress = .finished(count: collected.count, missing: ledger.pending.count)
+        }
         Task { await enhanceWithAI() }
     }
+
+    /// Folds newly fetched messages into a growing collection, newest kept.
+    private static func folding(_ fetched: [Message], into existing: [Message]) -> [Message] {
+        var byRemoteID: [String: Int] = [:]
+        for (index, message) in existing.enumerated() {
+            if let remoteID = message.remoteID { byRemoteID[remoteID] = index }
+        }
+
+        var result = existing
+        for message in fetched {
+            guard let remoteID = message.remoteID else {
+                result.append(message)
+                continue
+            }
+            if let index = byRemoteID[remoteID] {
+                var updated = message
+                updated.tags = result[index].tags
+                updated.aiSummary = result[index].aiSummary
+                result[index] = updated
+            } else {
+                result.append(message)
+                byRemoteID[remoteID] = result.count - 1
+            }
+        }
+        return result
+    }
+
+    /// Three goes with a widening pause, then it hands back nothing.
+    ///
+    /// A single dropped request is the normal condition of a phone, not a
+    /// reason to abandon a mailbox. Returning nil rather than throwing is
+    /// deliberate: the caller's job is to carry on with the rest.
+    static func retrying<T>(
+        _ attempts: Int = 3,
+        _ work: () async throws -> T
+    ) async -> T? {
+        for attempt in 1...attempts {
+            if let value = try? await work() { return value }
+            guard attempt < attempts else { break }
+            try? await Task.sleep(for: .milliseconds(400 * attempt))
+        }
+        return nil
+    }
+
+    /// Messages held in memory before a write. Big enough that the archive is
+    /// not rewritten every chunk, small enough that a kill costs little.
+    static let importFlushEvery = 250
 
     /// Folds a freshly fetched page into what is already held, rather than
     /// replacing it.
@@ -627,6 +768,8 @@ final class MailStore {
         // old one would ask Gmail about somebody else's log.
         syncCursor = nil
         hasImported = false
+        // The next mailbox owes nothing on this one's behalf.
+        ImportLedger.clear()
         importProgress = .idle
         connectionError = nil
         persistAccount()

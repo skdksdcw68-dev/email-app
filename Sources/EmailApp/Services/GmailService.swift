@@ -110,6 +110,45 @@ enum GmailService {
         return (messages.compactMap { $0["id"] as? String }, next)
     }
 
+    /// Every message id matching a query, across as many pages as it takes.
+    ///
+    /// Ids only, so this is cheap: one request per 500 messages, and no body
+    /// is fetched. That is what makes an honest denominator affordable --
+    /// "1,540 of 1,580" instead of a bar that guesses, and a list the import
+    /// can be resumed against.
+    ///
+    /// Deliberately unlabelled, so it means all mail rather than the inbox.
+    /// A mailbox where things get archived, or where a filter files mail past
+    /// the inbox, is not searchable if only the inbox was ever imported --
+    /// and archived mail is exactly where "when did I register" lives.
+    /// Gmail excludes spam and trash from an unlabelled list by default.
+    static func allMessageIDs(
+        matching query: String,
+        accessToken: String,
+        ceiling: Int = 10_000
+    ) async throws -> [String] {
+        var ids: [String] = []
+        var token: String?
+
+        repeat {
+            let (page, next) = try await messageIDs(
+                accessToken: accessToken,
+                limit: idPageSize,
+                pageToken: token,
+                query: query,
+                label: nil
+            )
+            ids += page
+            token = next
+        } while token != nil && ids.count < ceiling
+
+        return ids
+    }
+
+    /// Gmail's maximum for a list request. Ids are small, so there is no
+    /// reason to ask for fewer.
+    static let idPageSize = 500
+
     // MARK: - Watching
 
     /// Asks Gmail to publish a notice to a Pub/Sub topic whenever this

@@ -55,7 +55,7 @@ final class ImportProgressTests: XCTestCase {
         // The import screen keys off this. If finished stayed "running" the
         // overlay would never come down.
         XCTAssertFalse(ImportProgress.idle.isRunning)
-        XCTAssertFalse(ImportProgress.finished(count: 10).isRunning)
+        XCTAssertFalse(ImportProgress.finished(count: 10, missing: 0).isRunning)
     }
 
     // MARK: - Every state says something
@@ -67,7 +67,8 @@ final class ImportProgressTests: XCTestCase {
             .importing(done: 0, total: 0),
             .importing(done: 5, total: 10),
             .saving,
-            .finished(count: 42),
+            .finished(count: 42, missing: 0),
+            .finished(count: 1_540, missing: 40),
         ]
         for state in states {
             XCTAssertFalse(state.title.isEmpty, "\(state) has no title")
@@ -79,5 +80,21 @@ final class ImportProgressTests: XCTestCase {
         // Before anything has arrived it should not claim to be importing.
         XCTAssertEqual(ImportProgress.importing(done: 0, total: 200).title, "Starting the import")
         XCTAssertEqual(ImportProgress.importing(done: 20, total: 200).title, "Importing your email")
+    }
+
+    func testAPartialImportNeverClaimsToBeComplete() {
+        // The whole bug, at the point the user could have seen it: 300 of
+        // 1,580 messages, reported as "All set". It must say the number it
+        // actually has and the number it was owed.
+        let partial = ImportProgress.finished(count: 1_540, missing: 40)
+        XCTAssertNotEqual(partial.title, "All set")
+        XCTAssertTrue(partial.detail.contains("1540"), partial.detail)
+        XCTAssertTrue(partial.detail.contains("1580"), partial.detail)
+    }
+
+    func testACleanImportSaysAllSet() {
+        let clean = ImportProgress.finished(count: 1_580, missing: 0)
+        XCTAssertEqual(clean.title, "All set")
+        XCTAssertEqual(clean.detail, "1580 messages ready.")
     }
 }

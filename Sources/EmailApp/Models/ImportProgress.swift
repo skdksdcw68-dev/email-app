@@ -16,7 +16,9 @@ enum ImportProgress: Equatable {
     case importing(done: Int, total: Int)
     /// Everything is down; writing it to disk and handing it to the app.
     case saving
-    case finished(count: Int)
+    /// `missing` is mail Gmail listed that would not come down this run.
+    /// Zero on a clean import; anything else is topped up on a later launch.
+    case finished(count: Int, missing: Int)
 
     var isRunning: Bool {
         switch self {
@@ -52,7 +54,7 @@ enum ImportProgress: Equatable {
                 "Importing your email"
             }
         case .saving: "Finalising"
-        case .finished: "All set"
+        case .finished(_, let missing): missing > 0 ? "Nearly everything" : "All set"
         }
     }
 
@@ -66,8 +68,17 @@ enum ImportProgress: Equatable {
                 ? "\(done) of \(total) messages"
                 : "\(done) messages so far"
         case .saving: "Adding your mail to Maily and saving it for offline."
-        case .finished(let count):
-            count == 1 ? "1 message ready." : "\(count) messages ready."
+        case .finished(let count, let missing):
+            // Never rounded up. Saying "all set" over a mailbox that is 40
+            // messages short is how the old import hid a third of somebody's
+            // mail from them for weeks.
+            if missing > 0 {
+                "\(count) of \(count + missing) messages. Maily will fetch the rest shortly."
+            } else if count == 1 {
+                "1 message ready."
+            } else {
+                "\(count) messages ready."
+            }
         }
     }
 }
