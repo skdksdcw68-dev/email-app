@@ -33,16 +33,20 @@ final class AutoReplyStore {
 
     /// Saves a setup that has been through to the end and switches it on.
     ///
-    /// Draft mode whatever the previous mode was, on a first setup: sending
-    /// on somebody's behalf is a decision they make deliberately, from the
-    /// Auto-Reply screen, after they have watched it write a few.
+    /// The run mode is deliberately not taken from what is passed in. It
+    /// belongs to the person, is changed only through `setMode`, and a first
+    /// setup always starts as a draft: sending on somebody's behalf is a
+    /// decision they make afterwards, from the Auto-Reply screen, once they
+    /// have watched it write a few. Reading it off the incoming config would
+    /// mean an edit -- or a setup flow with a stale copy -- could quietly
+    /// turn sending on or off behind them.
     func complete(_ config: AutoReplyConfig) {
         var value = config
         value.instructions = Self.tidied(value.instructions)
         value.isSetUp = true
         value.isOn = true
         value.knowledgeConfirmed = true
-        if !self.config.isSetUp { value.mode = .draft }
+        value.mode = self.config.isSetUp ? self.config.mode : .draft
         value.updatedAt = .now
         self.config = value
         persist()

@@ -75,8 +75,17 @@ final class AutoReplyTests: XCTestCase {
         store.complete(setUpConfig())
         store.setMode(.send)
 
+        // Handed a config that says draft, twice over: the setup flow does
+        // not own the run mode, so it can neither turn sending off behind
+        // them nor turn it on for them.
         store.complete(setUpConfig())
         XCTAssertEqual(store.config.mode, .send, "editing a setup must not silently undo their choice")
+
+        store.setMode(.draft)
+        var wantsToSend = setUpConfig()
+        wantsToSend.mode = .send
+        store.complete(wantsToSend)
+        XCTAssertEqual(store.config.mode, .draft, "a config cannot switch sending on by itself")
     }
 
     // MARK: - Turning it off keeps the work
