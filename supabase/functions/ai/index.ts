@@ -812,13 +812,11 @@ function askMessages(question: string, body: Record<string, unknown>) {
   // this out from what it holds, so the model does not have to derive it
   // from a dozen of their emails.
   if (body.people) {
-    facts.push(`What you know about the people they asked about:
-${String(body.people).slice(0, 2500)}`);
+    facts.push(
+      `What you know about the people they asked about:\n${String(body.people).slice(0, 2500)}`,
+    );
   }
-  const preamble = facts.length ? `${facts.join("
-")}
-
-` : "";
+  const preamble = facts.length ? `${facts.join("\n")}\n\n` : "";
 
   // The model may ask to look further rather than answer.
   //

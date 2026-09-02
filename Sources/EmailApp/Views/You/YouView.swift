@@ -26,35 +26,44 @@ struct YouView: View {
 
                 gmailSection
 
-                Section {
-                    NavigationLink { AppearanceView() } label: {
-                        row("Appearance", "circle.lefthalf.filled")
-                    }
-                    NavigationLink { LanguageView() } label: {
-                        row("Language", "globe")
-                    }
-                    NavigationLink { NotificationSettingsView() } label: {
-                        row("Notifications", "bell.badge")
-                    }
-                    NavigationLink { WritingStyleView() } label: {
-                        row("Writing style", "pencil.line")
-                    }
-                } header: {
-                    Text("Personal")
-                }
-
+                // Everything about the assistant in one place, above the
+                // ordinary settings. This is the part of the app somebody
+                // came here to change; appearance and language are not.
                 Section {
                     NavigationLink { AIPreferencesView() } label: {
                         row("AI preferences", "sparkles")
                     }
-                    NavigationLink { AutoReplyView() } label: {
-                        autoReplyRow
+                    NavigationLink { WritingStyleView() } label: {
+                        row("Writing style", "pencil.line")
                     }
                     NavigationLink { MemorySettingsView() } label: {
                         row("Memory", "brain")
                     }
+                    NavigationLink { AutomationsView() } label: {
+                        row("Automations", "bolt.badge.clock")
+                    }
+                    NavigationLink { AutoReplyView() } label: {
+                        autoReplyRow
+                    }
+                    NavigationLink { AIUsageView() } label: {
+                        usageRow
+                    }
                 } header: {
                     Text("Maily AI")
+                }
+
+                Section {
+                    NavigationLink { AppearanceView() } label: {
+                        row("Appearance", "circle.lefthalf.filled")
+                    }
+                    NavigationLink { NotificationSettingsView() } label: {
+                        row("Notifications", "bell.badge")
+                    }
+                    NavigationLink { LanguageView() } label: {
+                        row("Language", "globe")
+                    }
+                } header: {
+                    Text("Personal")
                 }
 
                 Section {
@@ -176,6 +185,29 @@ struct YouView: View {
                 Text(autoReply.config.isOn ? "On" : "Off")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(autoReply.config.isOn ? Color.green : Color.secondary)
+            }
+        }
+        .padding(.vertical, 1)
+    }
+
+    /// The count, on the row, because the moment somebody wants to know what
+    /// the AI is costing them is the moment they open this tab -- not after
+    /// tapping into a screen they did not know was there.
+    private var usageRow: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "gauge.with.dots.needle.33percent")
+                .font(.body)
+                .foregroundStyle(.tint)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("AI usage")
+                    .font(.subheadline)
+                Text(AIUsage.total == 0
+                     ? "Nothing yet this month"
+                     : "\(AIUsage.total) requests in \(AIUsage.monthName)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
         }
         .padding(.vertical, 1)

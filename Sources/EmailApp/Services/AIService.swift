@@ -343,6 +343,8 @@ enum AIService {
         payload["hops_left"] = max(0, hopsLeft)
         payload["searched"] = hasSearched
 
+        AIUsage.record(action: "ask_stream")
+
         var request = URLRequest(url: SupabaseConfig.url.appending(path: "functions/v1/ai"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -400,6 +402,9 @@ enum AIService {
     /// Not private: the Auto-Reply calls live in their own file, because
     /// they are about the person's setup rather than their mail.
     static func call<T: Decodable>(_ payload: [String: String]) async throws -> T {
+        // Every non-streaming call goes through here, so this is the one
+        // place that can honestly say what the app has spent.
+        AIUsage.record(action: payload["action"] ?? "")
         var request = URLRequest(url: SupabaseConfig.url.appending(path: "functions/v1/ai"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
