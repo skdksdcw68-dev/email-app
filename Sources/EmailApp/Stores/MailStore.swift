@@ -206,18 +206,22 @@ final class MailStore {
         // not present the connect screen to someone already signed in. Which
         // one opens is the registry's decision -- last used, or a fixed
         // favourite.
+        let active: MailAccount?
         if let account {
             registry.upsert(account)
-            registry.setActive(account.id)
-            self.account = account
+            active = account
         } else {
-            self.account = registry.opening
+            active = registry.opening
         }
-        if let id = self.account?.id {
+        self.account = active
+        self.messages = messages
+
+        // After every stored property, because both of these reach back into
+        // the object being built.
+        if let id = active?.id {
             registry.setActive(id)
             MailboxScope.activate(id)
         }
-        self.messages = messages
     }
 
     /// Writes the account back to the registry, which owns persistence now.
