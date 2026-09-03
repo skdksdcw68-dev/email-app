@@ -586,7 +586,7 @@ struct AIChatView: View {
         if standings.isEmpty && !context.isEmpty && !state.people.isEmpty {
             standings = state.people.flatMap { mail.peopleMentioned(in: $0, limit: 1) }
         }
-        state.asking(question, about: standings.map(\.person.name))
+        state.asking(question, about: standings.map(\.person.contact.name))
         var pinned = Set<Message.ID>()
         if !facts.isEmpty {
             let wanted = Set(facts.map(\.messageID))
