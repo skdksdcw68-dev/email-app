@@ -21,14 +21,14 @@ enum FollowUpPreferences {
     private static var dismissals: [String: Date] {
         get {
             if let cached { return cached }
-            let raw = UserDefaults.standard.dictionary(forKey: key) as? [String: Double] ?? [:]
+            let raw = MailboxScope.defaults.dictionary(forKey: key) as? [String: Double] ?? [:]
             let loaded = raw.mapValues { Date(timeIntervalSince1970: $0) }
             cached = loaded
             return loaded
         }
         set {
             cached = newValue
-            UserDefaults.standard.set(
+            MailboxScope.defaults.set(
                 newValue.mapValues(\.timeIntervalSince1970), forKey: key
             )
         }
@@ -55,6 +55,13 @@ enum FollowUpPreferences {
 
     static func clearAll() {
         cached = [:]
-        UserDefaults.standard.removeObject(forKey: key)
+        MailboxScope.defaults.removeObject(forKey: key)
+    }
+
+    /// Drops what is held in memory without touching what is stored. Called
+    /// when the active mailbox changes: these dismissals are keyed by that
+    /// mailbox's thread ids and mean nothing in another one.
+    static func resetCache() {
+        cached = nil
     }
 }

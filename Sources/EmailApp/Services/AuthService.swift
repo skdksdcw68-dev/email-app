@@ -70,7 +70,7 @@ enum AuthService {
     /// A granted mailbox, separate from the Maily account. Signing into Maily
     /// with Google does *not* grant mailbox access -- that is a second, explicit
     /// consent with its own scopes, which is the whole point of keeping
-    /// `AppAccount` and `GmailAccount` apart.
+    /// `AppAccount` and `MailAccount` apart.
     struct GmailSession {
         let email: String
         let displayName: String

@@ -331,7 +331,9 @@ struct PrivacySettingsView: View {
             Section {
                 LabeledContent("Held on this device", value: "\(mail.messages.count) messages")
                 LabeledContent("Offline copy", value: "Last three months")
-                Button("Clear cached mail", role: .destructive) { MessageArchive.clear() }
+                Button("Clear cached mail", role: .destructive) {
+                    if let id = mail.account?.id { MessageArchive.clear(mailbox: id) }
+                }
             } header: {
                 Text("Data retention")
             } footer: {
@@ -460,7 +462,7 @@ struct StorageSettingsView: View {
                 LabeledContent("Messages", value: "\(mail.messages.count)")
                 LabeledContent("Offline copy", value: archiveSize)
                 Button("Clear cached mail", role: .destructive) {
-                    MessageArchive.clear()
+                    if let id = mail.account?.id { MessageArchive.clear(mailbox: id) }
                     archiveSize = "0 KB"
                 }
             } header: {
@@ -499,7 +501,7 @@ struct StorageSettingsView: View {
 
             Section {
                 LabeledContent("Version", value: appVersion)
-                LabeledContent("Mailbox", value: mail.account?.email ?? "None")
+                LabeledContent("Mailbox", value: mail.account?.address ?? "None")
                 LabeledContent("Connection", value: mail.connectionError ?? "OK")
                 LabeledContent("People known", value: "\(mail.people.count)")
                 LabeledContent("Follow-ups", value: "\(mail.followUps.count)")
@@ -512,7 +514,10 @@ struct StorageSettingsView: View {
         .navigationTitle("App")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
-        .task { archiveSize = await MessageArchive.formattedSize() }
+        .task {
+            guard let id = mail.account?.id else { return }
+            archiveSize = await MessageArchive.formattedSize(mailbox: id)
+        }
     }
 }
 

@@ -45,7 +45,7 @@ extension MailStore {
         // Auto-Reply never writes into one they have picked up since. The
         // date is the whole point: anything they wrote *before* the message
         // being considered is history, not an answer to it.
-        let mine = account.email.lowercased()
+        let mine = account.address.lowercased()
         var myLatestReply: [String: Date] = [:]
         for message in messages where message.mailbox == .sent
             || message.sender.address.lowercased() == mine {
@@ -75,7 +75,7 @@ extension MailStore {
             let verdict = AutoReplyEligibility.check(
                 message,
                 config: config,
-                myAddress: account.email,
+                myAddress: account.address,
                 headers: [:],
                 alreadyHandled: queue.handled,
                 myLatestReply: myLatestReply

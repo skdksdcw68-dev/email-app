@@ -98,7 +98,7 @@ struct SnoozeTests {
             return message
         }
         return MailStore(
-            account: GmailAccount(email: "me@example.com", displayName: "Me", connectedAt: .now),
+            account: MailAccount(provider: .gmail, address: "me@example.com", displayName: "Me"), registry: MailboxRegistry(defaults: .previews),
             messages: messages
         )
     }
@@ -146,7 +146,7 @@ struct SnoozeTests {
         // Nothing this app wrote itself has a remote id yet, and none of it
         // should vanish because somebody snoozed something else.
         let mail = MailStore(
-            account: GmailAccount(email: "me@example.com", displayName: "Me", connectedAt: .now),
+            account: MailAccount(provider: .gmail, address: "me@example.com", displayName: "Me"), registry: MailboxRegistry(defaults: .previews),
             messages: [Message(
                 sender: Contact(name: "Sam", address: "sam@example.com"),
                 recipients: [],

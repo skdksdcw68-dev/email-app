@@ -12,7 +12,7 @@ final class InsightsTests: XCTestCase {
     /// that there is no inbox.
     private func connected(_ messages: [Message]) -> MailStore {
         MailStore(
-            account: GmailAccount(email: "abel@example.com", displayName: "Abel Amare", connectedAt: .now),
+            account: MailAccount(provider: .gmail, address: "abel@example.com", displayName: "Abel Amare"), registry: MailboxRegistry(defaults: .previews),
             messages: messages
         )
     }

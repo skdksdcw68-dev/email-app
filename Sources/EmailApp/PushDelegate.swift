@@ -19,7 +19,7 @@ final class PushDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
-        Self.push?.register(deviceToken: deviceToken, gmailAddress: Self.mail?.account?.email)
+        Self.push?.register(deviceToken: deviceToken, gmailAddress: Self.mail?.account?.address)
     }
 
     func application(

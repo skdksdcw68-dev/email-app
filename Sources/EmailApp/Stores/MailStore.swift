@@ -6,7 +6,8 @@ import UIKit
 @MainActor
 final class MailStore {
     /// `nil` until the user connects Gmail. Everything in the Mail tab keys off this.
-    private(set) var account: GmailAccount?
+    /// The mailbox in front of you. One at a time; `registry` has the rest.
+    private(set) var account: MailAccount?
     private(set) var messages: [Message]
     private(set) var isConnecting = false
     private(set) var isRefreshing = false
@@ -58,10 +59,10 @@ final class MailStore {
     /// screen asking for a count to the mail it came from. Without it the
     /// cache would be invisible to observation and nothing would redraw.
     var derived: MailboxIndex {
-        let key = (mail: mailVersion, prefs: preferencesVersion, account: account?.email)
+        let key = (mail: mailVersion, prefs: preferencesVersion, account: account?.address)
         if let indexCache, indexKey == key { return indexCache }
 
-        let built = MailboxIndex(messages, myAddress: account?.email)
+        let built = MailboxIndex(messages, myAddress: account?.address)
         indexCache = built
         indexKey = key
         return built
@@ -183,30 +184,49 @@ final class MailStore {
     private(set) var importProgress: ImportProgress = .idle
     /// Set once the three-month import has completed, so it never runs twice.
     var hasImported: Bool {
-        get { UserDefaults.standard.bool(forKey: "mail.hasImported") }
-        set { UserDefaults.standard.set(newValue, forKey: "mail.hasImported") }
+        get { MailboxScope.defaults.bool(forKey: "mail.hasImported") }
+        set { MailboxScope.defaults.set(newValue, forKey: "mail.hasImported") }
     }
 
-    private static let accountKey = "mail.account"
+    /// Every mailbox the app knows about. The store holds one of them at a
+    /// time; this holds the list, and outlives every change of which.
+    let registry: MailboxRegistry
 
-    init(account: GmailAccount? = nil, messages: [Message] = [], facts: FactStore? = nil) {
+    init(
+        account: MailAccount? = nil,
+        registry: MailboxRegistry? = nil,
+        messages: [Message] = [],
+        facts: FactStore? = nil
+    ) {
+        let registry = registry ?? MailboxRegistry()
+        self.registry = registry
         self.facts = facts ?? FactStore()
+
         // A previously connected mailbox is remembered so a cold launch does
-        // not present the connect screen to someone already signed in.
+        // not present the connect screen to someone already signed in. Which
+        // one opens is the registry's decision -- last used, or a fixed
+        // favourite.
         if let account {
+            registry.upsert(account)
+            registry.setActive(account.id)
             self.account = account
-        } else if let data = UserDefaults.standard.data(forKey: Self.accountKey) {
-            self.account = try? JSONDecoder().decode(GmailAccount.self, from: data)
+        } else {
+            self.account = registry.opening
+        }
+        if let id = self.account?.id {
+            registry.setActive(id)
+            MailboxScope.activate(id)
         }
         self.messages = messages
     }
 
+    /// Writes the account back to the registry, which owns persistence now.
+    /// A `MailAccount` is a record that gets updated, never re-minted -- the
+    /// old code built a fresh one on every launch, which is why its id could
+    /// never be trusted.
     private func persistAccount() {
-        guard let account, let data = try? JSONEncoder().encode(account) else {
-            UserDefaults.standard.removeObject(forKey: Self.accountKey)
-            return
-        }
-        UserDefaults.standard.set(data, forKey: Self.accountKey)
+        guard let account else { return }
+        registry.upsert(account)
     }
 
     /// Called at launch. Re-establishes the Google session without a consent
@@ -218,17 +238,38 @@ final class MailStore {
         defer { isRefreshing = false }
 
         guard let session = await AuthService.restoreGmail() else {
-            // The grant was revoked or expired beyond recovery.
+            // The grant was revoked or expired beyond recovery. Marked rather
+            // than dropped: an inbox that is simply empty is the worst way to
+            // report this, and the account list can show it needs signing in
+            // again.
+            if let id = account?.id {
+                registry.update(id) { $0.state = .needsReauth(reason: "Google ended the session.") }
+            }
             account = nil
-            persistAccount()
             return
         }
 
-        account = GmailAccount(
-            email: session.email,
-            displayName: session.displayName,
-            connectedAt: account?.connectedAt ?? .now
-        )
+        // Update the record, do not build a new one. This used to construct a
+        // whole fresh account on every launch, which is how the id managed to
+        // change every cold start.
+        if var existing = account, existing.address == MailboxID.canonical(session.email) {
+            existing.displayName = session.displayName
+            existing.state = .ok
+            account = existing
+        } else {
+            // A different Google account came back than the one that was
+            // stored -- the device switched users under us. Take what the
+            // provider says; the id derives from the address, so nothing
+            // else has to be told.
+            account = MailAccount(
+                provider: .gmail,
+                address: session.email,
+                displayName: session.displayName,
+                tint: registry.nextTint,
+                connectedAt: account?.connectedAt ?? .now
+            )
+            if let id = account?.id { MailboxScope.activate(id) }
+        }
         persistAccount()
 
         // An import that was interrupted -- the app killed partway through --
@@ -245,7 +286,10 @@ final class MailStore {
             merge(page.messages)
             self.nextPageToken = page.nextPageToken
             let snapshot = messages
-            Task { await MessageArchive.save(snapshot) }
+            Task { [id = account?.id] in
+                guard let id else { return }
+                await MessageArchive.save(snapshot, mailbox: id)
+            }
             Task { await enhanceWithAI() }
         }
 
@@ -272,12 +316,19 @@ final class MailStore {
 
         do {
             let session = try await AuthService.connectGmail()
-            account = GmailAccount(
-                email: session.email,
+            let connected = MailAccount(
+                provider: .gmail,
+                address: session.email,
                 displayName: session.displayName,
+                tint: registry.nextTint,
                 connectedAt: .now
             )
-            persistAccount()
+            account = connected
+            registry.upsert(connected)
+            registry.setActive(connected.id)
+            // Point the scoped stores at it before anything is written, or
+            // the first import would land in whatever suite was last active.
+            MailboxScope.activate(connected.id)
             await importRecentMail()
         } catch {
             connectionError = error.localizedDescription
@@ -302,7 +353,10 @@ final class MailStore {
             merge(page.messages)
             nextPageToken = page.nextPageToken
             let snapshot = messages
-            Task { await MessageArchive.save(snapshot) }
+            Task { [id = account?.id] in
+                guard let id else { return }
+                await MessageArchive.save(snapshot, mailbox: id)
+            }
             Task { await enhanceWithAI() }
         } catch {
             connectionError = error.localizedDescription
@@ -432,8 +486,8 @@ final class MailStore {
     static let verifyInterval: TimeInterval = 24 * 60 * 60
 
     private var lastVerifiedAt: Date? {
-        get { UserDefaults.standard.object(forKey: "mail.lastVerifiedAt") as? Date }
-        set { UserDefaults.standard.set(newValue, forKey: "mail.lastVerifiedAt") }
+        get { MailboxScope.defaults.object(forKey: "mail.lastVerifiedAt") as? Date }
+        set { MailboxScope.defaults.set(newValue, forKey: "mail.lastVerifiedAt") }
     }
 
     /// How much of the mailbox is still owed, for the settings screen.
@@ -535,7 +589,7 @@ final class MailStore {
             // guarantee.
             if held.count >= Self.importFlushEvery {
                 collected = Self.folding(held, into: collected)
-                await MessageArchive.save(collected)
+                if let id = account?.id { await MessageArchive.save(collected, mailbox: id) }
                 ledger.save()
                 held = []
             }
@@ -546,7 +600,7 @@ final class MailStore {
         if !held.isEmpty {
             collected = Self.folding(held, into: collected)
         }
-        await MessageArchive.save(collected)
+        if let id = account?.id { await MessageArchive.save(collected, mailbox: id) }
 
         // Everything arrives at once, after the progress screen has said it
         // is finishing. One layout pass instead of twenty. Folded rather than
@@ -668,7 +722,8 @@ final class MailStore {
     /// network call finishes.
     func loadArchive() async {
         guard messages.isEmpty else { return }
-        let stored = await MessageArchive.load()
+        guard let mailbox = account?.id else { return }
+        let stored = await MessageArchive.load(mailbox: mailbox)
         guard !stored.isEmpty, messages.isEmpty else { return }
         let read = locallyRead
         let replied = locallyReplied
@@ -946,7 +1001,7 @@ final class MailStore {
         // Conversations move on whether or not the model is allowed to read
         // them, and a fact crossed off by a reply should not wait for that.
         if let account {
-            facts.reconcile(with: messages, myAddress: account.email, replied: locallyReplied)
+            facts.reconcile(with: messages, myAddress: account.address, replied: locallyReplied)
         }
 
         // The setting is real: off means nothing leaves the device and nothing
@@ -1049,7 +1104,7 @@ final class MailStore {
     private func extractFacts(from message: Message) async -> Bool {
         guard let remoteID = message.remoteID, let account else { return false }
         guard let extraction = try? await AIService.extract(message) else { return false }
-        let found = extraction.facts(for: message, myAddress: account.email)
+        let found = extraction.facts(for: message, myAddress: account.address)
         facts.record(found, from: remoteID)
         if !found.isEmpty {
             Analytics.record(.factsExtracted, [
@@ -1101,33 +1156,53 @@ final class MailStore {
         if message.tags.isEmpty { message.tags.insert(.noReplyNeeded) }
     }
 
+    /// Removes the mailbox in front of you, and everything derived from it.
+    ///
+    /// Scoped now. It used to name no mailbox, which was fine when there was
+    /// one and destructive with two: five stores wipe themselves on this
+    /// notice, so an unnamed one wiped every mailbox's chats, searches, facts
+    /// and attachments to remove a single account.
     func disconnect() {
-        // Anything else holding mail content on disk (chat history) clears
-        // itself on this.
-        NotificationCenter.default.post(name: .mailboxDisconnected, object: nil)
-        account = nil
+        guard let going = account else { return }
+
+        // Everything this mailbox holds, in its own suite and its own folder.
+        // Cleared before the record goes, because the clearing is scoped to
+        // the record.
         write { $0 = [] }
-        MessageArchive.clear()
+        MessageArchive.clear(mailbox: going.id)
         readCache = []
         repliedCache = []
-        UserDefaults.standard.removeObject(forKey: Self.readKey)
-        UserDefaults.standard.removeObject(forKey: Self.repliedKey)
+        MailboxScope.defaults.removeObject(forKey: Self.readKey)
+        MailboxScope.defaults.removeObject(forKey: Self.repliedKey)
         // The next mailbox starts its own history, and resuming from the
         // old one would ask Gmail about somebody else's log.
         syncCursor = nil
         hasImported = false
         // The next mailbox owes nothing on this one's behalf.
         ImportLedger.clear()
+        ClassificationCache.clear()
+        SnoozeStore.clearAll()
+        // Vectors are derived from message content, so they go with it. A
+        // signed-out mailbox leaves nothing behind, not even as numbers.
+        SemanticIndex.forgetEverything()
+
         importProgress = .idle
         importAudit = nil
         lastVerifiedAt = nil
         connectionError = nil
-        persistAccount()
-        ClassificationCache.clear()
-        // Vectors are derived from message content, so they go with it. A
-        // signed-out mailbox leaves nothing behind, not even as numbers.
-        SemanticIndex.forgetEverything()
-        SnoozeStore.clearAll()
+        account = nil
+
+        // The registry deletes the record, the credentials, the suite and the
+        // files, and posts the notice naming this mailbox -- which is what
+        // lets the other stores tell "mine" from "somebody else's".
+        registry.forget(going.id)
+
+        // Whatever is left, if anything, becomes the one in front of you.
+        if let next = registry.opening {
+            account = next
+            registry.setActive(next.id)
+            MailboxScope.activate(next.id)
+        }
     }
 
     // MARK: - Reading
@@ -1222,13 +1297,13 @@ final class MailStore {
     private var locallyRead: Set<String> {
         get {
             if let readCache { return readCache }
-            let loaded = Set(UserDefaults.standard.stringArray(forKey: Self.readKey) ?? [])
+            let loaded = Set(MailboxScope.defaults.stringArray(forKey: Self.readKey) ?? [])
             readCache = loaded
             return loaded
         }
         set {
             readCache = newValue
-            UserDefaults.standard.set(Array(newValue), forKey: Self.readKey)
+            MailboxScope.defaults.set(Array(newValue), forKey: Self.readKey)
         }
     }
 
@@ -1246,13 +1321,13 @@ final class MailStore {
     private var locallyReplied: Set<String> {
         get {
             if let repliedCache { return repliedCache }
-            let loaded = Set(UserDefaults.standard.stringArray(forKey: Self.repliedKey) ?? [])
+            let loaded = Set(MailboxScope.defaults.stringArray(forKey: Self.repliedKey) ?? [])
             repliedCache = loaded
             return loaded
         }
         set {
             repliedCache = newValue
-            UserDefaults.standard.set(Array(newValue), forKey: Self.repliedKey)
+            MailboxScope.defaults.set(Array(newValue), forKey: Self.repliedKey)
         }
     }
 
@@ -1347,7 +1422,7 @@ final class MailStore {
 
         let token = try await AuthService.currentGmailAccessToken()
         let envelope = MIMEBuilder.Envelope(
-            from: MIMEBuilder.address(name: account.displayName, email: account.email),
+            from: MIMEBuilder.address(name: account.displayName, email: account.address),
             to: address,
             cc: cc,
             subject: subject.isEmpty ? "(No Subject)" : subject,
@@ -1365,7 +1440,7 @@ final class MailStore {
         )
 
         var local = Message(
-            sender: Contact(name: account.displayName, address: account.email),
+            sender: Contact(name: account.displayName, address: account.address),
             recipients: [Contact(name: address, address: address)],
             subject: subject.isEmpty ? "(No Subject)" : subject,
             body: body,
@@ -1411,7 +1486,7 @@ final class MailStore {
 
         let token = try await AuthService.currentGmailAccessToken()
         let envelope = MIMEBuilder.Envelope(
-            from: MIMEBuilder.address(name: account.displayName, email: account.email),
+            from: MIMEBuilder.address(name: account.displayName, email: account.address),
             to: address,
             cc: cc,
             subject: subject.isEmpty ? "(No Subject)" : subject,
@@ -1449,7 +1524,7 @@ final class MailStore {
         )
 
         var local = Message(
-            sender: Contact(name: account.displayName, address: account.email),
+            sender: Contact(name: account.displayName, address: account.address),
             recipients: [Contact(name: address, address: address)],
             subject: subject.isEmpty ? "(No Subject)" : subject,
             body: body,

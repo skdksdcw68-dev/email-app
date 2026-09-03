@@ -16,12 +16,12 @@ extension MailStore {
 
     /// Where Gmail's log was last time the app looked.
     var syncCursor: String? {
-        get { UserDefaults.standard.string(forKey: Self.historyKey) }
+        get { MailboxScope.defaults.string(forKey: Self.historyKey) }
         set {
             if let newValue {
-                UserDefaults.standard.set(newValue, forKey: Self.historyKey)
+                MailboxScope.defaults.set(newValue, forKey: Self.historyKey)
             } else {
-                UserDefaults.standard.removeObject(forKey: Self.historyKey)
+                MailboxScope.defaults.removeObject(forKey: Self.historyKey)
             }
         }
     }
@@ -65,7 +65,10 @@ extension MailStore {
 
             if !arrived.isEmpty {
                 let snapshot = messages
-                Task { await MessageArchive.save(snapshot) }
+                Task { [id = account?.id] in
+                    guard let id else { return }
+                    await MessageArchive.save(snapshot, mailbox: id)
+                }
                 Task { await enhanceWithAI() }
             }
             return arrived.filter { $0.mailbox == .inbox }

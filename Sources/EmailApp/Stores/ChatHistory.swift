@@ -24,9 +24,37 @@ struct Conversation: Identifiable, Codable, Equatable {
 }
 
 extension Notification.Name {
-    /// Posted when the mailbox is disconnected. Anything that keeps mail
+    /// Posted when a mailbox is disconnected. Anything that keeps mail
     /// content on disk clears itself on this.
     static let mailboxDisconnected = Notification.Name("maily.mailboxDisconnected")
+
+    /// Posted when a different mailbox becomes the one in front of you.
+    /// Nothing is deleted -- the file-backed stores rebind to that mailbox's
+    /// copy and reload.
+    static let activeMailboxChanged = Notification.Name("maily.activeMailboxChanged")
+}
+
+/// Which mailbox a notice is about.
+///
+/// The disconnect notice used to carry nothing, which was fine when there was
+/// one mailbox and is destructive with two: five stores wipe themselves on it,
+/// and without an id every one of them wipes when *any* mailbox is removed.
+///
+/// A missing id still means "everything", because full sign-out really does
+/// mean all of it.
+enum MailboxNotice {
+    static let key = "mailbox"
+
+    static func id(in note: Notification) -> MailboxID? {
+        guard let raw = note.userInfo?[key] as? String else { return nil }
+        return MailboxID(rawValue: raw)
+    }
+
+    /// True when the notice names this mailbox, or names none at all.
+    static func concerns(_ mine: MailboxID?, _ note: Notification) -> Bool {
+        guard let named = id(in: note) else { return true }
+        return named == mine
+    }
 }
 
 /// Past conversations, kept on this phone only.
@@ -42,33 +70,72 @@ final class ChatHistory {
     /// Newest first.
     private(set) var conversations: [Conversation] = []
 
-    let fileURL: URL
-    /// Read in `deinit`, which is not on the main actor. The token is only
+    /// Which mailbox's conversations these are. Nil when the store was handed
+    /// an explicit file -- previews and tests -- and for the window before
+    /// any mailbox exists.
+    private(set) var boundMailbox: MailboxID?
+    /// A `var` because the active mailbox can change under it. Rebound, never
+    /// reconstructed: this object is in the environment, and replacing it
+    /// tears down every view holding it.
+    private(set) var fileURL: URL
+
+    private static let fileName = "chats.json"
+
+    /// Read in `deinit`, which is not on the main actor. The tokens are only
     /// ever written once, in `init`, so there is nothing to race.
     nonisolated(unsafe) private var disconnectObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var switchObserver: NSObjectProtocol?
 
-    init(fileURL: URL? = nil) {
-        self.fileURL = fileURL ?? Self.defaultURL
+    init(fileURL: URL? = nil, mailbox: MailboxID? = nil) {
+        self.boundMailbox = mailbox
+        self.fileURL = fileURL
+            ?? mailbox.map { MailboxPaths.file(Self.fileName, for: $0) }
+            ?? Self.defaultURL
         load()
 
         disconnectObserver = NotificationCenter.default.addObserver(
             forName: .mailboxDisconnected, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.clearAll() }
+        ) { [weak self] note in
+            let id = MailboxNotice.id(in: note)
+            Task { @MainActor in self?.forget(mailbox: id) }
+        }
+
+        switchObserver = NotificationCenter.default.addObserver(
+            forName: .activeMailboxChanged, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let id = MailboxNotice.id(in: note) else { return }
+            Task { @MainActor in self?.rebind(to: id) }
         }
     }
 
     deinit {
-        if let disconnectObserver {
-            NotificationCenter.default.removeObserver(disconnectObserver)
+        for token in [disconnectObserver, switchObserver].compactMap({ $0 }) {
+            NotificationCenter.default.removeObserver(token)
         }
+    }
+
+    /// A mailbox went. Ours, or a full sign-out, means clear. Somebody else's
+    /// means delete their file and leave what is on screen alone.
+    private func forget(mailbox id: MailboxID?) {
+        guard let id, id != boundMailbox else { clearAll(); return }
+        try? FileManager.default.removeItem(at: MailboxPaths.file(Self.fileName, for: id))
+    }
+
+    /// Point at another mailbox's conversations.
+    func rebind(to id: MailboxID) {
+        guard id != boundMailbox else { return }
+        persist()
+        boundMailbox = id
+        fileURL = MailboxPaths.file(Self.fileName, for: id)
+        conversations = []
+        load()
     }
 
     private static var defaultURL: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return support.appending(path: "Maily", directoryHint: .isDirectory)
-            .appending(path: "chats.json")
+            .appending(path: fileName)
     }
 
     func conversation(_ id: UUID) -> Conversation? {

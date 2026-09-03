@@ -19,25 +19,59 @@ final class AttachmentStore {
     /// The last thing that went wrong, for the attachment it went wrong on.
     private(set) var failures: [String: String] = [:]
 
-    private let directory: URL
-    nonisolated(unsafe) private var disconnectObserver: NSObjectProtocol?
+    private(set) var boundMailbox: MailboxID?
+    private(set) var directory: URL
 
-    init(directory: URL? = nil) {
-        self.directory = directory ?? Self.defaultDirectory
+    nonisolated(unsafe) private var disconnectObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var switchObserver: NSObjectProtocol?
+
+    init(directory: URL? = nil, mailbox: MailboxID? = nil) {
+        self.boundMailbox = mailbox
+        self.directory = directory
+            ?? mailbox.map { MailboxPaths.attachments(for: $0) }
+            ?? Self.defaultDirectory
 
         // Downloaded files are mail content like any other, so they go with
-        // the mailbox.
+        // the mailbox -- and only with *that* mailbox. Wiping the whole cache
+        // because a different account was removed would make everybody else
+        // re-download everything.
         disconnectObserver = NotificationCenter.default.addObserver(
             forName: .mailboxDisconnected, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.clear() }
+        ) { [weak self] note in
+            let id = MailboxNotice.id(in: note)
+            Task { @MainActor in self?.forget(mailbox: id) }
+        }
+
+        switchObserver = NotificationCenter.default.addObserver(
+            forName: .activeMailboxChanged, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let id = MailboxNotice.id(in: note) else { return }
+            Task { @MainActor in self?.rebind(to: id) }
         }
     }
 
     deinit {
-        if let disconnectObserver {
-            NotificationCenter.default.removeObserver(disconnectObserver)
+        for token in [disconnectObserver, switchObserver].compactMap({ $0 }) {
+            NotificationCenter.default.removeObserver(token)
         }
+    }
+
+    private func forget(mailbox id: MailboxID?) {
+        guard let id, id != boundMailbox else { clear(); return }
+        try? FileManager.default.removeItem(at: MailboxPaths.attachments(for: id))
+    }
+
+    /// Point at another mailbox's downloads.
+    ///
+    /// Nothing is deleted. The files on disk are a cache and the folder they
+    /// are in is the mailbox's; what is dropped here is only the in-memory
+    /// state, which describes downloads that belong to the mailbox being left.
+    func rebind(to id: MailboxID) {
+        guard id != boundMailbox else { return }
+        boundMailbox = id
+        directory = MailboxPaths.attachments(for: id)
+        inFlight = []
+        failures = [:]
     }
 
     private static var defaultDirectory: URL {

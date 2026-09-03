@@ -94,13 +94,13 @@ struct GmailAccountsView: View {
                 if let account = mail.account {
                     HStack(spacing: 12) {
                         SenderAvatar(
-                            contact: Contact(name: account.displayName, address: account.email),
+                            contact: Contact(name: account.displayName, address: account.address),
                             size: 40
                         )
                         VStack(alignment: .leading, spacing: 2) {
                             Text(account.displayName)
                                 .font(.subheadline.weight(.semibold))
-                            Text(account.email)
+                            Text(account.address)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)

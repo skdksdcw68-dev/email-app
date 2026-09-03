@@ -277,12 +277,12 @@ struct ComposeView: View {
     private var fromRow: some View {
         HStack(spacing: 10) {
             if let account = store.account {
-                SenderAvatar(contact: Contact(name: account.displayName, address: account.email), size: 26)
+                SenderAvatar(contact: Contact(name: account.displayName, address: account.address), size: 26)
                 Text(account.displayName)
                     .font(.subheadline.weight(.medium))
                 Text("·")
                     .foregroundStyle(.secondary)
-                Text(account.email)
+                Text(account.address)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

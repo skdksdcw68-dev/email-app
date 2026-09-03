@@ -34,7 +34,7 @@ final class MailboxIndexTests: XCTestCase {
 
     private func store(_ messages: [Message]) -> MailStore {
         MailStore(
-            account: GmailAccount(email: me, displayName: "Abel", connectedAt: .now),
+            account: MailAccount(provider: .gmail, address: me, displayName: "Abel"), registry: MailboxRegistry(defaults: .previews),
             messages: messages,
             facts: FactStore(fileURL: FileManager.default.temporaryDirectory
                 .appending(path: "index-\(UUID().uuidString).json"))

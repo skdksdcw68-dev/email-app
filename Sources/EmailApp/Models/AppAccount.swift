@@ -2,9 +2,9 @@ import Foundation
 
 /// The Maily account itself: who the customer is.
 ///
-/// Deliberately separate from `GmailAccount`. This one identifies the person,
+/// Deliberately separate from `MailAccount`. This one identifies the person,
 /// carries their subscription and their AI preferences, and survives them
-/// disconnecting or switching inboxes. `GmailAccount` is only a grant of
+/// disconnecting or switching inboxes. `MailAccount` is only a grant of
 /// access to one mailbox. A user could eventually connect several.
 struct AppAccount: Identifiable, Hashable, Codable {
     enum Provider: String, Codable {

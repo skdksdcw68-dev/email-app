@@ -13,10 +13,16 @@ import Foundation
 /// slow one. Offline reading is therefore plain text; opening a message with
 /// a connection fetches the real HTML. That is a deliberate trade, and the
 /// reading view already falls back cleanly when htmlBody is nil.
+/// A mailbox each. Every function names the one it means -- there is no
+/// "current archive", because a background catch-up for a mailbox that is not
+/// in front of you writes here too, and it must not be able to reach the
+/// wrong file by forgetting to say which.
 enum MessageArchive {
-    private static let filename = "mailbox.json"
+    static let filename = "mailbox.json"
 
-    private static var url: URL? {
+    /// Where the single mailbox used to live, before there could be two. Read
+    /// only by the migration, which moves it.
+    static var legacyURL: URL? {
         guard let directory = try? FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -26,10 +32,14 @@ enum MessageArchive {
         return directory.appendingPathComponent(filename)
     }
 
+    private static func url(for mailbox: MailboxID) -> URL {
+        MailboxPaths.file(filename, for: mailbox)
+    }
+
     /// Written off the main actor -- encoding a few thousand messages is not
     /// free, and this runs right after an import when the UI is still moving.
-    static func save(_ messages: [Message]) async {
-        guard let url else { return }
+    static func save(_ messages: [Message], mailbox: MailboxID) async {
+        let url = url(for: mailbox)
         let stripped = messages.map { message -> Message in
             var copy = message
             copy.htmlBody = nil
@@ -44,8 +54,8 @@ enum MessageArchive {
         }.value
     }
 
-    static func load() async -> [Message] {
-        guard let url else { return [] }
+    static func load(mailbox: MailboxID) async -> [Message] {
+        let url = url(for: mailbox)
         return await Task.detached(priority: .userInitiated) {
             guard let data = try? Data(contentsOf: url),
                   let messages = try? JSONDecoder().decode([Message].self, from: data)
@@ -54,17 +64,16 @@ enum MessageArchive {
         }.value
     }
 
-    static func clear() {
-        guard let url else { return }
-        try? FileManager.default.removeItem(at: url)
+    static func clear(mailbox: MailboxID) {
+        try? FileManager.default.removeItem(at: url(for: mailbox))
     }
 }
 
 extension MessageArchive {
-    /// How much room the offline copy takes, for the storage screen.
-    static func formattedSize() async -> String {
-        guard let url else { return "0 KB" }
-        let path = url.path
+    /// How much room one mailbox's offline copy takes, for the storage screen
+    /// and the per-account page.
+    static func formattedSize(mailbox: MailboxID) async -> String {
+        let path = url(for: mailbox).path
 
         return await Task.detached(priority: .utility) {
             let attributes = try? FileManager.default.attributesOfItem(atPath: path)

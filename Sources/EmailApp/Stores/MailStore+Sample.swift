@@ -139,11 +139,14 @@ extension MailStore {
     /// A store that is already connected. Previews only.
     static func connected() -> MailStore {
         MailStore(
-            account: GmailAccount(
-                email: "abelamare1633@gmail.com",
-                displayName: "Abel Amare",
-                connectedAt: .now
+            account: MailAccount(
+                provider: .gmail,
+                address: "abelamare1633@gmail.com",
+                displayName: "Abel Amare"
             ),
+            // Its own registry, in its own suite. A preview or a test must
+            // never write into the real one.
+            registry: MailboxRegistry(defaults: .previews),
             messages: Message.samples
         )
     }

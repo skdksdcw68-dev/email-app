@@ -40,7 +40,7 @@ enum ClassificationCache {
 
     static func load() -> [String: Entry] {
         if let entries { return entries }
-        guard let data = UserDefaults.standard.data(forKey: key),
+        guard let data = MailboxScope.defaults.data(forKey: key),
               let decoded = try? JSONDecoder().decode([String: Entry].self, from: data)
         else {
             entries = [:]
@@ -88,18 +88,19 @@ enum ClassificationCache {
         guard isDirty, let entries else { return }
         isDirty = false
         guard let data = try? JSONEncoder().encode(entries) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        MailboxScope.defaults.set(data, forKey: key)
     }
 
     static func clear() {
         entries = [:]
         isDirty = false
-        UserDefaults.standard.removeObject(forKey: key)
+        MailboxScope.defaults.removeObject(forKey: key)
     }
 
     /// Drops what is held in memory without touching what was written, which
-    /// is what a cold launch looks like. Only the tests need it; the app
-    /// gets this for free by starting.
+    /// is what a cold launch looks like -- and what changing the active
+    /// mailbox has to look like too, since the entries belong to the mailbox
+    /// they were read from.
     static func forgetInMemory() {
         entries = nil
         isDirty = false

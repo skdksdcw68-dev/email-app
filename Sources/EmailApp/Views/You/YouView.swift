@@ -130,14 +130,14 @@ struct YouView: View {
             if let account = mail.account {
                 HStack(spacing: 12) {
                     SenderAvatar(
-                        contact: Contact(name: account.displayName, address: account.email),
+                        contact: Contact(name: account.displayName, address: account.address),
                         size: 34
                     )
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Current")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.tint)
-                        Text(account.email)
+                        Text(account.address)
                             .font(.subheadline)
                             .lineLimit(1)
                             .truncationMode(.middle)

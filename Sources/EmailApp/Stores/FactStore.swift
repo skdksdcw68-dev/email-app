@@ -21,31 +21,72 @@ final class FactStore {
     /// nothing in. Reading a message twice is paying twice for one answer.
     private(set) var extracted: Set<String> = []
 
-    let fileURL: URL
-    nonisolated(unsafe) private var disconnectObserver: NSObjectProtocol?
+    /// Which mailbox these belong to. Nil when the store was handed an
+    /// explicit file -- previews and tests -- and before any mailbox exists.
+    private(set) var boundMailbox: MailboxID?
+    /// A `var` because the active mailbox can change under it. Rebound, never
+    /// reconstructed: this object is in the environment, and replacing it
+    /// tears down every view holding it.
+    private(set) var fileURL: URL
 
-    init(fileURL: URL? = nil) {
-        self.fileURL = fileURL ?? Self.defaultURL
+    private static let fileName = "facts.json"
+
+    nonisolated(unsafe) private var disconnectObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var switchObserver: NSObjectProtocol?
+
+    init(fileURL: URL? = nil, mailbox: MailboxID? = nil) {
+        self.boundMailbox = mailbox
+        self.fileURL = fileURL
+            ?? mailbox.map { MailboxPaths.file(Self.fileName, for: $0) }
+            ?? Self.defaultURL
         load()
 
         disconnectObserver = NotificationCenter.default.addObserver(
             forName: .mailboxDisconnected, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.clearAll() }
+        ) { [weak self] note in
+            let id = MailboxNotice.id(in: note)
+            Task { @MainActor in self?.forget(mailbox: id) }
+        }
+
+        switchObserver = NotificationCenter.default.addObserver(
+            forName: .activeMailboxChanged, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let id = MailboxNotice.id(in: note) else { return }
+            Task { @MainActor in self?.rebind(to: id) }
         }
     }
 
     deinit {
-        if let disconnectObserver {
-            NotificationCenter.default.removeObserver(disconnectObserver)
+        for token in [disconnectObserver, switchObserver].compactMap({ $0 }) {
+            NotificationCenter.default.removeObserver(token)
         }
+    }
+
+    /// A mailbox went. Ours, or a full sign-out, means clear. Somebody else's
+    /// means delete their file and leave what is on screen alone.
+    private func forget(mailbox id: MailboxID?) {
+        guard let id, id != boundMailbox else { clearAll(); return }
+        try? FileManager.default.removeItem(at: MailboxPaths.file(Self.fileName, for: id))
+    }
+
+    /// Point at another mailbox's facts.
+    func rebind(to id: MailboxID) {
+        guard id != boundMailbox else { return }
+        persist()
+        boundMailbox = id
+        fileURL = MailboxPaths.file(Self.fileName, for: id)
+        // load() returns early when the file is not there, so without this a
+        // brand-new mailbox would open showing the previous one's.
+        facts = []
+        extracted = []
+        load()
     }
 
     private static var defaultURL: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return support.appending(path: "Maily", directoryHint: .isDirectory)
-            .appending(path: "facts.json")
+            .appending(path: fileName)
     }
 
     // MARK: - Recording

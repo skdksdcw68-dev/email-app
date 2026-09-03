@@ -30,7 +30,7 @@ extension MailStore {
         // "reply to it", "answer that": whatever was just on screen.
         if request.hints.isEmpty { return offered }
 
-        let mine = account?.email.lowercased()
+        let mine = account?.address.lowercased()
         var scored: [(message: Message, score: Int)] = []
 
         for message in pool ?? messages(in: .inbox) {

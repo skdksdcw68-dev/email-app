@@ -69,7 +69,7 @@ struct ImportLedger: Codable, Equatable {
     private static let key = "mail.importLedger"
 
     static func load() -> ImportLedger? {
-        guard let data = UserDefaults.standard.data(forKey: key),
+        guard let data = MailboxScope.defaults.data(forKey: key),
               let ledger = try? JSONDecoder().decode(ImportLedger.self, from: data)
         else { return nil }
         return ledger
@@ -77,10 +77,10 @@ struct ImportLedger: Codable, Equatable {
 
     func save() {
         guard let data = try? JSONEncoder().encode(self) else { return }
-        UserDefaults.standard.set(data, forKey: Self.key)
+        MailboxScope.defaults.set(data, forKey: Self.key)
     }
 
     static func clear() {
-        UserDefaults.standard.removeObject(forKey: key)
+        MailboxScope.defaults.removeObject(forKey: key)
     }
 }
