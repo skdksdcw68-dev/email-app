@@ -39,7 +39,7 @@ struct SemanticIndexTests {
         // Skipped rather than failed where the asset is missing: this is the
         // one test that says the feature does anything at all, but a CI
         // runner without the English embedding is not a broken app.
-        try #require(SemanticIndex.isAvailable)
+        try #require(SemanticIndex.canExpand)
 
         let extra = SemanticIndex.expand(["laptop"])
         #expect(!extra.isEmpty, "laptop should have near neighbours")
@@ -69,7 +69,7 @@ struct SemanticIndexTests {
     }
 
     @Test func scoresStayInRange() throws {
-        try #require(SemanticIndex.isAvailable)
+        try #require(SemanticIndex.canRank)
 
         let candidates = [
             message("Invoice for August", "Please find the invoice attached."),
@@ -82,7 +82,7 @@ struct SemanticIndexTests {
     }
 
     @Test func theCloserMeaningScoresHigher() throws {
-        try #require(SemanticIndex.isAvailable)
+        try #require(SemanticIndex.canRank)
 
         let bill = message("Invoice for August", "Please find the invoice attached, payment due in 30 days.")
         let lunch = message("Lunch on Friday", "Are you free at one? There is a new place on the corner.")
@@ -96,7 +96,7 @@ struct SemanticIndexTests {
     }
 
     @Test func onlyTheShortlistIsEmbedded() throws {
-        try #require(SemanticIndex.isAvailable)
+        try #require(SemanticIndex.canRank)
 
         // Embedding is per-message work, and a mailbox is thousands of them.
         // The cap is the whole reason a question stays fast.

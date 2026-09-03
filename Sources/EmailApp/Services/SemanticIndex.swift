@@ -38,7 +38,14 @@ enum SemanticIndex {
     nonisolated(unsafe) private static let words = NLEmbedding.wordEmbedding(for: .english)
     nonisolated(unsafe) private static let sentences = NLEmbedding.sentenceEmbedding(for: .english)
 
-    static var isAvailable: Bool { words != nil || sentences != nil }
+    /// The two are separate assets and one can be present without the other
+    /// -- the simulator ships the word model and not the sentence one. So
+    /// each stage asks about its own, and a missing model costs that stage
+    /// and nothing else.
+    static var canExpand: Bool { words != nil }
+    static var canRank: Bool { sentences != nil }
+
+    static var isAvailable: Bool { canExpand || canRank }
 
     // MARK: - Expanding a question
 
