@@ -108,7 +108,7 @@ struct MessageSwipeActions: ViewModifier {
     @Environment(MailStore.self) private var store
 
     /// A swipe action cannot open a menu, so the choice of when arrives as a
-    /// dialog the moment the swipe finishes.
+    /// sheet the moment the swipe finishes.
     @State private var isPickingWhen = false
 
     private var isAsleep: Bool { SnoozeStore.isAsleep(message.remoteID) }
@@ -160,12 +160,8 @@ struct MessageSwipeActions: ViewModifier {
                 }
                 .tint(.orange)
             }
-            .confirmationDialog("Snooze until", isPresented: $isPickingWhen, titleVisibility: .visible) {
-                ForEach(SnoozeStore.When.allCases) { when in
-                    Button(when.title) { snooze(until: when.date()) }
-                }
-            } message: {
-                Text("It leaves the inbox and comes back then. This is Maily only -- in Gmail it never moved.")
+            .sheet(isPresented: $isPickingWhen) {
+                SnoozeSheet(subject: message.subject) { snooze(until: $0) }
             }
     }
 

@@ -123,22 +123,7 @@ struct InboxHomeView: View {
                 }
 
                 ForEach(messages) { message in
-                    // A ZStack with a zero-opacity link behind the row, rather
-                    // than a NavigationLink label: the label form draws a
-                    // disclosure chevron on every row, which the reference
-                    // list does not have and which cannot be turned off.
-                    //
-                    // Drafts are the exception. An unfinished message opens
-                    // where it can be finished, not in a reader -- nobody
-                    // taps their own half-written email to read it.
-                    ZStack {
-                        if mailbox != .drafts {
-                            NavigationLink(value: message.id) { EmptyView() }.opacity(0)
-                        }
-                        MessageRow(message: message, threadCount: mail.threadCount(for: message))
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { if mailbox == .drafts { editing = message } }
+                    openable(message)
                     .listRowSeparator(.visible)
                     .listRowSeparatorTint(Color(uiColor: .separator).opacity(0.45))
                     .alignmentGuide(.listRowSeparatorLeading) { _ in 68 }
@@ -275,6 +260,33 @@ struct InboxHomeView: View {
         .onChange(of: tag) { _, _ in shownRows = Self.pageOfRows }
         .sheet(isPresented: $isComposing) { ComposeView() }
         .sheet(item: $editing) { ComposeView(editing: $0) }
+    }
+
+    /// A row and whatever tapping it should do.
+    ///
+    /// A ZStack with a zero-opacity link behind the row, rather than a
+    /// NavigationLink label: the label form draws a disclosure chevron on
+    /// every row, which the reference list does not have and which cannot be
+    /// turned off.
+    ///
+    /// Drafts are the exception -- an unfinished message opens where it can
+    /// be finished, not in a reader. The two cases are branches rather than
+    /// one row with a conditional gesture, because a tap gesture attached to
+    /// every row swallows the tap the link was supposed to get.
+    @ViewBuilder
+    private func openable(_ message: Message) -> some View {
+        let row = MessageRow(message: message, threadCount: mail.threadCount(for: message))
+
+        if mailbox == .drafts {
+            row
+                .contentShape(Rectangle())
+                .onTapGesture { editing = message }
+        } else {
+            ZStack {
+                NavigationLink(value: message.id) { EmptyView() }.opacity(0)
+                row
+            }
+        }
     }
 
     // MARK: - The one card
