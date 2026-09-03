@@ -179,40 +179,9 @@ struct GmailAccountsView: View {
     }
 }
 
-/// Appearance on its own, as the plan has it.
-struct AppearanceView: View {
-    @State private var appearance = AppSettings.appearance
-
-    var body: some View {
-        List {
-            Section {
-                ForEach(AppSettings.Appearance.allCases) { option in
-                    Button {
-                        appearance = option
-                        AppSettings.appearance = option
-                        NotificationCenter.default.post(name: .appearanceChanged, object: nil)
-                    } label: {
-                        HStack {
-                            Label(option.title, systemImage: option.symbol)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            if appearance == option {
-                                Image(systemName: "checkmark")
-                                    .font(.footnote.weight(.bold))
-                                    .foregroundStyle(.tint)
-                            }
-                        }
-                    }
-                }
-            } footer: {
-                Text("System follows your device setting.")
-            }
-        }
-        .navigationTitle("Appearance")
-        .navigationBarTitleDisplayMode(.inline)
-        .hidesTabBar()
-    }
-}
+// Appearance had a page here once. It is a segmented control on You now --
+// three options are not a destination, and a tap to see two of them is a tap
+// spent finding out what the choices are.
 
 /// Writing style on its own, as the plan has it.
 struct WritingStyleView: View {

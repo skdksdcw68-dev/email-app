@@ -15,50 +15,32 @@ struct AppSettingsView: View {
     @Environment(UserStore.self) private var user
     @Environment(AutoReplyStore.self) private var autoReply
     @Environment(MailStore.self) private var mail
-    @Environment(AIMemory.self) private var memory
 
-    @State private var isEditingProfile = false
     @State private var isConfirmingSignOut = false
 
     private var config: AutoReplyConfig { autoReply.config }
 
     var body: some View {
         List {
+            // Profile, Gmail, the AI rows, Auto-Reply's setup and rules, and
+            // the theme all live on You. They are not repeated here: a
+            // control in two places is a control to decide about twice, and
+            // one of the two drifts.
             Section {
-                SettingsRow("Personalization", "person.text.rectangle") { PersonalizationView() }
-                SettingsRow("Writing", "pencil.line", value: user.writingToneTitle) { WritingStyleView() }
-                SettingsRow("Memory", "brain",
-                            value: memory.facts.isEmpty ? "Empty" : "\(memory.facts.count)") {
-                    MemorySettingsView()
-                }
-            } header: {
-                Text("Customise Maily")
-            }
-
-            Section {
-                Button { isEditingProfile = true } label: {
-                    plainRow("Profile", "person.crop.circle", value: user.account?.displayName)
-                }
-                .buttonStyle(.plain)
-                SettingsRow("Gmail", "envelope", value: mail.account?.email ?? "None") {
-                    GmailAccountsView()
-                }
                 SettingsRow("Plan", "star", value: "Free") { PlanView() }
             } header: {
                 Text("Account")
             }
 
-            Section {
-                SettingsRow("Setup", "slider.horizontal.3",
-                            value: config.isSetUp ? "Done" : "Not set up") {
-                    config.isSetUp ? AnyView(AutoReplyEditView()) : AnyView(AutoReplyView())
-                }
-                if config.isSetUp {
-                    SettingsRow("Rules", "list.bullet.rectangle",
-                                value: config.instructions.isEmpty
-                                    ? "None" : "\(config.activeInstructions.count)") {
-                        AutoReplyInstructionsView()
-                    }
+            // The deep end of Auto-Reply. What it may never do, what it does
+            // when it is unsure, and what it knows about the business -- all
+            // set once and rarely opened again. The switch and the everyday
+            // edits are on You.
+            // Nothing at all until it is set up. An empty header for a
+            // feature somebody has not turned on is a heading with a hole
+            // under it.
+            if config.isSetUp {
+                Section {
                     SettingsRow("Boundaries", "hand.raised", value: "\(config.mustAsk.count)") {
                         AutoReplySetupView(editing: config, startingAt: .boundaries, singleStep: true)
                     }
@@ -71,9 +53,9 @@ struct AppSettingsView: View {
                                     ? "None" : "\(config.business.filled.count)") {
                         AutoReplySetupView(editing: config, startingAt: .knowledge, singleStep: true)
                     }
+                } header: {
+                    Text("Auto-Reply")
                 }
-            } header: {
-                Text("Auto-Reply")
             }
 
             Section {
@@ -81,8 +63,6 @@ struct AppSettingsView: View {
                 SettingsRow("Running", "bolt.badge.clock") { AutomationsView() }
                 SettingsRow("Notifications", "bell") { NotificationSettingsView() }
                 SettingsRow("Language", "globe", value: "English") { LanguageView() }
-                SettingsRow("Theme", "circle.lefthalf.filled",
-                            value: AppSettings.appearance.title) { AppearanceView() }
             } header: {
                 Text("App settings")
             }
@@ -122,7 +102,6 @@ struct AppSettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
-        .sheet(isPresented: $isEditingProfile) { EditProfileView() }
         .alert("Log out of Maily?", isPresented: $isConfirmingSignOut) {
             Button("Cancel", role: .cancel) {}
             Button("Log out", role: .destructive) { user.signOut() }
@@ -131,30 +110,6 @@ struct AppSettingsView: View {
         }
     }
 
-    /// The same shape as `SettingsRow` for the one row that opens a sheet
-    /// rather than pushing, so the column stays even.
-    private func plainRow(_ title: String, _ symbol: String, value: String?) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: symbol)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .frame(width: 26)
-            Text(title)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-            Spacer(minLength: 12)
-            if let value, !value.isEmpty {
-                Text(value)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 1)
-    }
 }
 
 
