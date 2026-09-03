@@ -21,6 +21,7 @@ struct YouView: View {
     @Environment(AutoReplyQueue.self) private var autoReplyQueue
 
     @State private var isEditingProfile = false
+    @State private var isAddingMailbox = false
     @State private var appearance = AppSettings.appearance
 
     var body: some View {
@@ -72,6 +73,7 @@ struct YouView: View {
             }
             .navigationTitle("You")
             .sheet(isPresented: $isEditingProfile) { EditProfileView() }
+            .sheet(isPresented: $isAddingMailbox) { AddMailboxFlow() }
         }
     }
 
@@ -151,32 +153,72 @@ struct YouView: View {
                     .foregroundStyle(.secondary)
             }
 
-            // One mailbox at a time is what the app actually does, so this
-            // connects when there is nothing connected and says so plainly
-            // when there is. A row promising a second account would be a
-            // promise the app cannot keep.
-            //
-            // The line underneath earns its place here where it would not
-            // elsewhere: "Add account" on an app that holds one mailbox
-            // needs the caveat, and there is nowhere on the right to put it.
-            NavigationLink { GmailAccountsView() } label: {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Add account")
-                        .font(.subheadline)
-                    Text(mail.isConnected
-                         ? "One mailbox at a time. Swap it from here."
-                         : "Connect your Gmail")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            // The others, tap to switch. Only drawn when there are others --
+            // a strip of one is a row that does nothing.
+            if mail.registry.hasSeveral {
+                otherMailboxes
             }
 
-            NavigationLink { GmailAccountsView() } label: {
+            // Two rows, and finally two destinations. They pushed the same
+            // page as each other for months, which is why adding an account
+            // appeared to do nothing.
+            Button {
+                isAddingMailbox = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "plus")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 26, height: 26)
+                        .background(Circle().fill(Color.blue))
+                    Text("Add account")
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 2)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink { MailboxListView() } label: {
                 Text("Manage accounts")
                     .font(.subheadline)
             }
         } header: {
             Text("Accounts")
+        }
+    }
+
+    /// The mailboxes that are not in front of you, as faces.
+    private var otherMailboxes: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 14) {
+                ForEach(mail.registry.accounts.filter { $0.id != mail.account?.id }) { account in
+                    Button {
+                        Task { await mail.activate(account) }
+                    } label: {
+                        VStack(spacing: 5) {
+                            SenderAvatar(contact: account.contact, size: 42)
+                                .overlay { Circle().strokeBorder(account.tint.color, lineWidth: 2) }
+                                .overlay(alignment: .topTrailing) {
+                                    if account.needsAttention {
+                                        Image(systemName: "exclamationmark.circle.fill")
+                                            .font(.caption2)
+                                            .foregroundStyle(.orange)
+                                    }
+                                }
+                            Text(account.title)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .frame(width: 62)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 4)
         }
     }
 

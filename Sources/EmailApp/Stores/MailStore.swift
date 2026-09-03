@@ -31,6 +31,41 @@ final class MailStore {
     /// Bumped by `write`, and the only thing that makes `derived` stale.
     private(set) var mailVersion = 0
 
+    // MARK: - Switching mailbox
+    //
+    // See `MailStore+Mailboxes`, which is where the reasoning lives. Stored
+    // here because an extension cannot hold state.
+
+    private(set) var isSwitching = false
+    /// Which mailbox is being switched to, so the overlay can name it.
+    private(set) var switchingTo: MailAccount?
+
+    /// Which mailbox the work in flight belongs to.
+    ///
+    /// This store has around ten detached tasks that write back into
+    /// `messages` when they return. A page fetched for mailbox A that lands
+    /// after a switch would merge A's mail into B and save the mixture to B's
+    /// archive, and nothing afterwards could tell them apart. Every
+    /// continuation that writes checks this first.
+    @ObservationIgnored private(set) var epoch = 0
+
+    /// True when the work that started in this epoch is still the work that
+    /// matters. False means a different mailbox is in front of the person now
+    /// and whatever this was doing is for the last one.
+    func isCurrent(_ stamp: Int) -> Bool { stamp == epoch }
+
+    /// Everything started before now is for the previous mailbox.
+    func bumpEpoch() { epoch &+= 1 }
+
+    /// Drops the derived state that describes the mailbox being left. Not the
+    /// stored copies -- those belong to that mailbox and stay with it.
+    func forgetCaches() {
+        readCache = nil
+        repliedCache = nil
+        indexCache = nil
+        positionCache = nil
+    }
+
     // MARK: - Sending
     //
     // See `MailStore+Sending`, which is where the reasoning lives. Stored
@@ -335,9 +370,13 @@ final class MailStore {
             return
         }
 
+        let stamp = epoch
         if let page = try? await GmailService.fetchInbox(
             accessToken: session.accessToken, limit: Self.pageSize
         ) {
+            // The mailbox may have been switched while this was in flight.
+            // Merging now would put the old one's mail into the new one.
+            guard isCurrent(stamp) else { return }
             merge(page.messages)
             self.nextPageToken = page.nextPageToken
             let snapshot = messages
@@ -362,8 +401,15 @@ final class MailStore {
     /// of ours. That is both less to build and a materially lower CASA risk
     /// profile, since the assessment trigger is an app able to reach restricted
     /// data "from or through a third-party server".
+    /// Connects a mailbox and makes it the one in front of you.
+    ///
+    /// No longer refuses when something is already connected -- that guard is
+    /// what made a second mailbox impossible even from code. What it refuses
+    /// instead is the *same* mailbox twice, which without a check looks like
+    /// it worked and changes nothing: the id derives from the address, so it
+    /// lands on the record that is already there.
     func connect() async {
-        guard !isConnecting, !isConnected else { return }
+        guard !isConnecting else { return }
         isConnecting = true
         connectionError = nil
         importProgress = .connecting
@@ -371,6 +417,13 @@ final class MailStore {
 
         do {
             let session = try await AuthService.connectGmail()
+
+            if let existing = registry.account(forAddress: session.email),
+               existing.id != account?.id {
+                connectionError = "\(existing.address) is already here. Switch to it from Mailboxes."
+                importProgress = .idle
+                return
+            }
             let connected = MailAccount(
                 provider: .gmail,
                 address: session.email,
@@ -410,9 +463,11 @@ final class MailStore {
         connectionError = nil
         defer { isRefreshing = false }
 
+        let stamp = epoch
         do {
             let token = try await accessToken()
             let page = try await GmailService.fetchInbox(accessToken: token, limit: Self.pageSize)
+            guard isCurrent(stamp) else { return }
             merge(page.messages)
             nextPageToken = page.nextPageToken
             let snapshot = messages
@@ -443,6 +498,7 @@ final class MailStore {
     /// launch.
     func importRecentMail() async {
         guard isConnected else { return }
+        let stamp = epoch
 
         guard let ledger = await openLedger() else {
             // Gmail could not even be asked what is there. Nothing is marked
@@ -669,6 +725,7 @@ final class MailStore {
         // is finishing. One layout pass instead of twenty. Folded rather than
         // assigned: mail that a catch-up or a search brought in while this
         // ran is not thrown away by it.
+        guard isCurrent(stamp) else { return }
         let read = locallyRead
         let replied = locallyReplied
         write { list in
@@ -805,6 +862,7 @@ final class MailStore {
         guard isConnected, !isLoadingMore, !isRefreshing, let token = nextPageToken else { return }
         isLoadingMore = true
         defer { isLoadingMore = false }
+        let stamp = epoch
 
         do {
             let accessToken = try await accessToken()
@@ -821,6 +879,7 @@ final class MailStore {
                 return !known.contains(remoteID)
             }
 
+            guard isCurrent(stamp) else { return }
             write { $0.append(contentsOf: fresh) }
             nextPageToken = page.nextPageToken
             Task { await enhanceWithAI() }

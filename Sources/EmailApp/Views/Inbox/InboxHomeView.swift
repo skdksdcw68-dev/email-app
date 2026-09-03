@@ -20,6 +20,8 @@ struct InboxHomeView: View {
     @State private var mailbox: Mailbox = .inbox
     @State private var tag: AITag?
     @State private var isComposing = false
+    @State private var isAddingMailbox = false
+    @State private var isManagingMailboxes = false
     /// A draft picked back up. Opens the composer on it rather than the
     /// reader; see the Drafts case in the list below.
     @State private var editing: Message?
@@ -218,11 +220,24 @@ struct InboxHomeView: View {
             }
         }
         .toolbar {
+            // Which account, then which folder inside it, left to right in
+            // the order somebody narrows. The account only appears when there
+            // is a choice to make: a switcher offering one thing is a control
+            // that does nothing.
+            if mail.registry.hasSeveral {
+                ToolbarItem(placement: .topBarLeading) {
+                    MailboxSwitcher(
+                        isAdding: $isAddingMailbox,
+                        isManaging: $isManagingMailboxes
+                    )
+                }
+            }
+
             ToolbarItem(placement: .topBarLeading) {
                 // The glyph is where you are; the menu behind it is where
                 // you can go. The bare hamburger said nothing about either.
                 Menu {
-                    Picker("Mailbox", selection: $mailbox) {
+                    Picker("Folder", selection: $mailbox) {
                         ForEach(Mailbox.allCases) { box in
                             Label(box.title, systemImage: box.systemImage).tag(box)
                         }
@@ -230,7 +245,7 @@ struct InboxHomeView: View {
                 } label: {
                     Image(systemName: mailbox.systemImage)
                 }
-                .accessibilityLabel("Mailbox: \(mailbox.title)")
+                .accessibilityLabel("Folder: \(mailbox.title)")
             }
 
             // One group, so the system draws them in one capsule -- the same
@@ -260,6 +275,8 @@ struct InboxHomeView: View {
         .onChange(of: tag) { _, _ in shownRows = Self.pageOfRows }
         .sheet(isPresented: $isComposing) { ComposeView() }
         .sheet(item: $editing) { ComposeView(editing: $0) }
+        .sheet(isPresented: $isAddingMailbox) { AddMailboxFlow() }
+        .navigationDestination(isPresented: $isManagingMailboxes) { MailboxListView() }
     }
 
     /// A row and whatever tapping it should do.

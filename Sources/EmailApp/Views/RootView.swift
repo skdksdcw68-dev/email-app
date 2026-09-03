@@ -69,6 +69,10 @@ struct MainTabView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             SendBanner()
         }
+        // Above the tab bar and above anything presented, because a switch
+        // can be started from three different screens and should look the
+        // same from all of them.
+        .overlay { SwitchingOverlay() }
         // Leaving the app is not a decision to abandon a message. Anything
         // still held goes now rather than waiting for a timer iOS is about
         // to suspend.

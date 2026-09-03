@@ -80,104 +80,10 @@ struct EditProfileView: View {
     }
 }
 
-/// Everything about the connected mailbox: status, what Maily is allowed to
-/// do, and how to get rid of it.
-struct GmailAccountsView: View {
-    @Environment(MailStore.self) private var mail
-
-    @State private var showingDisconnect = false
-    @State private var isRefreshing = false
-
-    var body: some View {
-        List {
-            Section {
-                if let account = mail.account {
-                    HStack(spacing: 12) {
-                        SenderAvatar(
-                            contact: Contact(name: account.displayName, address: account.address),
-                            size: 40
-                        )
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(account.displayName)
-                                .font(.subheadline.weight(.semibold))
-                            Text(account.address)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 0)
-                        Label("Active", systemImage: "checkmark.circle.fill")
-                            .labelStyle(.iconOnly)
-                            .foregroundStyle(.green)
-                    }
-                    .padding(.vertical, 2)
-                } else {
-                    Label("No mailbox connected", systemImage: "envelope.badge.shield.half.filled")
-                        .foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("Current")
-            }
-
-            if mail.isConnected {
-                Section {
-                    LabeledContent("Connection", value: mail.connectionError == nil ? "Connected" : "Problem")
-                    LabeledContent("Messages held", value: "\(mail.messages.count)")
-                    LabeledContent("Offline copy", value: "Last three months")
-                    Button {
-                        Task {
-                            isRefreshing = true
-                            await mail.refresh()
-                            isRefreshing = false
-                        }
-                    } label: {
-                        HStack {
-                            Text(isRefreshing ? "Syncing…" : "Sync now")
-                            Spacer()
-                            if isRefreshing { ProgressView().controlSize(.small) }
-                        }
-                    }
-                    .disabled(isRefreshing)
-                } header: {
-                    Text("Sync")
-                }
-
-                Section {
-                    Label("Read your mail", systemImage: "envelope.open")
-                    Label("Create drafts and send", systemImage: "paperplane")
-                } header: {
-                    Text("What Maily can do")
-                } footer: {
-                    // Stated plainly, because it is the reason archive and
-                    // delete do not stick in Gmail.
-                    Text("Maily cannot archive, delete or star mail. Doing that needs a further Gmail permission this app deliberately does not ask for.")
-                }
-            }
-
-            Section {
-                Button("Add another account") {}
-                    .disabled(true)
-            } footer: {
-                Text("One mailbox at a time for now. Several accounts at once, and a combined inbox across them, is not built yet.")
-            }
-
-            if mail.isConnected {
-                Section {
-                    Button("Disconnect inbox", role: .destructive) { showingDisconnect = true }
-                }
-            }
-        }
-        .navigationTitle("Gmail accounts")
-        .navigationBarTitleDisplayMode(.inline)
-        .hidesTabBar()
-        .alert("Disconnect inbox?", isPresented: $showingDisconnect) {
-            Button("Cancel", role: .cancel) {}
-            Button("Disconnect", role: .destructive) { mail.disconnect() }
-        } message: {
-            Text("Removes the mailbox and every cached message from this device. Your Maily account and preferences are kept.")
-        }
-    }
-}
+// The accounts screens moved to Views/Accounts: MailboxListView for the
+// list, MailboxDetailView for one of them. This page could only ever show a
+// single mailbox, and its "Add another account" button was disabled with a
+// footer saying so.
 
 // Appearance had a page here once. It is a segmented control on You now --
 // three options are not a destination, and a tap to see two of them is a tap

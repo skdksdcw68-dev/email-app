@@ -34,6 +34,7 @@ extension MailStore {
     @discardableResult
     func catchUp() async -> [Message] {
         guard isConnected, !isRefreshing, !importProgress.isRunning else { return [] }
+        let stamp = epoch
         guard let cursor = syncCursor else {
             await refresh()
             await rememberCursor()
@@ -53,6 +54,9 @@ extension MailStore {
             var arrived: [Message] = []
             if !changes.added.isEmpty {
                 arrived = try await GmailService.messages(ids: changes.added, accessToken: token)
+                // A switch landed while Gmail was answering. These belong
+                // to the mailbox that was open when this started.
+                guard isCurrent(stamp) else { return [] }
                 absorb(arrived)
             }
             if !changes.removed.isEmpty {
