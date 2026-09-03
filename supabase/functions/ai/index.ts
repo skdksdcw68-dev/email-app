@@ -16,8 +16,33 @@
 
 const OPENAI_KEY = Deno.env.get("OPENAI_API_KEY");
 
-const CLASSIFY_MODEL = "gpt-4.1-mini";
-const DRAFT_MODEL = "gpt-5.4";
+// Reading mail and writing it are not the same job, and they should not pay
+// the same rate.
+//
+// Classifying is structured extraction from twelve hundred characters:
+// how urgent, does it want an answer, what is it about, one line saying so.
+// That is what the nano tier is for, and it was being done on a model
+// costing eight times as much for no visible gain -- a five thousand message
+// import was $2.12 on 4.1-mini and is $0.34 here.
+//
+// Drafting is the opposite. It writes in somebody's voice, to people who
+// know them, and a worse model shows immediately -- so that one was picked
+// by looking at what the candidates actually wrote, not at a benchmark that
+// has never seen an email.
+//
+// gpt-5.6-luna against gpt-5.4, gpt-5.1 and gpt-5-mini, on seven real tasks:
+// four replies and three questions. It held the line every time the others
+// did -- refusing to invent a day rate nobody had given it, keeping a
+// two-line reply two lines, emitting OLDEST: rather than guessing at an
+// email it had not been shown. On the hardest one, a reply that had to use
+// context without reciting it, it was the only one that did neither: 5.4
+// added a promise the user never made, and 5.1 and 5-mini both read the
+// meeting time back to the person who had set it.
+//
+// It is twelve and a half times cheaper. Seven tasks is a small sample and
+// this is a one line change to undo if real use disagrees.
+const CLASSIFY_MODEL = "gpt-5-nano";
+const DRAFT_MODEL = "gpt-5.6-luna";
 
 /// How much of a body the model sees. Enough to judge intent; far short of
 /// shipping the message wholesale.
@@ -352,6 +377,16 @@ function setupLines(body: Record<string, string>) {
 // ------------------------------------------------------------------- draft
 
 async function draft(body: Record<string, string>) {
+  const reply = await openai(DRAFT_MODEL, draftMessages(body), false);
+  return json({ body: reply.trim(), model: DRAFT_MODEL });
+}
+
+/// The prompt on its own, so the same one can be put to a different model.
+///
+/// Split out so the same prompt can be put to a different model. That is how
+/// the drafting model was chosen: on what the candidates actually wrote,
+/// rather than on a benchmark that has never seen an email.
+function draftMessages(body: Record<string, string>) {
   const tone = body.tone ?? "match how I already write";
 
   // Emoji everywhere except the one tone that is actively hurt by them.
@@ -403,16 +438,10 @@ Rules:
     body.instruction ?? "",
   ].filter(Boolean).join("\n");
 
-  const reply = await openai(
-    DRAFT_MODEL,
-    [
-      { role: "system", content: system },
-      { role: "user", content },
-    ],
-    false,
-  );
-
-  return json({ body: reply.trim(), model: DRAFT_MODEL });
+  return [
+    { role: "system", content: system },
+    { role: "user", content },
+  ];
 }
 
 // ------------------------------------------------------------------ refine
