@@ -15,6 +15,9 @@ struct ComposeView: View {
     /// replaces the quoted-original prefill so they see their reply, not a
     /// wall of quoted text.
     var initialBody: String? = nil
+    /// A draft being picked back up. Its fields fill the sheet, and saving or
+    /// sending replaces it rather than leaving the old copy in Drafts.
+    var editing: Message? = nil
 
     @Environment(MailStore.self) private var store
     @Environment(UserStore.self) private var user
@@ -73,6 +76,11 @@ struct ComposeView: View {
         recipient.contains("@") && !recipient.hasSuffix("@") && !isSending
     }
 
+    private var title: String {
+        if editing != nil { return "Draft" }
+        return replyingTo == nil ? "New Message" : "Reply"
+    }
+
     private var hasContent: Bool {
         !recipient.isEmpty || !subject.isEmpty || !messageBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -97,7 +105,7 @@ struct ComposeView: View {
                 onCompletion: take
             )
             .dismissesKeyboardOnBackgroundTap()
-            .navigationTitle(replyingTo == nil ? "New Message" : "Reply")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .onAppear(perform: prefill)
             .sheet(isPresented: $isWriting) {
@@ -130,9 +138,7 @@ struct ComposeView: View {
                         .font(.subheadline.weight(.semibold))
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task { await performSend() }
-                    } label: {
+                    Button(action: performSend) {
                         Label(isSending ? "Sending…" : "Send", systemImage: "paperplane.fill")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
@@ -206,30 +212,27 @@ struct ComposeView: View {
 
     // MARK: - Sending
 
-    /// The sheet stays open when this fails. A compose window that closes on a
-    /// failed send loses the message and tells the user it went.
-    private func performSend() async {
+    /// Held for a few seconds rather than sent, so there is a way back.
+    ///
+    /// The sheet closes immediately, which is the point: the countdown and
+    /// its Undo button live on the screen behind, where they can be seen
+    /// after this is out of the way. Nothing here can fail, so nothing here
+    /// reports failure -- if the send itself does, `sendFailure` says so
+    /// where the person actually is.
+    private func performSend() {
         guard !isSending else { return }
-        isSending = true
-        sendError = nil
-        defer { isSending = false }
 
-        do {
-            try await store.send(
-                subject: subject,
-                to: recipient,
-                cc: showsCcBcc && !cc.isEmpty ? cc : nil,
-                body: messageBody,
-                html: richText.hasFormatting ? richText.htmlBody() : nil,
-                attachments: attached.map { $0.outgoing },
-                replyingTo: replyingTo
-            )
-            // Answered, so it stops asking to be answered.
-            if let replyingTo { store.markReplied(replyingTo.id) }
-            dismiss()
-        } catch {
-            sendError = error.localizedDescription
-        }
+        store.sendWithUndo(
+            subject: subject,
+            to: recipient,
+            cc: showsCcBcc && !cc.isEmpty ? cc : nil,
+            body: messageBody,
+            html: richText.hasFormatting ? richText.htmlBody() : nil,
+            attachments: attached.map { $0.outgoing },
+            replyingTo: replyingTo,
+            discardingDraft: editing
+        )
+        dismiss()
     }
 
     private func performSaveDraft() async {
@@ -246,7 +249,8 @@ struct ComposeView: View {
                 body: messageBody,
                 html: richText.hasFormatting ? richText.htmlBody() : nil,
                 attachments: attached.map { $0.outgoing },
-                replyingTo: replyingTo
+                replyingTo: replyingTo,
+                replacing: editing
             )
             dismiss()
         } catch {
@@ -693,7 +697,19 @@ struct ComposeView: View {
     /// past before you could type -- and the thread is one tap away behind the
     /// sheet anyway.
     private func prefill() {
-        guard let original = replyingTo, recipient.isEmpty else { return }
+        guard recipient.isEmpty else { return }
+
+        // A draft comes back exactly as it was left, including an empty
+        // subject -- "(No Subject)" is Gmail's placeholder for one that was
+        // never written, not something to hand back as if it had been.
+        if let editing {
+            recipient = editing.recipients.first?.address ?? ""
+            subject = editing.subject == "(No Subject)" ? "" : editing.subject
+            setBody(editing.body)
+            return
+        }
+
+        guard let original = replyingTo else { return }
         recipient = original.sender.address
         subject = original.subject.lowercased().hasPrefix("re:")
             ? original.subject

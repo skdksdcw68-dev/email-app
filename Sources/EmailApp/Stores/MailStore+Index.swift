@@ -55,6 +55,10 @@ struct MailboxIndex {
         for mailbox in Mailbox.allCases {
             let list = sorted
                 .filter { mailbox.isSmart ? $0.isFlagged && $0.mailbox != .trash : $0.mailbox == mailbox }
+                // Snoozed mail is out of the inbox until its day. Filtered
+                // here so every count, chip and list agrees without each
+                // one having to remember.
+                .filter { mailbox != .inbox || !SnoozeStore.isAsleep($0.remoteID) }
                 .collapsingThreads()
             byMailbox[mailbox] = list
             unread[mailbox] = list.filter { !$0.isRead }.count

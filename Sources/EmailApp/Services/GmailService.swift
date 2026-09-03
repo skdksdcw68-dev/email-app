@@ -356,12 +356,21 @@ enum GmailService {
 
     /// Writes a real Gmail draft, so it appears in Gmail on every device
     /// rather than only in this app.
+    /// The two ids a draft has. Keeping them apart is the whole point: the
+    /// draft endpoints want `draft`, everything else in the app wants
+    /// `message`, and using one where the other belongs fails quietly.
+    struct DraftHandle {
+        let draft: String
+        let message: String
+        let thread: String?
+    }
+
     @discardableResult
     static func createDraft(
         accessToken: String,
         envelope: MIMEBuilder.Envelope,
         threadID: String? = nil
-    ) async throws -> String {
+    ) async throws -> DraftHandle {
         var message: [String: Any] = ["raw": MIMEBuilder.raw(envelope)]
         if let threadID { message["threadId"] = threadID }
 
@@ -371,7 +380,76 @@ enum GmailService {
             accessToken: accessToken
         )
         guard let id = json["id"] as? String else { throw ServiceError.malformed }
-        return id
+        let created = json["message"] as? [String: Any]
+        return DraftHandle(
+            draft: id,
+            message: created?["id"] as? String ?? id,
+            thread: created?["threadId"] as? String ?? threadID
+        )
+    }
+
+    /// Finds the draft id for a message that carries the DRAFT label.
+    ///
+    /// Mail arrives here through `messages.list`, which knows nothing about
+    /// drafts beyond the label, so a draft synced from Gmail has a message id
+    /// and nothing else. This is the one call that pairs them up. Cheap: the
+    /// listing is ids only, and there are rarely many drafts.
+    static func draftID(accessToken: String, forMessage messageID: String) async throws -> String? {
+        var components = URLComponents(string: "\(base)/drafts")!
+        components.queryItems = [URLQueryItem(name: "maxResults", value: "200")]
+
+        let json = try await get(components.url!, accessToken: accessToken)
+        let drafts = json["drafts"] as? [[String: Any]] ?? []
+        for draft in drafts {
+            let message = draft["message"] as? [String: Any]
+            if message?["id"] as? String == messageID { return draft["id"] as? String }
+        }
+        return nil
+    }
+
+    /// Replaces a draft in place, keeping its id.
+    ///
+    /// Reopening a draft and saving it again must not leave the half-written
+    /// copy behind. Gmail has no notion of "the draft I edited" -- there is
+    /// only the one it holds -- so an edit is a replacement of that exact id.
+    static func updateDraft(
+        accessToken: String,
+        id: String,
+        envelope: MIMEBuilder.Envelope,
+        threadID: String? = nil
+    ) async throws {
+        var message: [String: Any] = ["raw": MIMEBuilder.raw(envelope)]
+        if let threadID { message["threadId"] = threadID }
+
+        var request = URLRequest(url: URL(string: "\(base)/drafts/\(id)")!)
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["message": message])
+        try await run(request)
+    }
+
+    /// Throws a draft away, on Gmail as well as here.
+    ///
+    /// Allowed by `gmail.compose`, which covers drafts. It is the only thing
+    /// in Maily that deletes anything on Gmail, and it is deliberately
+    /// limited to drafts -- deleting mail needs `gmail.modify`, which this
+    /// app does not ask for.
+    static func deleteDraft(accessToken: String, id: String) async throws {
+        var request = URLRequest(url: URL(string: "\(base)/drafts/\(id)")!)
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        try await run(request)
+    }
+
+    /// For the calls that answer with nothing worth reading.
+    private static func run(_ request: URLRequest) async throws {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ServiceError.malformed }
+        guard (200..<300).contains(http.statusCode) else {
+            let text = String(data: data, encoding: .utf8) ?? ""
+            throw ServiceError.http(http.statusCode, String(text.prefix(300)))
+        }
     }
 
     private static func post(

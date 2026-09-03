@@ -38,6 +38,7 @@ struct MainTabView: View {
     private enum AppTab: Hashable { case inbox, ai, people, you }
 
     @Environment(MailStore.self) private var mail
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selection: AppTab = .inbox
 
     var body: some View {
@@ -63,6 +64,24 @@ struct MainTabView: View {
                 .tabItem { Label("You", systemImage: "person.crop.circle.fill") }
                 .tag(AppTab.you)
         }
+        // Above the tab bar, over every tab, outliving the sheet that
+        // started it. See `SendBanner`.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            SendBanner()
+        }
+        // Leaving the app is not a decision to abandon a message. Anything
+        // still held goes now rather than waiting for a timer iOS is about
+        // to suspend.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                // Coming back is when a snooze that ran out overnight should
+                // be waiting in the inbox.
+                mail.wakeSnoozed()
+            } else {
+                mail.sendHeldNow()
+            }
+        }
+        .task { mail.wakeSnoozed() }
     }
 
     /// A dictionary lookup, not a count of the mailbox.

@@ -20,6 +20,12 @@ struct Message: Identifiable, Hashable, Codable {
     /// single row saying 4.
     var threadID: String? = nil
 
+    /// Gmail's *draft* id, which is not the message id. A draft has both, and
+    /// the draft endpoints only answer to this one -- editing or deleting a
+    /// draft by its message id gets a 404. Nil until it is known: mail synced
+    /// from Gmail arrives as messages, so it is looked up when first needed.
+    var draftID: String? = nil
+
     /// The RFC 2822 Message-ID, angle brackets included. Gmail threads on its
     /// own threadId, but In-Reply-To/References is how every other client in
     /// the chain knows a reply belongs to a conversation.

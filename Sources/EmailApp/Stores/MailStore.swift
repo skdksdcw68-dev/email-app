@@ -30,6 +30,21 @@ final class MailStore {
     /// Bumped by `write`, and the only thing that makes `derived` stale.
     private(set) var mailVersion = 0
 
+    // MARK: - Sending
+    //
+    // See `MailStore+Sending`, which is where the reasoning lives. Stored
+    // here because an extension cannot hold state.
+
+    /// A message written, accepted, and not yet gone.
+    internal(set) var heldSend: HeldSend?
+    /// What went wrong with the last send, for the one place that can say so
+    /// after the compose sheet has already closed.
+    var sendFailure: String?
+
+    /// The send itself, kept apart from its timer so it can be run early.
+    @ObservationIgnored var heldWork: (() async -> Void)?
+    @ObservationIgnored var heldTimer: Task<Void, Never>?
+
     // MARK: - Derived
 
     @ObservationIgnored private var indexCache: MailboxIndex?
@@ -102,6 +117,17 @@ final class MailStore {
 
     func notePreferencesChanged() {
         preferencesVersion += 1
+    }
+
+    /// Brings back anything whose snooze has run out.
+    ///
+    /// Nothing about the mailbox changes when a snooze expires -- the clock
+    /// moved, not the mail -- so the cached index would happily keep hiding a
+    /// message past its day. This is what tells it to look again, and it is
+    /// called when the app comes back to the front, which is when somebody is
+    /// there to notice.
+    func wakeSnoozed(now: Date = .now) {
+        if SnoozeStore.forgetWoken(now: now) { notePreferencesChanged() }
     }
 
     /// Adds messages this app did not have, leaving everything it holds
@@ -1332,6 +1358,11 @@ final class MailStore {
 
     /// Writes a real Gmail draft, so it is there in Gmail on every device and
     /// not just in this app's memory.
+    ///
+    /// Pass `replacing` to save over one that already exists rather than
+    /// leaving the old copy behind. Reopening a draft, changing a line and
+    /// saving is the common case, and two drafts of the same message is not
+    /// what anybody meant by it.
     func saveDraft(
         subject: String,
         to address: String,
@@ -1339,7 +1370,8 @@ final class MailStore {
         body: String,
         html: String? = nil,
         attachments: [MIMEBuilder.Attached] = [],
-        replyingTo original: Message? = nil
+        replyingTo original: Message? = nil,
+        replacing existing: Message? = nil
     ) async throws {
         guard let account else { throw SendError.notConnected }
         try checkSize(of: attachments)
@@ -1357,7 +1389,27 @@ final class MailStore {
             attachments: attachments
         )
 
-        let id = try await GmailService.createDraft(
+        // Editing one that exists replaces it in place, so the id everything
+        // else holds stays valid.
+        if let existing, let draftID = try await draftID(of: existing, token: token) {
+            try await GmailService.updateDraft(
+                accessToken: token,
+                id: draftID,
+                envelope: envelope,
+                threadID: existing.threadID ?? original?.threadID
+            )
+            update(existing.id) {
+                $0.subject = subject.isEmpty ? "(No Subject)" : subject
+                $0.recipients = [Contact(name: address, address: address)]
+                $0.body = body
+                $0.htmlBody = html
+                $0.date = .now
+                $0.draftID = draftID
+            }
+            return
+        }
+
+        let handle = try await GmailService.createDraft(
             accessToken: token,
             envelope: envelope,
             threadID: original?.threadID
@@ -1372,8 +1424,42 @@ final class MailStore {
             isRead: true,
             mailbox: .drafts
         )
-        local.remoteID = id
+        // The message id, not the draft id. They are different numbers, and
+        // everything outside the draft endpoints wants this one.
+        local.remoteID = handle.message
+        local.threadID = handle.thread
+        local.draftID = handle.draft
+        local.htmlBody = html
         write { $0.append(local) }
+    }
+
+    /// Throws a draft away here and on Gmail.
+    ///
+    /// Unlike deleting mail, this is real and permanent -- `gmail.compose`
+    /// covers drafts, and a draft in the trash is not a thing Gmail has. The
+    /// row goes either way: a draft that failed to delete remotely but stayed
+    /// on screen is worse than one that comes back on the next refresh.
+    func discardDraft(_ id: Message.ID) async {
+        guard let message = message(id), message.mailbox == .drafts else { return }
+        write { $0.removeAll { $0.id == id } }
+
+        do {
+            let token = try await AuthService.currentGmailAccessToken()
+            guard let draftID = try await draftID(of: message, token: token) else { return }
+            try await GmailService.deleteDraft(accessToken: token, id: draftID)
+        } catch {
+            sendFailure = "The draft is gone from here, but Gmail kept it. \(error.localizedDescription)"
+        }
+    }
+
+    /// A draft's own id, looked up once and remembered.
+    private func draftID(of message: Message, token: String) async throws -> String? {
+        if let known = message.draftID { return known }
+        guard let remoteID = message.remoteID else { return nil }
+
+        let found = try await GmailService.draftID(accessToken: token, forMessage: remoteID)
+        if let found { update(message.id) { $0.draftID = found } }
+        return found
     }
 
     enum SendError: LocalizedError {

@@ -20,6 +20,9 @@ struct InboxHomeView: View {
     @State private var mailbox: Mailbox = .inbox
     @State private var tag: AITag?
     @State private var isComposing = false
+    /// A draft picked back up. Opens the composer on it rather than the
+    /// reader; see the Drafts case in the list below.
+    @State private var editing: Message?
     @State private var isSearching = false
     @State private var query = ""
     @State private var searchMode: MailStore.SearchMode = .mail
@@ -124,10 +127,18 @@ struct InboxHomeView: View {
                     // than a NavigationLink label: the label form draws a
                     // disclosure chevron on every row, which the reference
                     // list does not have and which cannot be turned off.
+                    //
+                    // Drafts are the exception. An unfinished message opens
+                    // where it can be finished, not in a reader -- nobody
+                    // taps their own half-written email to read it.
                     ZStack {
-                        NavigationLink(value: message.id) { EmptyView() }.opacity(0)
+                        if mailbox != .drafts {
+                            NavigationLink(value: message.id) { EmptyView() }.opacity(0)
+                        }
                         MessageRow(message: message, threadCount: mail.threadCount(for: message))
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture { if mailbox == .drafts { editing = message } }
                     .listRowSeparator(.visible)
                     .listRowSeparatorTint(Color(uiColor: .separator).opacity(0.45))
                     .alignmentGuide(.listRowSeparatorLeading) { _ in 68 }
@@ -263,6 +274,7 @@ struct InboxHomeView: View {
         // top of it rather than three hundred rows in.
         .onChange(of: tag) { _, _ in shownRows = Self.pageOfRows }
         .sheet(isPresented: $isComposing) { ComposeView() }
+        .sheet(item: $editing) { ComposeView(editing: $0) }
     }
 
     // MARK: - The one card
@@ -342,7 +354,38 @@ struct InboxHomeView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 10, trailing: 16))
                 .transition(.opacity)
             }
+
+            // Only when there is something asleep. A permanent row for an
+            // empty folder is the kind of clutter this screen is built to
+            // avoid -- but mail that vanished from the inbox has to be
+            // reachable from the inbox, or it is simply lost.
+            if snoozedCount > 0 {
+                NavigationLink {
+                    SnoozedListView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "clock.fill")
+                            .font(.title3)
+                            .foregroundStyle(.indigo)
+                            .frame(width: 26)
+
+                        Text(snoozedCount == 1 ? "1 snoozed" : "\(snoozedCount) snoozed")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                    }
+                    .padding(.vertical, 3)
+                }
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 10, trailing: 16))
+            }
         }
+    }
+
+    /// Counted off the snooze store rather than the mailbox, so it is right
+    /// even for a message the three month window no longer holds.
+    private var snoozedCount: Int {
+        _ = mail.preferencesVersion
+        return SnoozeStore.sleeping().count
     }
 
     @ViewBuilder

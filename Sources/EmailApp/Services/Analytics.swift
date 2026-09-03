@@ -72,6 +72,12 @@ enum Analytics {
 
         case markedRead = "marked_read"
         case markedReadUndone = "marked_read_undone"
+        /// A send caught inside the undo window. Worth knowing how often the
+        /// window earns its delay.
+        case sendUndone = "send_undone"
+        /// Something put away until later. No id, no subject -- only that it
+        /// happened.
+        case messageSnoozed = "message_snoozed"
         case memorySaved = "memory_saved"
         /// Auto-Reply setup finished. Shape of the setup only -- never the
         /// business facts, which are the person's own and stay on the phone.

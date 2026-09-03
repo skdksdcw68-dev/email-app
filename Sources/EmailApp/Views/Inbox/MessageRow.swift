@@ -107,6 +107,12 @@ struct MessageSwipeActions: ViewModifier {
     let message: Message
     @Environment(MailStore.self) private var store
 
+    /// A swipe action cannot open a menu, so the choice of when arrives as a
+    /// dialog the moment the swipe finishes.
+    @State private var isPickingWhen = false
+
+    private var isAsleep: Bool { SnoozeStore.isAsleep(message.remoteID) }
+
     func body(content: Content) -> some View {
         content
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
@@ -119,12 +125,32 @@ struct MessageSwipeActions: ViewModifier {
                     )
                 }
                 .tint(.blue)
+
+                // Drafts are not a thing you put off until Tuesday; they are
+                // a thing you finish. No snooze on them.
+                if message.mailbox != .drafts, message.remoteID != nil {
+                    Button {
+                        if isAsleep {
+                            SnoozeStore.wake(message.remoteID ?? "")
+                            store.notePreferencesChanged()
+                        } else {
+                            isPickingWhen = true
+                        }
+                    } label: {
+                        Label(isAsleep ? "Wake" : "Snooze", systemImage: isAsleep ? "bell" : "clock")
+                    }
+                    .tint(.indigo)
+                }
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                 Button(role: .destructive) {
-                    store.delete(message.id)
+                    if message.mailbox == .drafts {
+                        Task { await store.discardDraft(message.id) }
+                    } else {
+                        store.delete(message.id)
+                    }
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label(message.mailbox == .drafts ? "Discard" : "Delete", systemImage: "trash")
                 }
 
                 Button {
@@ -134,6 +160,22 @@ struct MessageSwipeActions: ViewModifier {
                 }
                 .tint(.orange)
             }
+            .confirmationDialog("Snooze until", isPresented: $isPickingWhen, titleVisibility: .visible) {
+                ForEach(SnoozeStore.When.allCases) { when in
+                    Button(when.title) { snooze(until: when.date()) }
+                }
+            } message: {
+                Text("It leaves the inbox and comes back then. This is Maily only -- in Gmail it never moved.")
+            }
+    }
+
+    private func snooze(until date: Date) {
+        guard let remoteID = message.remoteID else { return }
+        SnoozeStore.snooze(remoteID, until: date)
+        // Snoozing lives outside the mailbox, so nothing about `messages`
+        // changed. This is what tells the lists to look again.
+        store.notePreferencesChanged()
+        Analytics.record(.messageSnoozed)
     }
 }
 
