@@ -54,12 +54,83 @@ final class MailStore {
     /// and whatever this was doing is for the last one.
     func isCurrent(_ stamp: Int) -> Bool { stamp == epoch }
 
-    /// Everything started before now is for the previous mailbox.
-    func bumpEpoch() { epoch &+= 1 }
+    /// The overlay must not strobe. Decoding an archive is a hundred to four
+    /// hundred milliseconds, so a fast switch would flash a blur and be gone
+    /// before it read as anything.
+    private static let minimumSwitch: TimeInterval = 0.35
 
-    /// Drops the derived state that describes the mailbox being left. Not the
-    /// stored copies -- those belong to that mailbox and stay with it.
-    func forgetCaches() {
+    /// Puts a different mailbox in front of the person.
+    ///
+    /// One store that swaps its contents, rather than a store per account.
+    /// The archive is thousands of messages and several megabytes decoded;
+    /// two or three resident at once in an app that has to survive a thirty
+    /// second background wake is how it gets killed for memory, and the
+    /// symptom of that is "notifications sometimes don't work", which is
+    /// close to undiagnosable from a TestFlight build.
+    ///
+    /// The order below is the whole design. Save what the outgoing mailbox
+    /// has, fence the work it started, clear, repoint, load.
+    func activate(_ next: MailAccount) async {
+        guard next.id != account?.id else { return }
+
+        isSwitching = true
+        switchingTo = next
+        let started = Date.now
+
+        leaveCurrentMailbox()
+
+        account = next
+        registry.setActive(next.id)
+        // Moves the suite, the in-memory caches and the five file-backed
+        // stores together.
+        announceActiveMailbox()
+
+        await loadArchive()
+
+        let elapsed = Date.now.timeIntervalSince(started)
+        if elapsed < Self.minimumSwitch {
+            try? await Task.sleep(for: .seconds(Self.minimumSwitch - elapsed))
+        }
+        isSwitching = false
+        switchingTo = nil
+
+        // Only the disk read is on the critical path. The network arrives
+        // behind the overlay.
+        Task { await restore() }
+    }
+
+    /// Puts down whatever the current mailbox was holding.
+    ///
+    /// Shared with `connect`, because connecting a mailbox while another is
+    /// open is a switch with a consent screen in front of it.
+    func leaveCurrentMailbox() {
+        // A message written and accepted belongs to the mailbox it was
+        // written from. Held a few more seconds and then sent from whichever
+        // account happened to be current would be somebody's reply going out
+        // from the wrong address.
+        sendHeldNow()
+        ClassificationCache.flush()
+
+        if let going = account {
+            let snapshot = messages
+            Task { await MessageArchive.save(snapshot, mailbox: going.id) }
+        }
+
+        // Nothing already running may write after this point.
+        epoch &+= 1
+
+        write { $0 = [] }
+        nextPageToken = nil
+        searchResults = []
+        searchTerms = []
+        searchExplanation = nil
+        searchError = nil
+        importProgress = .idle
+        importAudit = nil
+        connectionError = nil
+
+        // Derived state describing the mailbox being left. Not the stored
+        // copies -- those belong to that mailbox and stay with it.
         readCache = nil
         repliedCache = nil
         indexCache = nil
@@ -498,7 +569,6 @@ final class MailStore {
     /// launch.
     func importRecentMail() async {
         guard isConnected else { return }
-        let stamp = epoch
 
         guard let ledger = await openLedger() else {
             // Gmail could not even be asked what is there. Nothing is marked
@@ -649,6 +719,7 @@ final class MailStore {
     /// climbed to 250 and fell back to 50 each time the flush caught up, and
     /// Gmail, asked for everything five times, started refusing.
     private func drain(_ start: ImportLedger, quietly: Bool) async {
+        let stamp = epoch
         // The system allows a little more time after the person leaves. Long
         // enough for the chunk in flight and the write behind it, so putting
         // the phone down does not undo the last half minute.
