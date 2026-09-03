@@ -80,7 +80,7 @@ struct SendBanner: View {
 
     /// How much of the window is left, 1 down to 0.
     private func remaining(_ held: MailStore.HeldSend) -> CGFloat {
-        let total = TimeInterval(MailStore.undoWindow.components.seconds)
+        let total = MailStore.undoWindow
         guard total > 0 else { return 0 }
         let left = held.sendsAt.timeIntervalSince(now)
         return CGFloat(min(max(left / total, 0), 1))

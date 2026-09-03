@@ -89,8 +89,7 @@ struct UndoSendTests {
     }
 
     @Test func theWindowIsLongEnoughToReadAndShortEnoughToTrust() {
-        let seconds = MailStore.undoWindow.components.seconds
-        #expect(seconds >= 5)
-        #expect(seconds <= 15)
+        #expect(MailStore.undoWindow >= 5)
+        #expect(MailStore.undoWindow <= 15)
     }
 }

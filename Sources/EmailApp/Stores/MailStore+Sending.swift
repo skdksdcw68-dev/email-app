@@ -30,8 +30,8 @@ extension MailStore {
         static func == (left: HeldSend, right: HeldSend) -> Bool { left.id == right.id }
     }
 
-    /// How long a message waits before it actually goes.
-    static let undoWindow: Duration = .seconds(8)
+    /// How long a message waits before it actually goes, in seconds.
+    static let undoWindow: TimeInterval = 8
 
     /// Sends after the undo window, unless it is called off.
     ///
@@ -58,7 +58,7 @@ extension MailStore {
             id: id,
             subject: subject.isEmpty ? "(No Subject)" : subject,
             recipient: address,
-            sendsAt: .now.advanced(by: Self.undoWindow)
+            sendsAt: .now.addingTimeInterval(Self.undoWindow)
         )
 
         // The work itself, kept apart from the timer so it can be run early.
@@ -79,7 +79,7 @@ extension MailStore {
         }
 
         heldTimer = Task { [weak self] in
-            try? await Task.sleep(for: Self.undoWindow)
+            try? await Task.sleep(for: .seconds(Self.undoWindow))
             guard !Task.isCancelled else { return }
             await self?.sendHeldNow()
         }
