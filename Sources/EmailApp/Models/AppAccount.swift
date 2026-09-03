@@ -30,6 +30,15 @@ struct AppAccount: Identifiable, Hashable, Codable {
     /// only field guaranteed to arrive on every subsequent sign-in.
     var externalID: String? = nil
 
+    /// What they do, in their own words. "Freelance iOS developer", "Runs a
+    /// bakery", "Second-year law student".
+    ///
+    /// Not decoration. It is the single most useful sentence about somebody
+    /// when the assistant is judging what matters in their inbox and how to
+    /// write on their behalf, and it is one line rather than the eleven
+    /// questions Auto-Reply asks. Optional: an empty one is simply not sent.
+    var occupation: String? = nil
+
     var initials: String {
         let parts = displayName.split(separator: " ").prefix(2)
         let letters = parts.compactMap(\.first).map(String.init)

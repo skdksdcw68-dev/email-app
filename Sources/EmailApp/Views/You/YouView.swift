@@ -113,9 +113,18 @@ struct YouView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(user.account?.displayName ?? "You")
                     .font(.title3.weight(.bold))
+                // What they do sits above the address, when they have said.
+                // It is the more interesting line about a person, and the
+                // one the assistant actually uses.
+                if let occupation = user.account?.occupation, !occupation.isEmpty {
+                    Text(occupation)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
                 Text(user.account?.email ?? "Not signed in")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
 

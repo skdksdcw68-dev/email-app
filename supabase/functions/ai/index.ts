@@ -790,6 +790,11 @@ function askMessages(question: string, body: Record<string, unknown>) {
   const facts: string[] = [];
   if (body.today) facts.push(`Today is ${String(body.today).slice(0, 60)}.`);
   if (body.user) facts.push(`You are talking to ${String(body.user).slice(0, 80)}.`);
+  // What they do, in their own words. One line, and the most useful thing
+  // there is for judging what matters in somebody else's inbox.
+  if (body.occupation) {
+    facts.push(`What they do: ${String(body.occupation).slice(0, 120)}.`);
+  }
   if (body.tone) facts.push(`They like replies ${String(body.tone).slice(0, 120)}.`);
   if (body.inbox) facts.push(`Their whole inbox by tag: ${String(body.inbox).slice(0, 400)}.`);
   // What they have told you to remember, oldest first, so a later correction

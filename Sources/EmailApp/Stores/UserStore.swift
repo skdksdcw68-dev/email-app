@@ -90,6 +90,16 @@ final class UserStore {
         persistAccount()
     }
 
+    /// What they do, in their own words. Cleared rather than stored empty, so
+    /// nothing downstream has to decide whether "" means anything.
+    func setOccupation(_ occupation: String) {
+        let trimmed = occupation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var updated = account else { return }
+        updated.occupation = trimmed.isEmpty ? nil : String(trimmed.prefix(80))
+        account = updated
+        persistAccount()
+    }
+
     func setTone(_ optionID: String) {
         answers[OnboardingQuestion.tone.id] = [optionID]
         persistAnswers()

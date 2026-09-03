@@ -1,13 +1,26 @@
 import SwiftUI
 import UIKit
 
-/// Renaming yourself. The email is whoever you signed in with and is not
-/// editable here, so it is shown rather than offered as a field.
+/// Who you are, as far as Maily is concerned.
+///
+/// Two fields, and only two, because only two of them change anything. The
+/// name is what replies go out under. What you do is the single most useful
+/// sentence about somebody when the assistant is deciding what matters in
+/// their inbox and how to write for them -- one line, where Auto-Reply asks
+/// eleven questions.
+///
+/// Everything below them is shown rather than offered: the email is whoever
+/// signed in, and pretending it is editable would be a field that fails.
 struct EditProfileView: View {
     @Environment(UserStore.self) private var user
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
+    @State private var occupation = ""
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         NavigationStack {
@@ -22,9 +35,22 @@ struct EditProfileView: View {
                 }
 
                 Section {
+                    TextField("Freelance iOS developer", text: $occupation, axis: .vertical)
+                        .lineLimit(1...3)
+                } header: {
+                    Text("What you do")
+                } footer: {
+                    Text("One line, in your own words. Maily uses it to judge what matters in your inbox and how to sound when it writes for you. Leave it blank and it simply won't be used.")
+                }
+
+                Section {
                     LabeledContent("Email", value: user.account?.email ?? "Not signed in")
                     if let provider = user.account?.provider {
                         LabeledContent("Signed in with", value: provider.title)
+                    }
+                    if let joined = user.account?.createdAt {
+                        LabeledContent("With Maily since",
+                                       value: joined.formatted(.dateTime.month(.wide).year()))
                     }
                 } footer: {
                     Text("Your email comes from the account you signed in with and cannot be changed here.")
@@ -40,12 +66,16 @@ struct EditProfileView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         user.setDisplayName(name)
+                        user.setOccupation(occupation)
                         dismiss()
                     }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!canSave)
                 }
             }
-            .onAppear { name = user.account?.displayName ?? "" }
+            .onAppear {
+                name = user.account?.displayName ?? ""
+                occupation = user.account?.occupation ?? ""
+            }
         }
     }
 }

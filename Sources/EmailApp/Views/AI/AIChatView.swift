@@ -620,6 +620,7 @@ struct AIChatView: View {
                     // is about mail, which is what keeps an aside cheap.
                     inbox: context.isEmpty ? nil : mail.tagSummary,
                     signedInAs: user.account?.displayName,
+                    occupation: user.account?.occupation,
                     tone: user.tonePreference,
                     memories: memory.prompt,
                     // Numbered against this hop's context, which a search may

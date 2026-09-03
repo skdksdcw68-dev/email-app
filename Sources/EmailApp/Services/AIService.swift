@@ -130,7 +130,7 @@ enum AIService {
             "tone": tone,
         ]
         if let message {
-            payload["from"] = "(message.sender.name) <(message.sender.address)>"
+            payload["from"] = "\(message.sender.name) <\(message.sender.address)>"
             payload["subject"] = message.subject
             payload["body"] = message.body
         }
@@ -281,6 +281,9 @@ enum AIService {
         history: [(role: String, content: String)] = [],
         inbox: String? = nil,
         signedInAs: String? = nil,
+        /// What they do, in their own words, when they have said. The one
+        /// line that tells the model whose inbox this is.
+        occupation: String? = nil,
         tone: String? = nil,
         memories: String? = nil,
         /// What the app has already read out of their mail: who is waiting
@@ -309,13 +312,9 @@ enum AIService {
         let digest = context.map { message in
             let opened = inFull.contains(message.id)
             return [
-                "from": "(message.sender.name) <(message.sender.address)>",
+                "from": "\(message.sender.name) <\(message.sender.address)>",
                 "date": message.fullDate,
                 "subject": message.subject,
-                // 300 says what a message is. It does not say what it asks
-                // for: the request in an email is usually in the last
-                // paragraph, after the context explaining it. So the model
-                // can name the ones it needs and get them whole.
                 "body": String(message.body.prefix(opened ? Self.openedBodyLimit : Self.digestBodyLimit)),
                 "full": opened ? "yes" : "no",
                 // Whether they have seen it. This is what stops the model
@@ -338,6 +337,7 @@ enum AIService {
         ]
         if let inbox, !inbox.isEmpty { payload["inbox"] = inbox }
         if let signedInAs, !signedInAs.isEmpty { payload["user"] = signedInAs }
+        if let occupation, !occupation.isEmpty { payload["occupation"] = occupation }
         if let tone, !tone.isEmpty { payload["tone"] = tone }
         if let memories, !memories.isEmpty { payload["memories"] = memories }
         if let facts, !facts.isEmpty { payload["facts"] = facts }
