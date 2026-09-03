@@ -83,16 +83,35 @@ enum AIUsage {
         var counts: [String: Int]
     }
 
-    nonisolated(unsafe) private static var cached: Stored?
+    /// Behind a lock, and it has to be.
+    ///
+    /// `record` is called from `AIService.call`, which is not on any actor,
+    /// and `enhanceWithAI` runs fifteen of those at once. This used to be a
+    /// `nonisolated(unsafe) static var` incremented by all fifteen with no
+    /// barrier -- which is a refcounted store to shared memory from fifteen
+    /// threads. It corrupted the heap and killed the app in an unrelated
+    /// Keychain call about a minute after launch, every time.
+    ///
+    /// Read from SwiftUI `body` as well, which is why this is a lock and not
+    /// an actor. See `Guarded`.
+    private static let state = Guarded<Stored?>(nil)
 
     /// Counted at the one place every call goes through, so nothing can be
     /// spent without appearing here.
     static func record(action: String) {
-        var stored = current()
         let kind = Kind(action: action).rawValue
-        stored.counts[kind, default: 0] += 1
-        cached = stored
-        guard let data = try? JSONEncoder().encode(stored) else { return }
+        let month = monthKey
+
+        let updated: Stored = state.withLock { held in
+            var stored = Self.loaded(held, month: month)
+            stored.counts[kind, default: 0] += 1
+            held = stored
+            return stored
+        }
+
+        // Outside the lock. Encoding and writing a plist is far too much work
+        // to do while fifteen other threads spin waiting for it.
+        guard let data = try? JSONEncoder().encode(updated) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
 
@@ -117,7 +136,7 @@ enum AIUsage {
     }
 
     static func reset() {
-        cached = nil
+        state.withLock { held in held = nil }
         UserDefaults.standard.removeObject(forKey: key)
     }
 
@@ -125,25 +144,36 @@ enum AIUsage {
     /// is what a cold launch looks like. Only the tests need it; the app gets
     /// this for free by starting.
     static func forgetInMemory() {
-        cached = nil
+        state.withLock { held in held = nil }
     }
 
     /// This month's counts, starting fresh when the month turns over. A
     /// running total since install would only ever grow, which tells nobody
     /// anything about whether this month is unusual.
+    ///
+    /// Under the lock, because this *writes* on the read path -- it fills the
+    /// cache from disk on first ask. Guarding only `record` would have left
+    /// half the race in place.
     private static func current() -> Stored {
-        let month = Self.monthKey
-        if let cached, cached.month == month { return cached }
+        let month = monthKey
+        return state.withLock { held in
+            let stored = Self.loaded(held, month: month)
+            held = stored
+            return stored
+        }
+    }
+
+    /// What is held, if it is still this month, else what is on disk, else a
+    /// fresh empty month. Pure, and called with the lock already taken.
+    private static func loaded(_ held: Stored?, month: String) -> Stored {
+        if let held, held.month == month { return held }
 
         guard let data = UserDefaults.standard.data(forKey: key),
               let stored = try? JSONDecoder().decode(Stored.self, from: data),
               stored.month == month
         else {
-            let fresh = Stored(month: month, counts: [:])
-            cached = fresh
-            return fresh
+            return Stored(month: month, counts: [:])
         }
-        cached = stored
         return stored
     }
 

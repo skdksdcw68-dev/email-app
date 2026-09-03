@@ -19,20 +19,39 @@ enum PersonPreferences {
     // out of UserDefaults each time meant hundreds of fetches and hundreds of
     // fresh Sets per draw, and again on every keystroke in the search field.
     // Held in memory and written through instead.
-    nonisolated(unsafe) private static var importantCache: Set<String>?
-    nonisolated(unsafe) private static var mutedCache: Set<String>?
-    nonisolated(unsafe) private static var overridesCache: [String: String]?
-    nonisolated(unsafe) private static var relationshipsCache: [String: String]?
+    //
+    // Behind a lock, and it is not optional. These caches fill themselves on
+    // *read*, and the reads come from two places at once: the main thread
+    // building `MailboxIndex`, and twenty-five background tasks parsing a
+    // page of Gmail, where `MessageClassifier` asks whether each sender is
+    // important or muted. Installing a `Set` buffer from twenty-six threads
+    // is the same heap corruption that killed `AIUsage`, waiting to be found.
+    private static let importantCache = Guarded<Set<String>?>(nil)
+    private static let mutedCache = Guarded<Set<String>?>(nil)
+    private static let overridesCache = Guarded<[String: String]?>(nil)
+    private static let relationshipsCache = Guarded<[String: String]?>(nil)
+
+    /// Fill-on-read, done once, under the lock.
+    private static func cached<Value>(
+        _ store: Guarded<Value?>,
+        load: () -> Value
+    ) -> Value {
+        store.withLock { held in
+            if let held { return held }
+            let loaded = load()
+            held = loaded
+            return loaded
+        }
+    }
 
     static var important: Set<String> {
         get {
-            if let importantCache { return importantCache }
-            let loaded = Set(UserDefaults.standard.stringArray(forKey: importantKey) ?? [])
-            importantCache = loaded
-            return loaded
+            cached(importantCache) {
+                Set(UserDefaults.standard.stringArray(forKey: importantKey) ?? [])
+            }
         }
         set {
-            importantCache = newValue
+            importantCache.withLock { held in held = newValue }
             UserDefaults.standard.set(Array(newValue), forKey: importantKey)
         }
     }
@@ -58,13 +77,12 @@ enum PersonPreferences {
 
     static var muted: Set<String> {
         get {
-            if let mutedCache { return mutedCache }
-            let loaded = Set(UserDefaults.standard.stringArray(forKey: mutedKey) ?? [])
-            mutedCache = loaded
-            return loaded
+            cached(mutedCache) {
+                Set(UserDefaults.standard.stringArray(forKey: mutedKey) ?? [])
+            }
         }
         set {
-            mutedCache = newValue
+            mutedCache.withLock { held in held = newValue }
             UserDefaults.standard.set(Array(newValue), forKey: mutedKey)
         }
     }
@@ -88,13 +106,12 @@ enum PersonPreferences {
 
     private static var overrides: [String: String] {
         get {
-            if let overridesCache { return overridesCache }
-            let loaded = UserDefaults.standard.dictionary(forKey: categoryKey) as? [String: String] ?? [:]
-            overridesCache = loaded
-            return loaded
+            cached(overridesCache) {
+                UserDefaults.standard.dictionary(forKey: categoryKey) as? [String: String] ?? [:]
+            }
         }
         set {
-            overridesCache = newValue
+            overridesCache.withLock { held in held = newValue }
             UserDefaults.standard.set(newValue, forKey: categoryKey)
         }
     }
@@ -123,13 +140,12 @@ enum PersonPreferences {
 
     private static var relationships: [String: String] {
         get {
-            if let relationshipsCache { return relationshipsCache }
-            let loaded = UserDefaults.standard.dictionary(forKey: relationshipKey) as? [String: String] ?? [:]
-            relationshipsCache = loaded
-            return loaded
+            cached(relationshipsCache) {
+                UserDefaults.standard.dictionary(forKey: relationshipKey) as? [String: String] ?? [:]
+            }
         }
         set {
-            relationshipsCache = newValue
+            relationshipsCache.withLock { held in held = newValue }
             UserDefaults.standard.set(newValue, forKey: relationshipKey)
         }
     }
@@ -162,10 +178,10 @@ enum PersonPreferences {
     }
 
     static func clearAll() {
-        importantCache = []
-        mutedCache = []
-        overridesCache = [:]
-        relationshipsCache = [:]
+        importantCache.withLock { held in held = [] }
+        mutedCache.withLock { held in held = [] }
+        overridesCache.withLock { held in held = [:] }
+        relationshipsCache.withLock { held in held = [:] }
         UserDefaults.standard.removeObject(forKey: importantKey)
         UserDefaults.standard.removeObject(forKey: mutedKey)
         UserDefaults.standard.removeObject(forKey: categoryKey)

@@ -9,6 +9,13 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
+    # Warnings, not errors, in Swift 5 mode -- so this cannot break the build.
+    #
+    # It is here because it was off, and a data race in AIUsage corrupted the
+    # heap and killed the app about a minute after every launch. The compiler
+    # had every fact it needed to say so and was not being asked. Treat what
+    # it reports as a list of places that have not been thought about yet.
+    SWIFT_STRICT_CONCURRENCY: complete
     VERSIONING_SYSTEM: apple-generic
     CURRENT_PROJECT_VERSION: 1
     MARKETING_VERSION: "1.0"

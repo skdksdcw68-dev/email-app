@@ -131,14 +131,29 @@ enum Backend {
 
     // MARK: - Coding
 
+    // A fresh one per call, rather than four shared instances.
+    //
+    // These are reached from every `Task.detached` in the app -- analytics,
+    // chat sync, search sync, memory sync, push registration -- so several
+    // threads can be inside one at once. Neither `JSONDecoder` nor
+    // `ISO8601DateFormatter` is documented thread-safe, and the failure mode
+    // is not an error, it is a corrupted heap detected somewhere unrelated
+    // half a minute later. `AIUsage` cost a crash learning that.
+    //
+    // Making them computed costs an allocation per request, next to a network
+    // round trip. That is not a trade worth thinking about.
+
     /// Postgres hands back `timestamptz` as ISO 8601, sometimes with
     /// fractional seconds and sometimes without. `.iso8601` alone rejects the
     /// first kind, which is the kind Supabase actually sends.
-    static let decoder: JSONDecoder = {
+    static var decoder: JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let text = try decoder.singleValueContainer().decode(String.self)
-            if let date = fractional.date(from: text) ?? plain.date(from: text) {
+            // Built here, inside the closure, so each decode has its own.
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text) {
                 return date
             }
             throw DecodingError.dataCorruptedError(
@@ -147,19 +162,11 @@ enum Backend {
             )
         }
         return decoder
-    }()
+    }
 
-    static let encoder: JSONEncoder = {
+    static var encoder: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return encoder
-    }()
-
-    private static let fractional: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    private static let plain = ISO8601DateFormatter()
+    }
 }
