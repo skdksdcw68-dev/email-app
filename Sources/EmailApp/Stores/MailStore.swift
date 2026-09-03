@@ -782,12 +782,19 @@ final class MailStore {
                 .filter { $0.count > 3 && !Self.stopWords.contains($0) }
         )
 
+        // What those words nearly mean. "The laptop" scored zero against an
+        // email that says MacBook throughout, and the message was right there
+        // on the phone. Worth less than a word actually typed, so an email
+        // that says laptop still wins. On device only -- see `SemanticIndex`.
+        let nearby = SemanticIndex.expand(words)
+
         let scored = messages.map { message -> (message: Message, keyword: Int, total: Int) in
             var keyword = 0
 
             if !words.isEmpty {
                 let haystack = "\(message.subject) \(message.sender.name) \(message.body.prefix(400))".lowercased()
                 keyword = words.filter(haystack.contains).count * 10
+                keyword += nearby.filter(haystack.contains).count * 4
             }
 
             // Recency and priority break ties, and carry the whole thing for a
@@ -813,8 +820,30 @@ final class MailStore {
             return []
         }
 
-        let best = scored
+        // A shortlist by words, then a re-rank by meaning.
+        //
+        // The word pass is what makes this affordable -- embedding is per
+        // message work, and a mailbox is thousands of them. So the cheap
+        // score picks the hundred worth thinking about and the sentence
+        // model orders those. It is what catches "when am I meeting the
+        // accountant" against "confirming Thursday 2pm with Grant Thornton",
+        // where not one word is shared.
+        let promising = scored
             .filter { $0.total > 0 }
+            .sorted { $0.total > $1.total }
+            .prefix(SemanticIndex.shortlist)
+
+        let meaning = SemanticIndex.similarity(of: promising.map(\.message), to: query)
+
+        let best = promising
+            .map { candidate -> (message: Message, total: Double) in
+                // Scaled to sit alongside the keyword score rather than
+                // above it. A word the person actually typed is still the
+                // strongest signal there is; this breaks ties and rescues
+                // the message that says the same thing differently.
+                let closeness = meaning[candidate.message.id] ?? 0
+                return (candidate.message, Double(candidate.total) + closeness * 25)
+            }
             .sorted { $0.total > $1.total }
             .prefix(limit)
             .map(\.message)
@@ -1095,6 +1124,10 @@ final class MailStore {
         connectionError = nil
         persistAccount()
         ClassificationCache.clear()
+        // Vectors are derived from message content, so they go with it. A
+        // signed-out mailbox leaves nothing behind, not even as numbers.
+        SemanticIndex.forgetEverything()
+        SnoozeStore.clearAll()
     }
 
     // MARK: - Reading

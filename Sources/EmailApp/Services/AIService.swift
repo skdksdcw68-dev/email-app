@@ -303,6 +303,11 @@ enum AIService {
         /// Whether a search has already run for this question. Changes the
         /// advice: a second guess should not repeat the first one's words.
         hasSearched: Bool = false,
+        /// What this conversation has already tried, who it is about, and
+        /// what is still unanswered. The transcript alone does not carry any
+        /// of that -- the SEARCH lines are stripped before the reader sees
+        /// them, so they are never in the history that comes back.
+        state: String? = nil,
         onDelta: @MainActor (String) -> Void
     ) async throws {
         // Enough to know which message is which, and no more. Depth is on
@@ -342,6 +347,7 @@ enum AIService {
         if let memories, !memories.isEmpty { payload["memories"] = memories }
         if let facts, !facts.isEmpty { payload["facts"] = facts }
         if let people, !people.isEmpty { payload["people"] = people }
+        if let state, !state.isEmpty { payload["state"] = state }
         payload["hops_left"] = max(0, hopsLeft)
         payload["searched"] = hasSearched
 

@@ -821,6 +821,19 @@ function askMessages(question: string, body: Record<string, unknown>) {
       `What you know about the people they asked about:\n${String(body.people).slice(0, 2500)}`,
     );
   }
+  // Where this conversation has got to: the queries already put to Gmail,
+  // who it is about, what is still unanswered.
+  //
+  // None of this is in the transcript. The SEARCH lines are stripped before
+  // the reader ever sees them, so they never come back in the history -- and
+  // without this the model happily repeats a search that just found nothing
+  // when it is asked to try again. Last in the preamble, because it is about
+  // right now rather than about them.
+  if (body.state) {
+    facts.push(
+      `Where this conversation has got to:\n${String(body.state).slice(0, 1200)}`,
+    );
+  }
   const preamble = facts.length ? `${facts.join("\n")}\n\n` : "";
 
   // The model may ask to look further rather than answer.

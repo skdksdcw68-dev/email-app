@@ -57,6 +57,10 @@ struct AIChatView: View {
     @State private var offered: [Message] = []
     /// A draft request waiting on the answer to "which one?".
     @State private var pendingChoice: DraftRequest?
+    /// What this conversation is about: what has been searched for, who it
+    /// concerns, what is still unanswered. See `ChatState` -- without it the
+    /// chat carries a transcript rather than a memory.
+    @State private var state = ChatState.fresh
     /// The model call in flight, so the stop button has something to stop.
     @State private var work: Task<Void, Never>?
     @State private var editing: EditingDraft?
@@ -312,6 +316,10 @@ struct AIChatView: View {
         currentID = conversation.id
         offered = []
         pendingChoice = nil
+        // A reopened conversation starts without one. What was tried is
+        // not saved with the turns, and inventing it from the text would
+        // be a guess presented as a record.
+        state = .fresh
     }
 
     /// Writes what is on screen to history, minus anything still pending.
@@ -343,6 +351,7 @@ struct AIChatView: View {
             turns = []
             offered = []
             pendingChoice = nil
+            state = .fresh
         }
         currentID = nil
     }
@@ -568,7 +577,16 @@ struct AIChatView: View {
         // them. "What is happening with Sara" used to mean handing over a
         // dozen of Sara's emails and hoping; the app already knows the
         // answer and can just say it.
-        let standings = context.isEmpty ? [] : mail.peopleMentioned(in: question)
+        //
+        // When the question names nobody, the conversation's own people
+        // stand in. "And what did she say about the invoice?" used to lose
+        // Sara entirely, because who a question is about was worked out from
+        // that question's own words and nothing else.
+        var standings = context.isEmpty ? [] : mail.peopleMentioned(in: question)
+        if standings.isEmpty && !context.isEmpty && !state.people.isEmpty {
+            standings = state.people.flatMap { mail.peopleMentioned(in: $0, limit: 1) }
+        }
+        state.asking(question, about: standings.map(\.person.name))
         var pinned = Set<Message.ID>()
         if !facts.isEmpty {
             let wanted = Set(facts.map(\.messageID))
@@ -629,7 +647,10 @@ struct AIChatView: View {
                     inFull: opened,
                     people: standings.map { $0.described() }.joined(separator: "\n\n"),
                     hopsLeft: hopsLeft,
-                    hasSearched: searchedFor != nil
+                    hasSearched: searchedFor != nil,
+                    // What this conversation has already tried, so "try
+                    // again" is a different attempt rather than the same one.
+                    state: state.briefing()
                 ) { fragment in
                     appendDelta(pendingID, fragment)
                 }
@@ -658,6 +679,13 @@ struct AIChatView: View {
 
                 let report = await mail.investigate(request)
                 record(pendingID, report.steps)
+
+                // Every query this conversation has put to Gmail, and whether
+                // it was worth putting. The empty ones are the point: the
+                // next hop is told not to try those words again.
+                for query in request.queries {
+                    state.searched(query, found: report.found.count)
+                }
 
                 searchedFor = report.answered ?? request.queries.first
                 var seen = Set<Message.ID>(found.map(\.id))
@@ -689,6 +717,15 @@ struct AIChatView: View {
                 begin(pendingID, found.isEmpty ? .rethinking() : .reading(found))
 
                 hopsLeft -= 1
+            }
+
+            // An aside is not what the conversation is about. "What can you
+            // do" should not become the thing every later question is
+            // answered in terms of.
+            if context.isEmpty {
+                state.setAside()
+            } else {
+                state.answered(found: found.count, searched: searchedFor != nil)
             }
 
             finish(pendingID, context: context, searchNote: searchedFor, found: found)
