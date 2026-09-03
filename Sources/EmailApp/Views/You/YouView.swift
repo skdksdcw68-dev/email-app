@@ -83,14 +83,40 @@ struct YouView: View {
                         }
                         .padding(.vertical, 2)
                     }
+
+                    // What is left of the allowance, for a plan that has no
+                    // allowance: the honest version is what has been used,
+                    // because the ceiling is on somebody else's dashboard.
+                    NavigationLink { AIUsageView() } label: {
+                        row("Usage this month",
+                            AIUsage.total == 0 ? "Nothing yet" : "\(AIUsage.total) AI requests",
+                            "gauge.with.dots.needle.33percent")
+                    }
+
+                    Link(destination: URL(string: "https://platform.openai.com/settings/organization/billing")!) {
+                        row("Manage billing", "Your own OpenAI account", "creditcard.fill")
+                    }
                 } header: {
                     Text("Plan")
+                } footer: {
+                    Text("Maily takes no payment. What the AI costs is between you and your provider.")
                 }
 
                 Section {
-                    NavigationLink { AppSettingsView() } label: {
-                        row("Settings", "gearshape.fill")
+                    NavigationLink { PrivacySettingsView() } label: {
+                        row("Privacy & Security", "lock.shield.fill")
                     }
+                    NavigationLink { GmailAccountsView() } label: {
+                        row("Accounts & Sync", "arrow.triangle.2.circlepath")
+                    }
+                    NavigationLink { AppSettingsView() } label: {
+                        row("App settings", "gearshape.fill")
+                    }
+                    NavigationLink { SupportView() } label: {
+                        row("Help & Support", "questionmark.circle.fill")
+                    }
+                } header: {
+                    Text("Settings")
                 }
             }
             .navigationTitle("You")
@@ -161,12 +187,28 @@ struct YouView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // One mailbox at a time is what the app actually does, so this
+            // connects when there is nothing connected and says so plainly
+            // when there is. A row promising a second account would be a
+            // promise the app cannot keep.
             NavigationLink { GmailAccountsView() } label: {
-                Text("Manage all accounts")
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Add account")
+                        .font(.subheadline)
+                    Text(mail.isConnected
+                         ? "One mailbox at a time. Swap it from here."
+                         : "Connect your Gmail")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            NavigationLink { GmailAccountsView() } label: {
+                Text("Manage accounts")
                     .font(.subheadline)
             }
         } header: {
-            Text("Gmail accounts")
+            Text("Accounts")
         }
     }
 
@@ -229,6 +271,27 @@ struct YouView: View {
         let waiting = autoReplyQueue.waiting.count
         if waiting > 0 { return waiting == 1 ? "1 reply waiting" : "\(waiting) replies waiting" }
         return "\(config.handledCount) kinds of mail handled"
+    }
+
+    /// The same row with a second line under it, for the handful that carry
+    /// a live number or a caveat worth reading before tapping.
+    private func row(_ title: String, _ detail: String, _ symbol: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol)
+                .font(.body)
+                .foregroundStyle(.tint)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 1)
     }
 
     private func row(_ title: String, _ symbol: String) -> some View {
