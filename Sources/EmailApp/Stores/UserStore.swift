@@ -261,3 +261,18 @@ extension UserDefaults {
     /// onboarding state.
     static let previews = UserDefaults(suiteName: "maily.previews") ?? .standard
 }
+
+extension UserStore {
+    /// The tone they chose, as the one word a settings row can carry. The
+    /// full instruction is what the model reads; this is what a person does.
+    var writingToneTitle: String {
+        switch selections(for: .tone).first {
+        case "professional": "Professional"
+        case "warm": "Warm"
+        case "direct": "Direct"
+        case "thorough": "Thorough"
+        case "casual": "Casual"
+        default: "Natural"
+        }
+    }
+}

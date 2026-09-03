@@ -544,3 +544,16 @@ extension AutoReplyConfig {
         return out.filter { !$0.value.isEmpty }
     }
 }
+
+extension AutoReplyConfig.Escalation {
+    /// One or two words, for a settings row where the full sentence would
+    /// wrap and push the label off the left edge.
+    var shortTitle: String {
+        switch self {
+        case .draft: "Draft it"
+        case .approve: "Ask me"
+        case .askSender: "Ask them"
+        case .notify: "Notify me"
+        }
+    }
+}
