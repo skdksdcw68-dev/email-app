@@ -75,6 +75,10 @@ enum AuthService {
         let email: String
         let displayName: String
         let accessToken: String
+        /// The long-lived half. Kept in the Keychain under the mailbox id, so
+        /// this app can refresh a mailbox the SDK is no longer holding -- see
+        /// `TokenBroker` for why that matters.
+        let refreshToken: String?
     }
 
     static func connectGmail() async throws -> GmailSession {
@@ -98,7 +102,8 @@ enum AuthService {
         return GmailSession(
             email: email,
             displayName: result.user.profile?.name ?? email,
-            accessToken: result.user.accessToken.tokenString
+            accessToken: result.user.accessToken.tokenString,
+            refreshToken: result.user.refreshToken.tokenString
         )
     }
 
@@ -119,18 +124,40 @@ enum AuthService {
         return GmailSession(
             email: email,
             displayName: user.profile?.name ?? email,
-            accessToken: user.accessToken.tokenString
+            accessToken: user.accessToken.tokenString,
+            refreshToken: user.refreshToken.tokenString
         )
     }
 
-    /// A fresh access token for an already-connected mailbox. Google's tokens
-    /// are short-lived; the SDK refreshes silently when one is close to expiry.
-    static func currentGmailAccessToken() async throws -> String {
-        guard let user = GIDSignIn.sharedInstance.currentUser else {
-            throw AuthError.notConnected
-        }
-        try await user.refreshTokensIfNeeded()
-        return user.accessToken.tokenString
+    /// Takes over a credential the SDK is currently holding.
+    ///
+    /// One job, once per mailbox: an install that connected under a build
+    /// where GoogleSignIn kept the credential has nothing in the Keychain, and
+    /// `TokenBroker` would otherwise conclude the mailbox needs connecting
+    /// again. **Without this the upgrade signs everybody out.**
+    ///
+    /// Only answers for the account the SDK actually holds. `currentUser` is
+    /// one session and it may not be the mailbox being asked about, and
+    /// handing back another account's token would read the wrong mailbox --
+    /// silently, and with entirely plausible-looking mail.
+    struct AdoptedCredential {
+        let accessToken: String
+        let refreshToken: String
+        let expires: Date
+    }
+
+    static func adoptSDKCredential(for account: MailAccount) async -> AdoptedCredential? {
+        guard let user = GIDSignIn.sharedInstance.currentUser,
+              let email = user.profile?.email,
+              MailboxID.canonical(email) == account.address
+        else { return nil }
+
+        try? await user.refreshTokensIfNeeded()
+        return AdoptedCredential(
+            accessToken: user.accessToken.tokenString,
+            refreshToken: user.refreshToken.tokenString,
+            expires: user.accessToken.expirationDate ?? .now.addingTimeInterval(3000)
+        )
     }
 
     // MARK: - Email

@@ -41,7 +41,7 @@ extension MailStore {
         }
 
         do {
-            let token = try await AuthService.currentGmailAccessToken()
+            let token = try await accessToken()
             let changes = try await GmailService.changes(since: cursor, accessToken: token)
 
             if changes.isExpired {
@@ -83,7 +83,7 @@ extension MailStore {
     /// to start from.
     func rememberCursor() async {
         guard isConnected else { return }
-        guard let token = try? await AuthService.currentGmailAccessToken(),
+        guard let token = try? await accessToken(),
               let id = try? await GmailService.currentHistoryID(accessToken: token)
         else { return }
         syncCursor = id

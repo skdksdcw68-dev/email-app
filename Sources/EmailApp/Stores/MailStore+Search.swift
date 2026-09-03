@@ -62,7 +62,7 @@ extension MailStore {
         }
 
         do {
-            let token = try await AuthService.currentGmailAccessToken()
+            let token = try await accessToken()
             let page = try await GmailService.fetchInbox(
                 accessToken: token,
                 limit: Self.searchPageSize,

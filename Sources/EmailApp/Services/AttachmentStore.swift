@@ -105,7 +105,10 @@ final class AttachmentStore {
 
     /// Fetches it if it is not already here, and hands back the file. Nil
     /// means it failed, and `failure(for:)` says why.
-    func file(for attachment: Attachment) async -> URL? {
+    /// `account` rather than "whichever mailbox the SDK is holding". An
+    /// attachment belongs to one mailbox, and fetching it with another
+    /// mailbox's token asks Gmail for a message id that account does not have.
+    func file(for attachment: Attachment, in account: MailAccount?) async -> URL? {
         let destination = location(of: attachment)
         if FileManager.default.fileExists(atPath: destination.path) { return destination }
 
@@ -115,7 +118,8 @@ final class AttachmentStore {
         defer { inFlight.remove(attachment.id) }
 
         do {
-            let token = try await AuthService.currentGmailAccessToken()
+            guard let account else { throw AuthService.AuthError.notConnected }
+            let token = try await TokenBroker.shared.accessToken(for: account)
             let data = try await GmailService.attachmentData(
                 messageID: attachment.messageRemoteID,
                 attachmentID: attachment.id,

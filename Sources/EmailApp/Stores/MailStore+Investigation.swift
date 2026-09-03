@@ -76,7 +76,7 @@ extension MailStore {
         }
 
         // Layer two: the account. Years deeper than the phone.
-        guard isConnected, let token = try? await AuthService.currentGmailAccessToken() else {
+        guard isConnected, let token = try? await accessToken() else {
             report.found = rank(pool, against: hypotheses, limit: limit)
             return report
         }
@@ -162,7 +162,7 @@ extension MailStore {
 
     private func earliest(_ queries: [String]) async -> Investigation {
         var report = Investigation()
-        guard isConnected, let token = try? await AuthService.currentGmailAccessToken() else {
+        guard isConnected, let token = try? await accessToken() else {
             return report
         }
 

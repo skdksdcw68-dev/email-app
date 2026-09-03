@@ -224,6 +224,31 @@ final class MailStore {
         }
     }
 
+    /// A token for the mailbox in front of you.
+    ///
+    /// The one place the store asks. It used to be a parameterless call into
+    /// the Google SDK, which answered for whichever single account that SDK
+    /// happened to be holding -- fine with one mailbox, and quietly the wrong
+    /// mailbox with two.
+    ///
+    /// A grant that has ended is recorded on the account rather than thrown
+    /// away, so the account list can offer to sign in again. The old failure
+    /// was an inbox that simply stopped filling with no explanation anywhere.
+    func accessToken() async throws -> String {
+        guard let account else { throw AuthService.AuthError.notConnected }
+        do {
+            return try await TokenBroker.shared.accessToken(for: account)
+        } catch let error as TokenError {
+            if error.needsReauth {
+                registry.update(account.id) {
+                    $0.state = .needsReauth(reason: error.errorDescription ?? "Sign in again.")
+                }
+                self.account = registry.account(account.id)
+            }
+            throw error
+        }
+    }
+
     /// Tells everything scoped which mailbox it is looking at.
     ///
     /// **Called at launch, before anything reads a file.** The file-backed
@@ -270,6 +295,13 @@ final class MailStore {
             }
             account = nil
             return
+        }
+
+        // Google rotates refresh tokens, so take whatever came back rather
+        // than trusting what was stored months ago.
+        let restoredID = MailboxID.derive(provider: .gmail, address: session.email)
+        if let refresh = session.refreshToken {
+            Keychain.storeQuietly(refresh, .refreshToken, for: restoredID)
         }
 
         // Update the record, do not build a new one. This used to construct a
@@ -346,6 +378,13 @@ final class MailStore {
                 tint: registry.nextTint,
                 connectedAt: .now
             )
+            // The long-lived half, kept where this app can reach it. Google's
+            // SDK holds exactly one session, so a second mailbox would lose
+            // the first the moment it signed in -- see `TokenBroker`.
+            if let refresh = session.refreshToken {
+                Keychain.storeQuietly(refresh, .refreshToken, for: connected.id)
+            }
+
             account = connected
             registry.upsert(connected)
             registry.setActive(connected.id)
@@ -372,7 +411,7 @@ final class MailStore {
         defer { isRefreshing = false }
 
         do {
-            let token = try await AuthService.currentGmailAccessToken()
+            let token = try await accessToken()
             let page = try await GmailService.fetchInbox(accessToken: token, limit: Self.pageSize)
             merge(page.messages)
             nextPageToken = page.nextPageToken
@@ -465,7 +504,7 @@ final class MailStore {
         if !force, let last = lastVerifiedAt,
            Date.now.timeIntervalSince(last) < Self.verifyInterval { return }
 
-        guard let token = try? await AuthService.currentGmailAccessToken() else { return }
+        guard let token = try? await accessToken() else { return }
         guard let ids = await Self.retrying({
             try await GmailService.allMessageIDs(
                 matching: GmailService.importWindow, accessToken: token
@@ -526,7 +565,7 @@ final class MailStore {
         }
 
         importProgress = .counting
-        guard let token = try? await AuthService.currentGmailAccessToken() else { return nil }
+        guard let token = try? await accessToken() else { return nil }
 
         guard let ids = await Self.retrying({
             try await GmailService.allMessageIDs(
@@ -581,7 +620,7 @@ final class MailStore {
             // its turn, so stop rather than spin.
             if chunk.allSatisfy(refused.contains) { break }
 
-            guard let token = try? await AuthService.currentGmailAccessToken() else { break }
+            guard let token = try? await accessToken() else { break }
 
             let fetched = await Self.retrying({
                 try await GmailService.messages(ids: chunk, accessToken: token)
@@ -768,7 +807,7 @@ final class MailStore {
         defer { isLoadingMore = false }
 
         do {
-            let accessToken = try await AuthService.currentGmailAccessToken()
+            let accessToken = try await accessToken()
             let page = try await GmailService.fetchInbox(
                 accessToken: accessToken, limit: Self.pageSize, pageToken: token
             )
@@ -1189,6 +1228,19 @@ final class MailStore {
     func disconnect() {
         guard let going = account else { return }
 
+        // Tell Google to stop, then end the grant. That order is not
+        // negotiable: revoking first makes the stop call impossible, which is
+        // how Gmail ends up publishing notices for a mailbox the app dropped
+        // for the next seven days. `stopWatching` existed for this and was
+        // never once called.
+        Task {
+            if going.canPush,
+               let token = try? await TokenBroker.shared.accessToken(for: going) {
+                try? await GmailService.stopWatching(accessToken: token)
+            }
+            await TokenBroker.shared.revoke(going)
+        }
+
         // Everything this mailbox holds, in its own suite and its own folder.
         // Cleared before the record goes, because the clearing is scoped to
         // the record.
@@ -1444,7 +1496,7 @@ final class MailStore {
         guard let account else { throw SendError.notConnected }
         try checkSize(of: attachments)
 
-        let token = try await AuthService.currentGmailAccessToken()
+        let token = try await accessToken()
         let envelope = MIMEBuilder.Envelope(
             from: MIMEBuilder.address(name: account.displayName, email: account.address),
             to: address,
@@ -1508,7 +1560,7 @@ final class MailStore {
         guard let account else { throw SendError.notConnected }
         try checkSize(of: attachments)
 
-        let token = try await AuthService.currentGmailAccessToken()
+        let token = try await accessToken()
         let envelope = MIMEBuilder.Envelope(
             from: MIMEBuilder.address(name: account.displayName, email: account.address),
             to: address,
@@ -1576,7 +1628,7 @@ final class MailStore {
         write { $0.removeAll { $0.id == id } }
 
         do {
-            let token = try await AuthService.currentGmailAccessToken()
+            let token = try await accessToken()
             guard let draftID = try await draftID(of: message, token: token) else { return }
             try await GmailService.deleteDraft(accessToken: token, id: draftID)
         } catch {

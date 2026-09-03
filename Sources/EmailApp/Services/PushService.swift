@@ -72,9 +72,9 @@ final class PushService: NSObject {
     /// Watching starts even if they decline the alerts: a silent push still
     /// wakes the app and brings the mail in, which is worth having on its own.
     /// Only the banner needs permission.
-    func enable(topic: String) async {
+    func enable(topic: String, for account: MailAccount?) async {
         await requestPermission()
-        await startWatching(topic: topic)
+        await startWatching(topic: topic, for: account)
     }
 
     func refreshAuthorization() async {
@@ -142,10 +142,10 @@ final class PushService: NSObject {
     ///
     /// Safe to call on every launch: Gmail treats a repeat call as a renewal
     /// rather than an error, and the seven day expiry is the whole reason to.
-    func startWatching(topic: String) async {
-        guard !topic.isEmpty else { return }
+    func startWatching(topic: String, for account: MailAccount?) async {
+        guard !topic.isEmpty, let account, account.canPush else { return }
         do {
-            let accessToken = try await AuthService.currentGmailAccessToken()
+            let accessToken = try await TokenBroker.shared.accessToken(for: account)
             try await GmailService.watch(topic: topic, accessToken: accessToken)
         } catch {
             // Not surfaced. Notifications quietly not starting is bad, but a

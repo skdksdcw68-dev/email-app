@@ -159,7 +159,7 @@ struct NotificationSettingsView: View {
             if !push.isAuthorized {
                 Section {
                     Button("Turn on notifications") {
-                        Task { await push.enable(topic: PushService.topic) }
+                        Task { await push.enable(topic: PushService.topic, for: mail.account) }
                     }
                     Button("Open iOS Settings") {
                         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }

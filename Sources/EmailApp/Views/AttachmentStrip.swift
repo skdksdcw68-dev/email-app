@@ -14,6 +14,7 @@ struct AttachmentStrip: View {
     let attachments: [Attachment]
 
     @Environment(AttachmentStore.self) private var store
+    @Environment(MailStore.self) private var mail
 
     @State private var previewing: URL?
 
@@ -101,7 +102,7 @@ struct AttachmentStrip: View {
 
     private func open(_ attachment: Attachment) {
         Task {
-            if let url = await store.file(for: attachment) {
+            if let url = await store.file(for: attachment, in: mail.account) {
                 previewing = url
             }
         }
