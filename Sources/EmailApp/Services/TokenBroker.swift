@@ -21,7 +21,7 @@ actor TokenBroker {
     static let shared = TokenBroker()
 
     private struct Token {
-        let value: String
+        let string: String
         let expires: Date
     }
 
@@ -44,11 +44,11 @@ actor TokenBroker {
 
     func accessToken(for account: MailAccount) async throws -> String {
         if let held = cache[account.id], held.expires > Date.now.addingTimeInterval(Self.margin) {
-            return held.value
+            return held.string
         }
 
         if let running = inFlight[account.id] {
-            return try await running.value
+            return try await running.value.string
         }
 
         let task = Task<Token, Error> { try await Self.obtain(for: account) }
@@ -58,7 +58,7 @@ actor TokenBroker {
             let fresh = try await task.value
             inFlight[account.id] = nil
             cache[account.id] = fresh
-            return fresh.value
+            return fresh.string
         } catch {
             inFlight[account.id] = nil
             throw error
@@ -114,7 +114,7 @@ actor TokenBroker {
             throw TokenError.noCredential
         }
         Keychain.storeQuietly(adopted.refreshToken, .refreshToken, for: account.id)
-        return Token(value: adopted.accessToken, expires: adopted.expires)
+        return Token(string: adopted.accessToken, expires: adopted.expires)
     }
 
     /// The refresh grant. An installed app has no client secret, so this is a
@@ -153,7 +153,7 @@ actor TokenBroker {
             throw TokenError.provider("no access_token in the reply")
         }
         let seconds = payload["expires_in"] as? Double ?? 3000
-        return Token(value: token, expires: .now.addingTimeInterval(seconds))
+        return Token(string: token, expires: .now.addingTimeInterval(seconds))
     }
 }
 
