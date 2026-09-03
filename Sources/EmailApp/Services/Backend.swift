@@ -45,12 +45,27 @@ enum Backend {
         )
     }
 
-    /// Everything of this person's, in one table. Used when they disconnect:
-    /// what the phone forgets, the server forgets too.
+    /// Everything of this person's, in one table.
+    ///
+    /// Only for signing out of Maily altogether. Removing *a mailbox* must
+    /// use `deleteAll(_:mailbox:)` -- this used to be called for that, which
+    /// meant disconnecting one account wiped every conversation and every
+    /// saved search the person had, on every device.
     static func deleteAll(_ table: String) async throws {
         let id = try await userID()
         _ = try await send(
             "DELETE", table, query: "user_id=eq.\(id.uuidString.lowercased())",
+            body: nil, prefer: "return=minimal"
+        )
+    }
+
+    /// Everything belonging to one mailbox. What the phone forgets when a
+    /// mailbox goes, the server forgets too -- and nothing else does.
+    static func deleteAll(_ table: String, mailbox: MailboxID) async throws {
+        let id = try await userID()
+        _ = try await send(
+            "DELETE", table,
+            query: "user_id=eq.\(id.uuidString.lowercased())&mailbox_id=eq.\(mailbox.rawValue)",
             body: nil, prefer: "return=minimal"
         )
     }

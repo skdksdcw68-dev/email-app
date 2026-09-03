@@ -161,10 +161,18 @@ final class ChatHistory {
     func clearAll() {
         conversations = []
         try? FileManager.default.removeItem(at: fileURL)
-        // What the phone forgets, the server forgets. Disconnecting a mailbox
-        // has always wiped the local file; leaving the synced copy behind
-        // would make that promise a lie.
-        Task.detached(priority: .background) { try? await Backend.deleteAll("chats") }
+
+        // What the phone forgets, the server forgets. Scoped to this mailbox
+        // when there is one: an unqualified delete here meant removing one
+        // account wiped every conversation the person had, on every device.
+        let mailbox = boundMailbox
+        Task.detached(priority: .background) {
+            if let mailbox {
+                try? await Backend.deleteAll("chats", mailbox: mailbox)
+            } else {
+                try? await Backend.deleteAll("chats")
+            }
+        }
     }
 
     // MARK: - Sync
@@ -178,6 +186,9 @@ final class ChatHistory {
     private struct Row: Codable {
         var id: UUID
         var user_id: UUID
+        /// Which mailbox it came out of. Nil for rows written before
+        /// mailboxes had names.
+        var mailbox_id: String?
         var title: String
         var turns: [ChatMessage]
         var created_at: Date
@@ -186,11 +197,13 @@ final class ChatHistory {
 
     private func push(_ conversation: Conversation) {
         guard AppSettings.syncsChats else { return }
+        let mailbox = boundMailbox?.rawValue
         Task.detached(priority: .background) {
             guard let userID = try? await Backend.userID() else { return }
             let row = Row(
                 id: conversation.id,
                 user_id: userID,
+                mailbox_id: mailbox,
                 title: conversation.title,
                 turns: conversation.turns,
                 created_at: conversation.createdAt,

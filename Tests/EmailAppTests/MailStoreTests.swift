@@ -5,7 +5,7 @@ import XCTest
 final class MailStoreTests: XCTestCase {
 
     private func makeStore() -> MailStore {
-        MailStore(messages: [
+        MailStore(registry: .throwaway(), messages: [
             Message(sender: .me, recipients: [], subject: "One",
                     body: "hello world", date: .now, isRead: false, mailbox: .inbox,
                     tags: [.urgent, .needsReply]),
@@ -97,7 +97,7 @@ final class MailStoreTests: XCTestCase {
     // MARK: - Connection
 
     func testStartsDisconnectedAndEmpty() {
-        let store = MailStore()
+        let store = MailStore(registry: .throwaway())
         XCTAssertFalse(store.isConnected)
         XCTAssertTrue(store.messages.isEmpty)
     }
@@ -128,7 +128,7 @@ final class MailStoreTests: XCTestCase {
     func testRefreshDoesNothingWhenNoMailboxIsConnected() async {
         // Guarded by `isConnected`, so it returns immediately and never
         // reaches the network.
-        let store = MailStore()
+        let store = MailStore(registry: .throwaway())
         await store.refresh()
         XCTAssertFalse(store.isRefreshing)
         XCTAssertTrue(store.messages.isEmpty)
@@ -254,7 +254,7 @@ final class MailStoreTests: XCTestCase {
         // "What was the last email I got" is a question about order. Ranking
         // by relevance answered it with whatever was most urgent and left the
         // newest message out of the digest entirely.
-        let store = MailStore(messages: [
+        let store = MailStore(registry: .throwaway(), messages: [
             Message(sender: .me, recipients: [], subject: "Newest", body: "nothing special",
                     date: .now, mailbox: .inbox, tags: [.noReplyNeeded]),
             Message(sender: .me, recipients: [], subject: "Older but urgent", body: "urgent thing",
@@ -266,7 +266,7 @@ final class MailStoreTests: XCTestCase {
     }
 
     func testTheDigestIsOrderedNewestFirst() {
-        let store = MailStore(messages: [
+        let store = MailStore(registry: .throwaway(), messages: [
             Message(sender: .me, recipients: [], subject: "Old", body: "urgent",
                     date: .now.addingTimeInterval(-86_400), mailbox: .inbox, tags: [.urgent]),
             Message(sender: .me, recipients: [], subject: "New", body: "quiet",

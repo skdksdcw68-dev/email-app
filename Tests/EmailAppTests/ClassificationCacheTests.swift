@@ -51,10 +51,10 @@ final class ClassificationCacheTests: XCTestCase {
 
     func testStoringDoesNotWriteUntilItIsFlushed() {
         ClassificationCache.store(classification("Held"), for: "m1")
-        XCTAssertNil(UserDefaults.standard.data(forKey: "ai.classifications"))
+        XCTAssertNil(MailboxScope.defaults.data(forKey: "ai.classifications"))
 
         ClassificationCache.flush()
-        XCTAssertNotNil(UserDefaults.standard.data(forKey: "ai.classifications"))
+        XCTAssertNotNil(MailboxScope.defaults.data(forKey: "ai.classifications"))
     }
 
     func testAFlushedEntryComesBackOnTheNextLaunch() {
@@ -81,10 +81,10 @@ final class ClassificationCacheTests: XCTestCase {
     func testFlushingTwiceIsNotTwoWrites() {
         ClassificationCache.store(classification("One"), for: "m1")
         ClassificationCache.flush()
-        let first = UserDefaults.standard.data(forKey: "ai.classifications")
+        let first = MailboxScope.defaults.data(forKey: "ai.classifications")
 
         ClassificationCache.flush()
-        XCTAssertEqual(UserDefaults.standard.data(forKey: "ai.classifications"), first)
+        XCTAssertEqual(MailboxScope.defaults.data(forKey: "ai.classifications"), first)
     }
 
     func testClearingEmptiesMemoryAndDisk() {
@@ -94,10 +94,10 @@ final class ClassificationCacheTests: XCTestCase {
         ClassificationCache.clear()
 
         XCTAssertNil(ClassificationCache.entry(for: "m1"))
-        XCTAssertNil(UserDefaults.standard.data(forKey: "ai.classifications"))
+        XCTAssertNil(MailboxScope.defaults.data(forKey: "ai.classifications"))
         // And a clear must not be undone by a later flush of what it cleared.
         ClassificationCache.flush()
-        XCTAssertNil(UserDefaults.standard.data(forKey: "ai.classifications"))
+        XCTAssertNil(MailboxScope.defaults.data(forKey: "ai.classifications"))
     }
 
     func testTheOldestGoFirstOnceItIsFull() {

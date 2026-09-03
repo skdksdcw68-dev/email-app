@@ -166,6 +166,18 @@ final class MailboxRegistry {
         )
     }
 
+    /// A registry nothing else shares.
+    ///
+    /// Previews and tests need one, and they need a *fresh* one: a suite they
+    /// all wrote into would accumulate mailboxes across a run, so a test that
+    /// disconnects the only account would find one left over from another
+    /// test and carry on as if nothing had happened. That is the kind of
+    /// failure that reads as a product bug.
+    static func throwaway() -> MailboxRegistry {
+        let suite = UserDefaults(suiteName: "maily.throwaway.\(UUID().uuidString)")
+        return MailboxRegistry(defaults: suite ?? .standard)
+    }
+
     // MARK: - Persistence
 
     private struct Stored: Codable {

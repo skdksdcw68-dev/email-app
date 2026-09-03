@@ -19,7 +19,7 @@ final class AutoSendGuardTests: XCTestCase {
             .appending(path: "arq-\(UUID().uuidString).json")
         queue = AutoReplyQueue(fileURL: url)
         mail = MailStore(
-            account: MailAccount(provider: .gmail, address: "abel@example.com", displayName: "Abel"), registry: MailboxRegistry(defaults: .previews),
+            account: MailAccount(provider: .gmail, address: "abel@example.com", displayName: "Abel"), registry: .throwaway(),
             facts: FactStore(fileURL: FileManager.default.temporaryDirectory
                 .appending(path: "f-\(UUID().uuidString).json"))
         )

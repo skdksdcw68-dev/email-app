@@ -12,7 +12,7 @@ struct UndoSendTests {
 
     private func store() -> MailStore {
         MailStore(
-            account: MailAccount(provider: .gmail, address: "me@example.com", displayName: "Me"), registry: MailboxRegistry(defaults: .previews),
+            account: MailAccount(provider: .gmail, address: "me@example.com", displayName: "Me"), registry: .throwaway(),
             messages: []
         )
     }

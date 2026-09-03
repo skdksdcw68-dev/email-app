@@ -146,7 +146,7 @@ extension MailStore {
             ),
             // Its own registry, in its own suite. A preview or a test must
             // never write into the real one.
-            registry: MailboxRegistry(defaults: .previews),
+            registry: .throwaway(),
             messages: Message.samples
         )
     }

@@ -128,7 +128,17 @@ final class SearchHistory {
     func clearAll() {
         entries = []
         try? FileManager.default.removeItem(at: fileURL)
-        Task.detached(priority: .background) { try? await Backend.deleteAll("searches") }
+
+        // Scoped to this mailbox when there is one. See the same note in
+        // ChatHistory: an unqualified delete took everything, everywhere.
+        let mailbox = boundMailbox
+        Task.detached(priority: .background) {
+            if let mailbox {
+                try? await Backend.deleteAll("searches", mailbox: mailbox)
+            } else {
+                try? await Backend.deleteAll("searches")
+            }
+        }
     }
 
     // MARK: - Sync
@@ -136,6 +146,9 @@ final class SearchHistory {
     private struct Row: Codable {
         var id: UUID
         var user_id: UUID
+        /// Which mailbox it was searched in. Nil for rows written before
+        /// mailboxes had names.
+        var mailbox_id: String?
         var text: String
         var mode: String
         var results: Int
@@ -143,10 +156,11 @@ final class SearchHistory {
     }
 
     private func push(_ entry: Entry) {
+        let mailbox = boundMailbox?.rawValue
         Task.detached(priority: .background) {
             guard let userID = try? await Backend.userID() else { return }
             let row = Row(
-                id: entry.id, user_id: userID, text: entry.text,
+                id: entry.id, user_id: userID, mailbox_id: mailbox, text: entry.text,
                 mode: entry.mode, results: entry.results, created_at: entry.createdAt
             )
             try? await Backend.upsert("searches", [row])

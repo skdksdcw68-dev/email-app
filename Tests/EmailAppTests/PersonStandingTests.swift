@@ -49,7 +49,7 @@ final class PersonStandingTests: XCTestCase {
 
     private func store(_ messages: [Message]) -> MailStore {
         MailStore(
-            account: MailAccount(provider: .gmail, address: me, displayName: "Abel"), registry: MailboxRegistry(defaults: .previews),
+            account: MailAccount(provider: .gmail, address: me, displayName: "Abel"), registry: .throwaway(),
             messages: messages,
             facts: FactStore(fileURL: factsURL)
         )
