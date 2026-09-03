@@ -35,12 +35,11 @@ struct SemanticIndexTests {
         #expect(extra.count <= 2 * SemanticIndex.neighboursPerWord)
     }
 
-    @Test func aRelatedWordActuallyTurnsUp() throws {
-        // Skipped rather than failed where the asset is missing: this is the
-        // one test that says the feature does anything at all, but a CI
-        // runner without the English embedding is not a broken app.
-        try #require(SemanticIndex.canExpand)
-
+    /// Skipped rather than failed where the asset is missing. A CI runner
+    /// without the English embedding is not a broken app -- the whole point
+    /// of `canExpand` is that the app carries on without it.
+    @Test(.enabled(if: SemanticIndex.canExpand))
+    func aRelatedWordActuallyTurnsUp() {
         let extra = SemanticIndex.expand(["laptop"])
         #expect(!extra.isEmpty, "laptop should have near neighbours")
     }
@@ -68,9 +67,10 @@ struct SemanticIndexTests {
         #expect(SemanticIndex.similarity(of: candidates, to: "  ").isEmpty)
     }
 
-    @Test func scoresStayInRange() throws {
-        try #require(SemanticIndex.canRank)
-
+    /// The simulator ships the word embedding and not the sentence one, so
+    /// these three do not run there. On a device they do.
+    @Test(.enabled(if: SemanticIndex.canRank))
+    func scoresStayInRange() {
         let candidates = [
             message("Invoice for August", "Please find the invoice attached."),
             message("Lunch on Friday", "Are you free at one?"),
@@ -81,9 +81,8 @@ struct SemanticIndexTests {
         }
     }
 
-    @Test func theCloserMeaningScoresHigher() throws {
-        try #require(SemanticIndex.canRank)
-
+    @Test(.enabled(if: SemanticIndex.canRank))
+    func theCloserMeaningScoresHigher() {
         let bill = message("Invoice for August", "Please find the invoice attached, payment due in 30 days.")
         let lunch = message("Lunch on Friday", "Are you free at one? There is a new place on the corner.")
 
@@ -95,9 +94,8 @@ struct SemanticIndexTests {
         #expect(billScore > lunchScore)
     }
 
-    @Test func onlyTheShortlistIsEmbedded() throws {
-        try #require(SemanticIndex.canRank)
-
+    @Test(.enabled(if: SemanticIndex.canRank))
+    func onlyTheShortlistIsEmbedded() {
         // Embedding is per-message work, and a mailbox is thousands of them.
         // The cap is the whole reason a question stays fast.
         let many = (0..<(SemanticIndex.shortlist + 50)).map {
