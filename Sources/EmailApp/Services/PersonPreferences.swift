@@ -31,14 +31,30 @@ enum PersonPreferences {
     private static let overridesCache = Guarded<[String: String]?>(nil)
     private static let relationshipsCache = Guarded<[String: String]?>(nil)
 
-    /// Fill-on-read, done once, under the lock.
+    /// Fill-on-read, with the reading done *outside* the lock.
+    ///
+    /// This is the whole trick and getting it wrong hangs the app. The lock
+    /// is an unfair lock: a waiter spins rather than sleeping, and a spinning
+    /// thread on Swift's cooperative pool cannot yield to run anything else.
+    /// The pool has about as many threads as the phone has cores. So holding
+    /// this across a `UserDefaults` read, while twenty-five Gmail parse tasks
+    /// queue behind it, starves the pool and the import simply stops.
+    ///
+    /// Under contention `load()` may run more than once. That is fine -- it
+    /// is a read with no side effects, and paying for it twice is far cheaper
+    /// than the alternative.
     private static func cached<Value>(
         _ store: Guarded<Value?>,
         load: () -> Value
     ) -> Value {
-        store.withLock { held in
+        if let held = store.read({ $0 }) { return held }
+
+        let loaded = load()
+
+        return store.withLock { held in
+            // Somebody else may have filled it while this was reading. Theirs
+            // is as good as ours, and using it keeps every caller agreeing.
             if let held { return held }
-            let loaded = load()
             held = loaded
             return loaded
         }

@@ -99,11 +99,13 @@ enum AIUsage {
     /// Counted at the one place every call goes through, so nothing can be
     /// spent without appearing here.
     static func record(action: String) {
-        let kind = Kind(action: action).rawValue
         let month = monthKey
+        prime(month: month)
 
+        let kind = Kind(action: action).rawValue
         let updated: Stored = state.withLock { held in
-            var stored = Self.loaded(held, month: month)
+            var stored = held.flatMap { $0.month == month ? $0 : nil }
+                ?? Stored(month: month, counts: [:])
             stored.counts[kind, default: 0] += 1
             held = stored
             return stored
@@ -113,6 +115,22 @@ enum AIUsage {
         // to do while fifteen other threads spin waiting for it.
         guard let data = try? JSONEncoder().encode(updated) else { return }
         UserDefaults.standard.set(data, forKey: key)
+    }
+
+    /// Gets this month's counts into memory, reading the disk **outside** the
+    /// lock.
+    ///
+    /// The first version of this decoded JSON while holding the lock, and
+    /// fifteen classify tasks spinning behind a JSON decode is enough to
+    /// starve Swift's cooperative pool -- the import stopped making progress
+    /// and never finished. Nothing slow may happen inside `withLock`.
+    private static func prime(month: String) {
+        if state.read({ $0?.month == month }) { return }
+
+        let fromDisk = diskCounts(month: month) ?? Stored(month: month, counts: [:])
+        state.withLock { held in
+            if held?.month != month { held = fromDisk }
+        }
     }
 
     static func count(of kind: Kind) -> Int {
@@ -151,29 +169,21 @@ enum AIUsage {
     /// running total since install would only ever grow, which tells nobody
     /// anything about whether this month is unusual.
     ///
-    /// Under the lock, because this *writes* on the read path -- it fills the
-    /// cache from disk on first ask. Guarding only `record` would have left
-    /// half the race in place.
+    /// This *writes* on the read path -- it fills the cache from disk on
+    /// first ask -- so it has to be synchronised too. Guarding only `record`
+    /// would have left half the race in place.
     private static func current() -> Stored {
         let month = monthKey
-        return state.withLock { held in
-            let stored = Self.loaded(held, month: month)
-            held = stored
-            return stored
-        }
+        prime(month: month)
+        return state.read { $0 } ?? Stored(month: month, counts: [:])
     }
 
-    /// What is held, if it is still this month, else what is on disk, else a
-    /// fresh empty month. Pure, and called with the lock already taken.
-    private static func loaded(_ held: Stored?, month: String) -> Stored {
-        if let held, held.month == month { return held }
-
+    /// What is on disk, if it is still this month. Called with no lock held.
+    private static func diskCounts(month: String) -> Stored? {
         guard let data = UserDefaults.standard.data(forKey: key),
               let stored = try? JSONDecoder().decode(Stored.self, from: data),
               stored.month == month
-        else {
-            return Stored(month: month, counts: [:])
-        }
+        else { return nil }
         return stored
     }
 

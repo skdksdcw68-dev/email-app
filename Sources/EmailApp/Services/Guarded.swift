@@ -29,9 +29,19 @@ final class Guarded<Value>: @unchecked Sendable {
     /// Reads, changes, or both. Whatever is returned from the closure comes
     /// back out.
     ///
-    /// Keep the body short and do no I/O in it. This is a spinlock: a thread
-    /// waiting on it burns CPU rather than sleeping, so holding it across a
-    /// network call or a disk write would be worse than the race it fixes.
+    /// 🔴 **Nothing slow goes in the body.** No disk, no `UserDefaults`, no
+    /// JSON, no network, no `await`. This is not style advice -- it hung the
+    /// app once already.
+    ///
+    /// A waiter on an unfair lock spins before it parks, and a spinning
+    /// thread on Swift's cooperative pool cannot yield to run another task.
+    /// The pool holds roughly one thread per core. So a lock held across a
+    /// `UserDefaults` read, with twenty-five Gmail parse tasks queued behind
+    /// it, starves the pool: the import stopped making progress and never
+    /// finished, with no crash and nothing in the log to say why.
+    ///
+    /// Load outside, install inside. `PersonPreferences.cached(_:load:)` is
+    /// the shape to copy.
     @discardableResult
     func withLock<Result>(_ body: (inout Value) -> Result) -> Result {
         storage.withLock { state in body(&state) }
