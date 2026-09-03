@@ -112,8 +112,17 @@ struct AddMailboxFlow: View {
                             Image(systemName: "chevron.left").fontWeight(.semibold)
                         }
                         .accessibilityLabel("Back")
-                    } else if step == .provider && !firstRun {
-                        Button("Cancel") { dismiss() }
+                    } else if !firstRun && (step == .provider || step == .importing) {
+                        // Closeable during the import, and that is the point.
+                        // The work is not owned by this screen: the task
+                        // outlives it, `MailStore` holds the mail, and
+                        // `ImportLedger` resumes what is left. Sitting and
+                        // watching a ring for four minutes is not something
+                        // to ask of anybody.
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark").fontWeight(.semibold)
+                        }
+                        .accessibilityLabel("Close")
                     }
                 }
             }
@@ -125,7 +134,10 @@ struct AddMailboxFlow: View {
                 Text(failure ?? "")
             }
         }
-        .interactiveDismissDisabled(step == .importing)
+        // Nothing here closes on a swipe -- a half-answered flow should not
+        // vanish because a finger moved. The X is the way out, and during
+        // the import it is offered rather than withheld.
+        .interactiveDismissDisabled()
     }
 
     // MARK: - Steps
@@ -248,7 +260,7 @@ struct AddMailboxFlow: View {
 
     private var importingStep: some View {
         AutoReplyStep("Bringing your mail over", nil) {
-            ImportingMailView(progress: mail.importProgress)
+            ImportingMailView(progress: mail.importProgress, canLeave: !firstRun)
                 .frame(minHeight: 320)
         }
     }

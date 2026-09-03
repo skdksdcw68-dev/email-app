@@ -7,6 +7,10 @@ import UIKit
 /// counts. There is no timer here and nothing says "almost there" before it is.
 struct ImportingMailView: View {
     let progress: ImportProgress
+    /// Whether there is anywhere to go. True when this is a mailbox being
+    /// added to an app already in use; false during onboarding, where the
+    /// import *is* the screen and leaving it would land on nothing.
+    var canLeave = false
 
     @State private var pulse = false
 
@@ -34,16 +38,42 @@ struct ImportingMailView: View {
 
             Spacer()
 
-            Text("You can use Maily without a connection once this is done.")
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 48)
+            footer
+                .padding(.horizontal, 40)
                 .padding(.bottom, 40)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemBackground))
         .onAppear { pulse = true }
+    }
+
+    /// Said plainly, because otherwise somebody sits and watches it.
+    ///
+    /// A progress ring with no other instruction reads as "do not touch
+    /// this", and a big mailbox can take minutes. It is genuinely safe to
+    /// walk away: the work is not owned by this screen, and `ImportLedger`
+    /// records what is left so leaving the app entirely resumes rather than
+    /// starting again.
+    @ViewBuilder
+    private var footer: some View {
+        if canLeave && progress.isRunning {
+            VStack(spacing: 6) {
+                Label("Safe to close", systemImage: "checkmark.circle.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.green)
+                Text("This carries on in the background, and picks up where it left off if you leave the app.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .transition(.opacity)
+        } else {
+            Text("You can use Maily without a connection once this is done.")
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+        }
     }
 
     /// A determinate ring once there is a real fraction, and a breathing
