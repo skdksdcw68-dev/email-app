@@ -15,6 +15,7 @@ struct AppSettingsView: View {
     @Environment(UserStore.self) private var user
     @Environment(AutoReplyStore.self) private var autoReply
     @Environment(MailStore.self) private var mail
+    @Environment(AIMemory.self) private var memory
 
     @State private var isConfirmingSignOut = false
 
@@ -22,54 +23,61 @@ struct AppSettingsView: View {
 
     var body: some View {
         List {
-            // Profile, Gmail, the AI rows, Auto-Reply's setup and rules, and
-            // the theme all live on You. They are not repeated here: a
-            // control in two places is a control to decide about twice, and
-            // one of the two drifts.
+            // The profile, the mailbox, usage, writing and personalization
+            // live on You, and so does the theme. They are not repeated
+            // here: a control in two places is a control to decide about
+            // twice, and one of the two drifts.
             Section {
-                SettingsRow("Plan", "star", value: "Free") { PlanView() }
+                SettingsRow("Memory",
+                            value: memory.facts.isEmpty ? "Empty" : "\(memory.facts.count)") {
+                    MemorySettingsView()
+                }
+                SettingsRow("Plan", value: "Free") { PlanView() }
             } header: {
                 Text("Account")
             }
 
-            // The deep end of Auto-Reply. What it may never do, what it does
-            // when it is unsure, and what it knows about the business -- all
-            // set once and rarely opened again. The switch and the everyday
-            // edits are on You.
-            // Nothing at all until it is set up. An empty header for a
-            // feature somebody has not turned on is a heading with a hole
-            // under it.
-            if config.isSetUp {
-                Section {
-                    SettingsRow("Boundaries", "hand.raised", value: "\(config.mustAsk.count)") {
+            // Everything Auto-Reply is configured to do. You carries whether
+            // it is running and what is waiting; the shape of it is set here
+            // and rarely opened again.
+            Section {
+                SettingsRow("Setup", value: config.isSetUp ? "Done" : "Not set up") {
+                    config.isSetUp ? AnyView(AutoReplyEditView()) : AnyView(AutoReplyView())
+                }
+                if config.isSetUp {
+                    SettingsRow("Rules",
+                                value: config.instructions.isEmpty
+                                    ? "None" : "\(config.activeInstructions.count)") {
+                        AutoReplyInstructionsView()
+                    }
+                    SettingsRow("Boundaries", value: "\(config.mustAsk.count)") {
                         AutoReplySetupView(editing: config, startingAt: .boundaries, singleStep: true)
                     }
-                    SettingsRow("Uncertainty", "questionmark.circle",
-                                value: config.whenUnsure.shortTitle) {
+                    SettingsRow("Uncertainty", value: config.whenUnsure.shortTitle) {
                         AutoReplySetupView(editing: config, startingAt: .unsure, singleStep: true)
                     }
-                    SettingsRow("Knowledge", "brain.head.profile",
+                    SettingsRow("Knowledge",
                                 value: config.business.isEmpty
                                     ? "None" : "\(config.business.filled.count)") {
                         AutoReplySetupView(editing: config, startingAt: .knowledge, singleStep: true)
                     }
-                } header: {
-                    Text("Auto-Reply")
                 }
+            } header: {
+                Text("Auto-Reply")
             }
 
             Section {
-                SettingsRow("Automation", "sparkles") { AIAutomationSettingsView() }
-                SettingsRow("Running", "bolt.badge.clock") { AutomationsView() }
-                SettingsRow("Notifications", "bell") { NotificationSettingsView() }
-                SettingsRow("Language", "globe", value: "English") { LanguageView() }
+                SettingsRow("Automation") { AIAutomationSettingsView() }
+                SettingsRow("Running") { AutomationsView() }
+                SettingsRow("Notifications") { NotificationSettingsView() }
+                SettingsRow("Language", value: "English") { LanguageView() }
             } header: {
                 Text("App settings")
             }
 
             Section {
-                SettingsRow("Privacy", "lock.shield") { PrivacySettingsView() }
-                SettingsRow("Storage", "internaldrive", value: "\(mail.messages.count)") {
+                SettingsRow("Privacy") { PrivacySettingsView() }
+                SettingsRow("Storage", value: "\(mail.messages.count)") {
                     StorageSettingsView()
                 }
             } header: {
@@ -77,24 +85,19 @@ struct AppSettingsView: View {
             }
 
             Section {
-                SettingsRow("Help", "questionmark.circle") { SupportView() }
+                SettingsRow("Help") { SupportView() }
             } header: {
                 Text("Get help")
             }
 
             Section {
                 Button(role: .destructive) { isConfirmingSignOut = true } label: {
-                    HStack(spacing: 14) {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .font(.body)
-                            .foregroundStyle(.red)
-                            .frame(width: 26)
-                        Text("Log out")
-                            .font(.subheadline)
-                            .foregroundStyle(.red)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.vertical, 1)
+                    Text("Log out")
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .padding(.vertical, 2)
                 }
                 .buttonStyle(.plain)
             }

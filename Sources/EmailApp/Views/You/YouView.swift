@@ -19,7 +19,6 @@ struct YouView: View {
     @Environment(MailStore.self) private var mail
     @Environment(AutoReplyStore.self) private var autoReply
     @Environment(AutoReplyQueue.self) private var autoReplyQueue
-    @Environment(AIMemory.self) private var memory
 
     @State private var isEditingProfile = false
     @State private var appearance = AppSettings.appearance
@@ -27,26 +26,24 @@ struct YouView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section { header.listRowSeparator(.hidden) }
+                Section {
+                    header
+                    Button("Edit profile") { isEditingProfile = true }
+                        .font(.subheadline)
+                }
 
                 accounts
 
                 Section {
-                    SettingsRow("Usage", "chart.bar",
+                    SettingsRow("Usage",
                                 value: AIUsage.total == 0 ? "None" : "\(AIUsage.total)") {
                         AIUsageView()
                     }
-                    SettingsRow("Preferences", "sparkles") { AIPreferencesView() }
-                    SettingsRow("Writing", "pencil.line", value: user.writingToneTitle) {
+                    SettingsRow("Preferences") { AIPreferencesView() }
+                    SettingsRow("Writing", value: user.writingToneTitle) {
                         WritingStyleView()
                     }
-                    SettingsRow("Memory", "brain",
-                                value: memory.facts.isEmpty ? "Empty" : "\(memory.facts.count)") {
-                        MemorySettingsView()
-                    }
-                    SettingsRow("Personalization", "person.text.rectangle") {
-                        PersonalizationView()
-                    }
+                    SettingsRow("Personalization") { PersonalizationView() }
                 } header: {
                     Text("AI")
                 }
@@ -54,19 +51,12 @@ struct YouView: View {
                 // Its own section rather than a row among the others. It is
                 // the one feature that acts on somebody's behalf, and how
                 // much of it is running should be readable without opening
-                // anything.
+                // anything. What it is *configured* to do is in Settings;
+                // this is only whether it is running and what is waiting.
                 Section {
-                    SettingsRow("Auto-Reply", "arrowshape.turn.up.left",
+                    SettingsRow("Auto-Reply",
                                 value: autoReplyValue, badge: autoReplyQueue.waiting.count) {
                         AutoReplyView()
-                    }
-                    if autoReply.config.isSetUp {
-                        SettingsRow("Setup", "slider.horizontal.3") { AutoReplyEditView() }
-                        SettingsRow("Rules", "list.bullet.rectangle",
-                                    value: autoReply.config.instructions.isEmpty
-                                        ? "None" : "\(autoReply.config.activeInstructions.count)") {
-                            AutoReplyInstructionsView()
-                        }
                     }
                 } header: {
                     Text("Auto-Reply")
@@ -77,7 +67,7 @@ struct YouView: View {
                 appearanceSection
 
                 Section {
-                    SettingsRow("Settings", "gearshape") { AppSettingsView() }
+                    SettingsRow("Settings") { AppSettingsView() }
                 }
             }
             .navigationTitle("You")
@@ -87,50 +77,43 @@ struct YouView: View {
 
     // MARK: - Header
 
-    /// The avatar carries the way in to editing, the way the apps people
-    /// already use put it there.
+    /// Picture on the left, three lines beside it.
     ///
-    /// The address is under the name because this is the one screen that
-    /// answers "which account am I in?" -- and somebody who has to open a
-    /// subpage to find that out has been sent looking for their own email.
+    /// Centring it made a poster of the top of a settings screen. Read down
+    /// the left edge like every row under it, a person is a row too -- and
+    /// the three lines can then be a hierarchy rather than a stack of
+    /// centred captions.
     private var header: some View {
-        VStack(spacing: 10) {
-            Button { isEditingProfile = true } label: {
-                SenderAvatar(
-                    contact: Contact(
-                        name: user.account?.displayName ?? "You",
-                        address: user.account?.email ?? ""
-                    ),
-                    size: 76
-                )
-                .overlay(alignment: .bottomTrailing) {
-                    Image(systemName: "pencil")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .frame(width: 26, height: 26)
-                        .background(Circle().fill(Color(uiColor: .secondarySystemBackground)))
-                        .overlay(Circle().strokeBorder(Color(uiColor: .systemBackground), lineWidth: 2))
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Edit profile")
+        HStack(spacing: 14) {
+            SenderAvatar(
+                contact: Contact(
+                    name: user.account?.displayName ?? "You",
+                    address: user.account?.email ?? ""
+                ),
+                size: 56
+            )
 
-            VStack(spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(user.account?.displayName ?? "You")
-                    .font(.headline)
+                    .font(.title3.weight(.bold))
+                // What they do sits above the address, when they have said.
+                // It is the more interesting line about a person, and the
+                // one the assistant actually uses.
                 if let occupation = user.account?.occupation, !occupation.isEmpty {
                     Text(occupation)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
                 }
                 Text(user.account?.email ?? "Not signed in")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
+
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Accounts
@@ -172,11 +155,26 @@ struct YouView: View {
             // connects when there is nothing connected and says so plainly
             // when there is. A row promising a second account would be a
             // promise the app cannot keep.
-            SettingsRow("Add account", "plus.circle",
-                        value: mail.isConnected ? "Swap" : "Connect") {
-                GmailAccountsView()
+            //
+            // The line underneath earns its place here where it would not
+            // elsewhere: "Add account" on an app that holds one mailbox
+            // needs the caveat, and there is nowhere on the right to put it.
+            NavigationLink { GmailAccountsView() } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Add account")
+                        .font(.subheadline)
+                    Text(mail.isConnected
+                         ? "One mailbox at a time. Swap it from here."
+                         : "Connect your Gmail")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-            SettingsRow("Manage accounts", "person.crop.circle") { GmailAccountsView() }
+
+            NavigationLink { GmailAccountsView() } label: {
+                Text("Manage accounts")
+                    .font(.subheadline)
+            }
         } header: {
             Text("Accounts")
         }
@@ -229,27 +227,31 @@ struct YouView: View {
     }
 }
 
-/// One row: an icon, a word, and what it is set to.
+/// One row: a word, and what it is set to.
+///
+/// No icon. A glyph beside every row is a column of decoration down the left
+/// edge that has to be read past to get to the word, and twenty of them in
+/// two screens never cohered into a set -- they were twenty pictures of
+/// twenty different things at twenty different weights. iOS itself only puts
+/// icons where they group (Wi-Fi, Bluetooth, Cellular); a settings list of
+/// unrelated single words reads faster without them.
 ///
 /// The value on the right is the point. "Appearance — System" tells somebody
 /// what they came to find out without opening anything, where a sentence
 /// underneath the label only tells them what the label already said.
 struct SettingsRow<Destination: View>: View {
     let title: String
-    let symbol: String
     var value: String?
     var badge: Int = 0
     @ViewBuilder let destination: Destination
 
     init(
         _ title: String,
-        _ symbol: String,
         value: String? = nil,
         badge: Int = 0,
         @ViewBuilder destination: () -> Destination
     ) {
         self.title = title
-        self.symbol = symbol
         self.value = value
         self.badge = badge
         self.destination = destination()
@@ -259,11 +261,7 @@ struct SettingsRow<Destination: View>: View {
         NavigationLink {
             destination
         } label: {
-            HStack(spacing: 14) {
-                Image(systemName: symbol)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .frame(width: 26)
+            HStack(spacing: 12) {
                 Text(title)
                     .font(.subheadline)
                 Spacer(minLength: 12)
@@ -277,7 +275,7 @@ struct SettingsRow<Destination: View>: View {
                         .truncationMode(.middle)
                 }
             }
-            .padding(.vertical, 1)
+            .padding(.vertical, 2)
         }
     }
 }
@@ -288,5 +286,4 @@ struct SettingsRow<Destination: View>: View {
         .environment(UserStore(defaults: .previews, startAt: .finished))
         .environment(AutoReplyStore(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-autoreply.json")))
         .environment(AutoReplyQueue(fileURL: FileManager.default.temporaryDirectory.appending(path: "preview-autoreply-queue.json")))
-        .environment(AIMemory())
 }
