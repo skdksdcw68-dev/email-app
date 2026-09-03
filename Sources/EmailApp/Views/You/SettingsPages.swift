@@ -7,44 +7,184 @@ import UIKit
 /// not exist yet the page says so, rather than offering a control that moves
 /// and changes nothing.
 struct AppSettingsView: View {
+    @Environment(UserStore.self) private var user
+    @Environment(AutoReplyStore.self) private var autoReply
+
+    @State private var isEditingProfile = false
+    @State private var isConfirmingSignOut = false
+
     var body: some View {
         List {
             Section {
-                NavigationLink { AIAutomationSettingsView() } label: {
-                    settingsRow("AI & Automation", "sparkles", "Permissions, approvals, priority rules")
+                Button { isEditingProfile = true } label: {
+                    settingsRow("Personal information", "person.crop.circle",
+                                "Your name and what you do")
                 }
+                .buttonStyle(.plain)
                 NavigationLink { GmailAccountsView() } label: {
-                    settingsRow("Accounts & Sync", "arrow.triangle.2.circlepath", "Mailbox, sync, permissions")
-                }
-                NavigationLink { NotificationSettingsView() } label: {
-                    settingsRow("Notifications", "bell", "New mail alerts and how they arrive")
+                    settingsRow("Gmail accounts", "envelope", "The mailbox, sync and permissions")
                 }
                 NavigationLink { PrivacySettingsView() } label: {
-                    settingsRow("Privacy & Security", "lock.shield", "What leaves your phone, and what to delete")
+                    settingsRow("Account & security", "lock.shield", "What Maily holds about you")
+                }
+                Button(role: .destructive) { isConfirmingSignOut = true } label: {
+                    settingsRow("Sign out", "rectangle.portrait.and.arrow.right",
+                                "Leaves the app; your mail stays in Gmail", tint: .red)
+                }
+                .buttonStyle(.plain)
+            } header: {
+                Text("Account")
+            }
+
+            Section {
+                NavigationLink { AIAutomationSettingsView() } label: {
+                    settingsRow("AI preferences", "sparkles", "Permissions, approvals, priority rules")
+                }
+                NavigationLink { WritingStyleView() } label: {
+                    settingsRow("Writing style", "pencil.line", "How Maily sounds when it writes")
+                }
+                NavigationLink { MemorySettingsView() } label: {
+                    settingsRow("Memory", "brain", "What you have told it to remember")
+                }
+                NavigationLink { AIUsageView() } label: {
+                    settingsRow("AI usage", "gauge.with.dots.needle.33percent",
+                                "What you have asked it to do this month")
+                }
+                NavigationLink { PersonalizationView() } label: {
+                    settingsRow("Personalization", "person.text.rectangle",
+                                "The answers that steer what it does")
+                }
+            } header: {
+                Text("AI")
+            }
+
+            // Each of these opens the one question behind it, rather than
+            // the whole eleven-step setup. The wizard is still there under
+            // Edit setup for somebody who wants to walk the lot.
+            Section {
+                NavigationLink { AutoReplyView() } label: {
+                    settingsRow("Auto-Reply", "arrowshape.turn.up.left.2",
+                                autoReply.config.isSetUp
+                                    ? (autoReply.config.isOn ? "On" : "Off, setup saved")
+                                    : "Not set up")
+                }
+                if autoReply.config.isSetUp {
+                    NavigationLink { AutoReplyEditView() } label: {
+                        settingsRow("Edit setup", "slider.horizontal.3", "Change one thing at a time")
+                    }
+                    NavigationLink { AutoReplyInstructionsView() } label: {
+                        settingsRow("Rules", "list.bullet.rectangle",
+                                    "Your own rules for how it writes")
+                    }
+                    NavigationLink {
+                        AutoReplySetupView(editing: autoReply.config, startingAt: .boundaries, singleStep: true)
+                    } label: {
+                        settingsRow("What always comes to you", "hand.raised",
+                                    "\(autoReply.config.mustAsk.count) boundaries")
+                    }
+                    NavigationLink {
+                        AutoReplySetupView(editing: autoReply.config, startingAt: .unsure, singleStep: true)
+                    } label: {
+                        settingsRow("When it isn't sure", "questionmark.circle",
+                                    autoReply.config.whenUnsure.title)
+                    }
+                    NavigationLink {
+                        AutoReplySetupView(editing: autoReply.config, startingAt: .knowledge, singleStep: true)
+                    } label: {
+                        settingsRow("What it may state", "brain.head.profile",
+                                    autoReply.config.business.isEmpty
+                                        ? "Nothing yet"
+                                        : "\(autoReply.config.business.filled.count) facts")
+                    }
+                }
+            } header: {
+                Text("Auto-Reply")
+            }
+
+            Section {
+                NavigationLink { NotificationSettingsView() } label: {
+                    settingsRow("Notifications", "bell", "New mail, and what Maily did for you")
+                }
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("One switch for now. Maily wakes on new mail, reads it on this phone, and tells you when Auto-Reply has sent something.")
+            }
+
+            Section {
+                NavigationLink { PrivacySettingsView() } label: {
+                    settingsRow("Privacy", "hand.raised.square", "What leaves your phone, and what does not")
                 }
                 NavigationLink { StorageSettingsView() } label: {
-                    settingsRow("App", "iphone", "Storage and diagnostics")
+                    settingsRow("Data and storage", "internaldrive",
+                                "What is held here, and how to delete it")
                 }
+            } header: {
+                Text("Privacy & Data")
+            }
+
+            Section {
+                NavigationLink { AppearanceView() } label: {
+                    settingsRow("Theme", "circle.lefthalf.filled", "Light, dark or your device setting")
+                }
+            } header: {
+                Text("Appearance")
+            }
+
+            Section {
+                NavigationLink { LanguageView() } label: {
+                    settingsRow("Language", "globe", "What Maily reads and writes in")
+                }
+                NavigationLink { AutomationsView() } label: {
+                    settingsRow("What runs on its own", "bolt.badge.clock",
+                                "Sorting, follow-ups and Auto-Reply")
+                }
+                NavigationLink { PlanView() } label: {
+                    settingsRow("Plan", "star.circle", "Free. You pay your own AI costs")
+                }
+            } header: {
+                Text("General")
+            }
+
+            Section {
                 NavigationLink { SupportView() } label: {
-                    settingsRow("Support", "questionmark.circle", "Help, feedback, about")
+                    settingsRow("Help and support", "questionmark.circle",
+                                "Report a problem, get in touch, about Maily")
                 }
+            } header: {
+                Text("Support")
             }
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
+        .sheet(isPresented: $isEditingProfile) { EditProfileView() }
+        .alert("Sign out of Maily?", isPresented: $isConfirmingSignOut) {
+            Button("Cancel", role: .cancel) {}
+            Button("Sign out", role: .destructive) { user.signOut() }
+        } message: {
+            Text("Your mail stays in Gmail. Anything Maily keeps on this phone goes.")
+        }
     }
 
-    private func settingsRow(_ title: String, _ symbol: String, _ detail: String) -> some View {
+    private func settingsRow(
+        _ title: String,
+        _ symbol: String,
+        _ detail: String,
+        tint: Color = .accentColor
+    ) -> some View {
         HStack(spacing: 14) {
             Image(systemName: symbol)
                 .font(.body)
-                .foregroundStyle(.tint)
+                .foregroundStyle(tint)
                 .frame(width: 26)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.medium))
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(tint == .accentColor ? Color.primary : tint)
                 Text(detail).font(.caption).foregroundStyle(.secondary)
             }
+            Spacer(minLength: 0)
         }
         .padding(.vertical, 2)
     }

@@ -14,6 +14,7 @@ struct YouView: View {
     @Environment(AutoReplyQueue.self) private var autoReplyQueue
 
     @State private var isEditingProfile = false
+    @State private var appearance = AppSettings.appearance
 
     var body: some View {
         NavigationStack {
@@ -26,10 +27,13 @@ struct YouView: View {
 
                 gmailSection
 
-                // Everything about the assistant in one place, above the
-                // ordinary settings. This is the part of the app somebody
-                // came here to change; appearance and language are not.
+                // What somebody manages, not what they configure. Everything
+                // here is either a live number or a thing they change often;
+                // the depth is one tap away at the bottom.
                 Section {
+                    NavigationLink { AIUsageView() } label: {
+                        usageRow
+                    }
                     NavigationLink { AIPreferencesView() } label: {
                         row("AI preferences", "sparkles")
                     }
@@ -39,84 +43,64 @@ struct YouView: View {
                     NavigationLink { MemorySettingsView() } label: {
                         row("Memory", "brain")
                     }
-                    NavigationLink { AutomationsView() } label: {
-                        row("Automations", "bolt.badge.clock")
+                    NavigationLink { PersonalizationView() } label: {
+                        row("Personalization", "person.text.rectangle")
                     }
+                } header: {
+                    Text("AI")
+                }
+
+                // Its own section rather than a row among the others. It is
+                // the one feature that acts on somebody's behalf, and how
+                // much of it is running should be readable without opening
+                // anything.
+                Section {
                     NavigationLink { AutoReplyView() } label: {
                         autoReplyRow
                     }
-                    NavigationLink { AIUsageView() } label: {
-                        usageRow
-                    }
-                } header: {
-                    Text("Maily AI")
-                }
-
-                Section {
-                    NavigationLink { AppearanceView() } label: {
-                        row("Appearance", "circle.lefthalf.filled")
-                    }
-                    NavigationLink { NotificationSettingsView() } label: {
-                        row("Notifications", "bell.badge")
-                    }
-                    NavigationLink { LanguageView() } label: {
-                        row("Language", "globe")
-                    }
-                } header: {
-                    Text("Personal")
-                }
-
-                Section {
-                    NavigationLink { PlanView() } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: "star.circle.fill")
-                                .font(.body)
-                                .foregroundStyle(.tint)
-                                .frame(width: 26)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("Free")
-                                    .font(.subheadline.weight(.medium))
-                                Text("You pay your own AI costs")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                    if autoReply.config.isSetUp {
+                        NavigationLink { AutoReplyEditView() } label: {
+                            row("Edit setup", "slider.horizontal.3")
                         }
-                        .padding(.vertical, 2)
-                    }
-
-                    // What is left of the allowance, for a plan that has no
-                    // allowance: the honest version is what has been used,
-                    // because the ceiling is on somebody else's dashboard.
-                    NavigationLink { AIUsageView() } label: {
-                        row("Usage this month",
-                            AIUsage.total == 0 ? "Nothing yet" : "\(AIUsage.total) AI requests",
-                            "gauge.with.dots.needle.33percent")
-                    }
-
-                    Link(destination: URL(string: "https://platform.openai.com/settings/organization/billing")!) {
-                        row("Manage billing", "Your own OpenAI account", "creditcard.fill")
+                        NavigationLink { AutoReplyInstructionsView() } label: {
+                            row("Rules", "list.bullet.rectangle.fill")
+                        }
                     }
                 } header: {
-                    Text("Plan")
+                    Text("Auto-Reply")
                 } footer: {
-                    Text("Maily takes no payment. What the AI costs is between you and your provider.")
+                    Text(autoReply.config.isSetUp
+                         ? (autoReply.config.mode == .send
+                            ? "Maily is sending replies for you."
+                            : "Maily writes the replies and waits for you.")
+                         : "Teach Maily to answer the mail you keep answering yourself.")
+                }
+
+                // Directly here, because it is one tap and everybody uses
+                // it. A subpage for three options is a subpage nobody wants.
+                Section {
+                    Picker("Appearance", selection: $appearance) {
+                        ForEach(AppSettings.Appearance.allCases) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: appearance) { _, value in
+                        AppSettings.appearance = value
+                        NotificationCenter.default.post(name: .appearanceChanged, object: nil)
+                    }
+                    .listRowSeparator(.hidden)
+                } header: {
+                    Text("Appearance")
+                } footer: {
+                    Text("System follows your device setting.")
                 }
 
                 Section {
-                    NavigationLink { PrivacySettingsView() } label: {
-                        row("Privacy & Security", "lock.shield.fill")
-                    }
-                    NavigationLink { GmailAccountsView() } label: {
-                        row("Accounts & Sync", "arrow.triangle.2.circlepath")
-                    }
                     NavigationLink { AppSettingsView() } label: {
-                        row("App settings", "gearshape.fill")
+                        row("Settings", "Notifications, privacy, language and the rest",
+                            "gearshape.fill")
                     }
-                    NavigationLink { SupportView() } label: {
-                        row("Help & Support", "questionmark.circle.fill")
-                    }
-                } header: {
-                    Text("Settings")
                 }
             }
             .navigationTitle("You")
