@@ -767,7 +767,7 @@ function askMessages(question: string, body: Record<string, unknown>) {
   const messages = Array.isArray(body.messages) ? body.messages : [];
 
   const digest = messages
-    .slice(0, 40)
+    .slice(0, 25)
     .map((message: Record<string, string>, index: number) =>
       [
         `[${index + 1}]`,
@@ -779,7 +779,7 @@ function askMessages(question: string, body: Record<string, unknown>) {
         // A message the model asked to open comes through whole. Everything
         // else keeps its opening, which says what the message is without
         // paying to ship a mailbox.
-        `${(message.body ?? "").slice(0, message.full === "yes" ? 4000 : 400)}`,
+        `${(message.body ?? "").slice(0, message.full === "yes" ? 4000 : 200)}`,
       ].filter(Boolean).join("\n")
     )
     .join("\n\n");
@@ -930,7 +930,7 @@ Never explain that you are about to look: the line, and nothing else.`;
   // screen, and a stray system-role turn from a client must never get in.
   const history = Array.isArray(body.history) ? body.history : [];
   const prior = history
-    .slice(-10)
+    .slice(-6)
     .filter(
       (turn: Record<string, unknown>) =>
         (turn.role === "user" || turn.role === "assistant") &&
@@ -938,7 +938,7 @@ Never explain that you are about to look: the line, and nothing else.`;
     )
     .map((turn: Record<string, string>) => ({
       role: turn.role,
-      content: turn.content.slice(0, 1500),
+      content: turn.content.slice(0, 700),
     }));
 
   return [

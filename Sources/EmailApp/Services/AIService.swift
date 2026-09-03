@@ -302,8 +302,10 @@ enum AIService {
         hasSearched: Bool = false,
         onDelta: @MainActor (String) -> Void
     ) async throws {
-        // 300, not 400. Twelve messages at 400 characters is most of what a
-        // question costs, and the opening 300 carries the point of an email.
+        // Enough to know which message is which, and no more. Depth is on
+        // demand: the model names what it needs and `OPEN:` hands that one
+        // over whole, so carrying a paragraph of forty messages upfront was
+        // paying twice for the same reading.
         let digest = context.map { message in
             let opened = inFull.contains(message.id)
             return [
@@ -314,7 +316,7 @@ enum AIService {
                 // for: the request in an email is usually in the last
                 // paragraph, after the context explaining it. So the model
                 // can name the ones it needs and get them whole.
-                "body": String(message.body.prefix(opened ? Self.openedBodyLimit : 300)),
+                "body": String(message.body.prefix(opened ? Self.openedBodyLimit : Self.digestBodyLimit)),
                 "full": opened ? "yes" : "no",
                 // Whether they have seen it. This is what stops the model
                 // telling somebody to reply to an email they read on Monday
@@ -388,6 +390,14 @@ enum AIService {
     /// What a message the model asked to open carries. Enough for the ask
     /// at the bottom of a long email, short of shipping a thread wholesale.
     static let openedBodyLimit = 4000
+
+    /// What every other message carries: enough to know which one it is.
+    ///
+    /// It was 300, and 300 of forty messages on the expensive model, three
+    /// times per question, was most of what a question cost. Depth is on
+    /// demand now -- the model names what it needs and `OPEN:` fetches it
+    /// whole -- so carrying it upfront is paying twice for the same reading.
+    static let digestBodyLimit = 200
 
     /// Also read by the Auto-Reply runtime, which has the same problem: a
     /// model that does not know the date cannot resolve "by Friday".

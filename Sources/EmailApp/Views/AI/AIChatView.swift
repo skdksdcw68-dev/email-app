@@ -537,7 +537,7 @@ struct AIChatView: View {
         // to be added, so "the second one" resolves the way it should.
         let history = turns
             .filter { !$0.isPending && !$0.failed && !$0.text.isEmpty }
-            .suffix(10)
+            .suffix(6)
             .map { (role: $0.role == .user ? "user" : "assistant", content: $0.text) }
 
         // The trail from the first moment, on every question. "Thinking" with
@@ -727,7 +727,7 @@ struct AIChatView: View {
     /// The most messages a question carries to the model. The server reads
     /// this many and no more, so the app decides which ones rather than
     /// letting the cut fall wherever the list happened to end.
-    static let contextCeiling = 40
+    static let contextCeiling = 25
 
     /// The most messages carried along because a fact points at them. A
     /// dozen: the facts the prompt gets are capped at thirty, and most of
