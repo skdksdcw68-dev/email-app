@@ -96,14 +96,19 @@ enum MailboxPaths {
     nonisolated(unsafe) static var supportOverride: URL?
     nonisolated(unsafe) static var cachesOverride: URL?
 
+    // `.first`, not `[0]`. The array is never empty on iOS, but a subscript
+    // that traps is a crash on launch with nothing to read afterwards, and
+    // the fallback costs one line.
     static var supportBase: URL {
         supportOverride
-            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
     }
 
     static var cachesBase: URL {
         cachesOverride
-            ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
     }
 
     /// `<Application Support>/Maily`

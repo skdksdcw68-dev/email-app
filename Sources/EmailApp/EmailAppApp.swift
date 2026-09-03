@@ -65,6 +65,11 @@ struct EmailAppApp: App {
                 // does not look like being signed out.
                 .onAppear {
                     Task {
+                        // Which mailbox everything scoped is looking at.
+                        // Must come first: the file-backed stores start on
+                        // the old single-mailbox paths and load nothing
+                        // until they are told where their data went.
+                        mail.announceActiveMailbox()
                         // Disk first, so mail is on screen before the network
                         // is even reached, then top it up.
                         await mail.loadArchive()

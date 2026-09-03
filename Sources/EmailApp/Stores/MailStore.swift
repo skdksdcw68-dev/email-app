@@ -224,6 +224,25 @@ final class MailStore {
         }
     }
 
+    /// Tells everything scoped which mailbox it is looking at.
+    ///
+    /// **Called at launch, before anything reads a file.** The file-backed
+    /// stores are `@State` on the App, so they are built before there is a
+    /// registry to ask and each one starts on the path the single mailbox
+    /// used to use. The migration has already moved those files, so without
+    /// this every one of them loads nothing and reports it as an empty
+    /// history -- the conversations, the searches, the facts and the
+    /// Auto-Reply queue all present as gone.
+    func announceActiveMailbox() {
+        guard let id = account?.id else { return }
+        MailboxScope.activate(id)
+        NotificationCenter.default.post(
+            name: .activeMailboxChanged,
+            object: nil,
+            userInfo: [MailboxNotice.key: id.rawValue]
+        )
+    }
+
     /// Writes the account back to the registry, which owns persistence now.
     /// A `MailAccount` is a record that gets updated, never re-minted -- the
     /// old code built a fresh one on every launch, which is why its id could
@@ -331,8 +350,9 @@ final class MailStore {
             registry.upsert(connected)
             registry.setActive(connected.id)
             // Point the scoped stores at it before anything is written, or
-            // the first import would land in whatever suite was last active.
-            MailboxScope.activate(connected.id)
+            // the first import would land in whatever suite was last active
+            // and the chats and facts would be written to the wrong mailbox.
+            announceActiveMailbox()
             await importRecentMail()
         } catch {
             connectionError = error.localizedDescription

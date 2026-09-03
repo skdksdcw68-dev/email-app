@@ -124,7 +124,11 @@ final class ChatHistory {
     /// Point at another mailbox's conversations.
     func rebind(to id: MailboxID) {
         guard id != boundMailbox else { return }
-        persist()
+        // Only when it already belonged to a mailbox. Unbound means this is
+        // the first binding after launch, and what is in memory came from
+        // the old single-mailbox file -- writing it back would put an empty
+        // copy where real data used to be.
+        if boundMailbox != nil { persist() }
         boundMailbox = id
         fileURL = MailboxPaths.file(Self.fileName, for: id)
         conversations = []

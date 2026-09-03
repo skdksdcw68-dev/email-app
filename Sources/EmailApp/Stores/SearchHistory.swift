@@ -81,7 +81,11 @@ final class SearchHistory {
     /// Point at another mailbox's searches.
     func rebind(to id: MailboxID) {
         guard id != boundMailbox else { return }
-        persist()
+        // Only when it already belonged to a mailbox. Unbound means this is
+        // the first binding after launch, and what is in memory came from
+        // the old single-mailbox file -- writing it back would put an empty
+        // copy where real data used to be.
+        if boundMailbox != nil { persist() }
         boundMailbox = id
         fileURL = MailboxPaths.file(Self.fileName, for: id)
         // load() returns early when the file is not there, so without this a
