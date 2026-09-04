@@ -21,6 +21,19 @@ enum MailProvider: String, Codable, CaseIterable, Sendable {
         case .imap:      "Your own domain, through IMAP"
         }
     }
+
+    /// The provider named inside a sentence, where `title` does not fit.
+    ///
+    /// "Nothing on Google is touched" reads; "Nothing on Other email is
+    /// touched" does not, and that sentence is the one reassuring somebody
+    /// their mail is safe.
+    var inSentence: String {
+        switch self {
+        case .gmail:     "Google"
+        case .microsoft: "Microsoft"
+        case .imap:      "your mail server"
+        }
+    }
 }
 
 /// The colour a mailbox is marked with.

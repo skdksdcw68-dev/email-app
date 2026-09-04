@@ -11,6 +11,9 @@ struct MailboxListView: View {
 
     @State private var isAdding = false
     @State private var removing: MailAccount?
+    /// Which mailbox's page to push. Driven by state rather than a link,
+    /// because a context menu item cannot be a `NavigationLink`.
+    @State private var opening: MailboxID?
 
     private var registry: MailboxRegistry { mail.registry }
 
@@ -44,11 +47,15 @@ struct MailboxListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
         .sheet(isPresented: $isAdding) { AddMailboxFlow() }
+        .navigationDestination(item: $opening) { MailboxDetailView(mailbox: $0) }
         .alert(item: $removing) { account in
             Alert(
-                title: Text("Remove \(account.address)?"),
-                message: Text("Its mail, read state, snoozes and drafts go from this phone, and Maily's access to it ends. Nothing in Gmail is touched."),
-                primaryButton: .destructive(Text("Remove")) { remove(account) },
+                title: Text("Sign out of \(account.address)?"),
+                // Named rather than "Gmail", which was wrong the moment a
+                // mailbox could be somewhere else -- and the reassurance only
+                // works if it names the place their mail actually is.
+                message: Text("Its mail, read state, snoozes and drafts go from this phone, and Maily's access to it ends. Nothing on \(account.provider.inSentence) is touched."),
+                primaryButton: .destructive(Text("Sign out")) { remove(account) },
                 secondaryButton: .cancel()
             )
         }
@@ -72,10 +79,10 @@ struct MailboxListView: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(account.title)
-                            .font(.subheadline.weight(.semibold))
+                            .font(Style.rowTitleStrong)
                             .foregroundStyle(.primary)
                         Text(account.address)
-                            .font(.caption)
+                            .font(Style.rowDetail)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -97,9 +104,39 @@ struct MailboxListView: View {
             .frame(width: 12)
         }
         .padding(.vertical, 2)
+        // Both, deliberately.
+        //
+        // The swipe was already here and nothing said so, which is the trouble
+        // with swipe as the only way to reach something: it is fast once you
+        // know and invisible until then. Signing an account out is not a thing
+        // anybody should have to discover by accident, so a long press offers
+        // the same list in a form that can be looked for.
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) { removing = account } label: {
-                Label("Remove", systemImage: "trash")
+                Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+            }
+            Button { opening = account.id } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .tint(.gray)
+        }
+        .contextMenu {
+            if !isActive {
+                Button {
+                    Task { await mail.activate(account) }
+                } label: {
+                    Label("Switch to this mailbox", systemImage: "arrow.left.arrow.right")
+                }
+            }
+
+            Button { opening = account.id } label: {
+                Label("Mailbox settings", systemImage: "gearshape")
+            }
+
+            Divider()
+
+            Button(role: .destructive) { removing = account } label: {
+                Label("Sign out of this mailbox", systemImage: "rectangle.portrait.and.arrow.right")
             }
         }
     }
@@ -111,14 +148,14 @@ struct MailboxListView: View {
             // an inbox that simply stopped filling.
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.footnote)
-                .foregroundStyle(.orange)
+                .foregroundStyle(Color.warning)
         } else if isActive {
             Image(systemName: "checkmark.circle.fill")
                 .font(.footnote)
-                .foregroundStyle(.green)
+                .foregroundStyle(Color.ok)
         } else if account.isPaused {
             Text("Paused")
-                .font(.caption)
+                .font(Style.rowDetail)
                 .foregroundStyle(.secondary)
         }
     }
@@ -139,10 +176,12 @@ struct MailboxListView: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Add account")
-                        .font(.subheadline)
+                        .font(Style.rowTitle)
                         .foregroundStyle(.primary)
-                    Text("Gmail, Outlook, or your own email")
-                        .font(.caption)
+                    // Outlook is still the row marked "Coming soon", so it does
+                    // not get promised here.
+                    Text("Gmail, or any other email address")
+                        .font(Style.rowDetail)
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
