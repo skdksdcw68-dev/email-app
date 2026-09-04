@@ -75,7 +75,7 @@ async function devices(address: string): Promise<Device[]> {
   // session to scope this by. The address is the only thing it may look up.
   const url = new URL(`${SUPABASE_URL}/rest/v1/devices`);
   url.searchParams.set("select", "token,environment");
-  url.searchParams.set("gmail_address", `eq.${address.toLowerCase()}`);
+  url.searchParams.set("address", `eq.${address.toLowerCase()}`);
 
   const response = await fetch(url, {
     headers: {
@@ -102,7 +102,7 @@ async function forget(token: string) {
 
 /// One silent push. No alert, because the phone writes its own once it knows
 /// what arrived.
-async function notify(device: Device, historyId: string, jwt: string) {
+async function notify(device: Device, historyId: string, address: string, jwt: string) {
   const host = HOSTS[device.environment] ?? HOSTS.production;
 
   const response = await fetch(`${host}/3/device/${device.token}`, {
@@ -118,6 +118,13 @@ async function notify(device: Device, historyId: string, jwt: string) {
     body: JSON.stringify({
       aps: { "content-available": 1 },
       historyId,
+      // Which mailbox this is about. Gmail tells us and this used to drop
+      // it, so a phone with two accounts connected could not tell which
+      // one had woken it and caught up whichever was in front instead.
+      //
+      // An older build ignores this key, which is why adding it is safe
+      // to deploy before every phone has updated.
+      address,
     }),
   });
 
@@ -153,7 +160,7 @@ Deno.serve(async (request) => {
     if (targets.length === 0) return new Response("no devices", { status: 200 });
 
     const jwt = await providerToken();
-    await Promise.all(targets.map((device) => notify(device, historyId, jwt)));
+    await Promise.all(targets.map((device) => notify(device, historyId, address, jwt)));
 
     return new Response("ok", { status: 200 });
   } catch (error) {
