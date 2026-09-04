@@ -71,7 +71,7 @@ final class GmailParsingTests: XCTestCase {
 
     func testStripsTagsAndEntities() {
         let html = "<div>Tom &amp; Jerry &lt;3</div>"
-        XCTAssertEqual(GmailService.strippingHTML(html), "Tom & Jerry <3")
+        XCTAssertEqual(MailText.strippingHTML(html), "Tom & Jerry <3")
     }
 
     // MARK: - Deferred bodies

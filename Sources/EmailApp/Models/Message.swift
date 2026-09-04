@@ -20,6 +20,19 @@ struct Message: Identifiable, Hashable, Codable {
     /// single row saying 4.
     var threadID: String? = nil
 
+    /// Which mailbox this came from.
+    ///
+    /// Everything is kept apart physically today -- a suite and a folder per
+    /// mailbox -- and correctness rests entirely on `MailStore.epoch` refusing
+    /// a write that belongs to the mailbox you just left. That is a discipline
+    /// rather than a fact about the data, and it gets thin the moment two
+    /// providers can fetch at once.
+    ///
+    /// Optional so every archive written before this still decodes. A message
+    /// with no id is one from an older file, and the mailbox it is in is the
+    /// answer.
+    var accountID: MailboxID? = nil
+
     /// Gmail's *draft* id, which is not the message id. A draft has both, and
     /// the draft endpoints only answer to this one -- editing or deleting a
     /// draft by its message id gets a 404. Nil until it is known: mail synced
@@ -63,7 +76,7 @@ struct Message: Identifiable, Hashable, Codable {
     /// URLs are stripped -- a message that opens with a logo previewed as
     /// "[image: Google]", which tells the reader nothing at all.
     var preview: String {
-        GmailService.previewText(from: body)
+        MailText.previewText(from: body)
     }
 
     /// Today shows a time, this week a weekday, anything older a short date --

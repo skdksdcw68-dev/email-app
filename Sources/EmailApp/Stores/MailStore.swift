@@ -226,6 +226,26 @@ final class MailStore {
         preferencesVersion += 1
     }
 
+    /// How far back the import reaches, in the provider's own words.
+    ///
+    /// Read off the account rather than a constant, because a mailbox decides
+    /// its own window: three months is right for a Gmail account that can
+    /// fetch it in a couple of minutes, and wrong for a small server on a slow
+    /// host. `ImportWindow` has been on `MailAccount` since the accounts work
+    /// and nothing read it until now.
+    ///
+    /// Still a Gmail search string here. That is the next thing to go, when
+    /// `MailQuery` lands and each backend renders the window its own way.
+    var importQuery: String {
+        switch account?.importWindow.months {
+        case .some(let months): "newer_than:\(months)m"
+        // `.everything`, which has no months. An unbounded query is the
+        // whole mailbox, which is exactly what was asked for.
+        case .none where account != nil: ""
+        default: "newer_than:3m"
+        }
+    }
+
     /// Brings back anything whose snooze has run out.
     ///
     /// Nothing about the mailbox changes when a snooze expires -- the clock
@@ -442,8 +462,12 @@ final class MailStore {
         }
 
         let stamp = epoch
+        // Through the broker like every other call. This was the one site
+        // still using the raw session token straight from the SDK, which is
+        // the thing a second provider cannot supply.
+        guard let token = try? await accessToken() else { return }
         if let page = try? await GmailService.fetchInbox(
-            accessToken: session.accessToken, limit: Self.pageSize
+            accessToken: token, limit: Self.pageSize
         ) {
             // The mailbox may have been switched while this was in flight.
             // Merging now would put the old one's mail into the new one.
@@ -634,7 +658,7 @@ final class MailStore {
         guard let token = try? await accessToken() else { return }
         guard let ids = await Self.retrying({
             try await GmailService.allMessageIDs(
-                matching: GmailService.importWindow, accessToken: token
+                matching: importQuery, accessToken: token
             )
         }) else { return }
         // Counting the whole window is four round trips. Comparing one
@@ -699,7 +723,7 @@ final class MailStore {
 
         guard let ids = await Self.retrying({
             try await GmailService.allMessageIDs(
-                matching: GmailService.importWindow, accessToken: token
+                matching: importQuery, accessToken: token
             )
         }) else { return nil }
 
