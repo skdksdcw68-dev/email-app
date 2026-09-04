@@ -16,6 +16,17 @@ struct MessageRow: View {
     /// Words to mark, when this row is a search result. Empty everywhere else,
     /// which is the common case and costs nothing.
     var highlight: [String] = []
+    /// Shows the loudest priority tag beside the sender.
+    ///
+    /// Off in the inbox on purpose -- a badge on most rows of a busy list is
+    /// wallpaper, and the filter pills above already carry the tags. On for
+    /// the attention list, where every row is there *because* of its tag and
+    /// which one is the whole question.
+    var showsPriority = false
+    /// Two lines of what the AI made of it, rather than one line of the
+    /// message's own opening. For lists where the reason a row is present
+    /// matters more than what it happens to start with.
+    var showsSummary = false
 
     /// For a search result, the piece of the body the match is actually in.
     ///
@@ -42,20 +53,31 @@ struct MessageRow: View {
         return start > body.startIndex ? "…\(snippet)" : snippet
     }
 
+    /// What goes under the subject: the AI's reading of it where that is what
+    /// the list is for, and otherwise the message's own opening.
+    private var secondLine: String {
+        if showsSummary, let summary = message.aiSummary { return summary }
+        return matchedPreview
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             SenderAvatar(contact: message.sender, size: 44, isMuted: message.isRead)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if showsPriority, let priority = message.topPriority {
+                        TagBadge(tag: priority)
+                    }
+
                     Text(message.sender.name)
-                        .font(.subheadline)
+                        .font(Style.rowTitle)
                         .fontWeight(message.isRead ? .medium : .semibold)
                         .lineLimit(1)
 
                     if threadCount > 1 {
                         Text("\(threadCount)")
-                            .font(.caption2.weight(.semibold))
+                            .font(Style.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
@@ -65,32 +87,32 @@ struct MessageRow: View {
                     Spacer(minLength: 4)
 
                     Text(message.listDate)
-                        .font(.caption)
+                        .font(Style.rowDetail)
                         .foregroundStyle(.secondary)
                 }
 
                 Text(Highlight.mark(message.subject, terms: highlight))
-                    .font(.subheadline)
+                    .font(Style.rowTitle)
                     .fontWeight(message.isRead ? .regular : .bold)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
 
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(Highlight.mark(matchedPreview, terms: highlight))
-                        .font(.footnote)
+                    Text(Highlight.mark(secondLine, terms: highlight))
+                        .font(Style.rowPreview)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(showsSummary ? 2 : 1)
 
                     Spacer(minLength: 0)
 
                     if message.isFlagged {
                         Image(systemName: "flag.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
+                            .font(Style.caption)
+                            .foregroundStyle(Color.flagged)
                     }
                     if message.hasAttachment {
                         Image(systemName: "paperclip")
-                            .font(.caption2)
+                            .font(Style.caption)
                             .foregroundStyle(.secondary)
                     }
                 }

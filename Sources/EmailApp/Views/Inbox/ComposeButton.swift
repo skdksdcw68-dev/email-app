@@ -32,8 +32,8 @@ struct ComposeButton: View {
         }
         .buttonStyle(BouncyButtonStyle())
         .accessibilityLabel("Write a new email")
-        .padding(.trailing, 20)
-        .padding(.bottom, 16)
+        .padding(.trailing, Style.gutter)
+        .padding(.bottom, Style.rowGutter)
     }
 }
 

@@ -31,8 +31,8 @@ struct SnoozedListView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         MessageRow(message: row.message)
                         Label(back(at: row.until), systemImage: "clock")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.indigo)
+                            .font(Style.caption.weight(.medium))
+                            .foregroundStyle(Color.snoozed)
                     }
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -42,7 +42,7 @@ struct SnoozedListView: View {
                     } label: {
                         Label("Wake", systemImage: "bell")
                     }
-                    .tint(.indigo)
+                    .tint(Color.snoozed)
                 }
             }
         }
@@ -65,11 +65,11 @@ struct SnoozedListView: View {
         .safeAreaInset(edge: .bottom) {
             if !rows.isEmpty {
                 Text("Snoozing happens on this phone. In Gmail these never left the inbox.")
-                    .font(.caption2)
+                    .font(Style.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 10)
+                    .screenGutter()
+                    .padding(.bottom, Style.tight)
             }
         }
     }

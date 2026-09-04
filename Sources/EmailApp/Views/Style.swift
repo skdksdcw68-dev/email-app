@@ -49,6 +49,8 @@ enum Style {
     static let rowValue = Font.subheadline
     /// The line under a title that explains it.
     static let rowDetail = Font.caption
+    /// A row's third line -- the opening of the mail, the gist of the thing.
+    static let rowPreview = Font.footnote
     /// A section's name.
     static let sectionHeader = Font.footnote.weight(.semibold)
     /// The small print under a section, where the reasoning goes.
@@ -83,6 +85,12 @@ extension Color {
     static let urgent = Color(uiColor: .systemRed)
     /// Flagged by hand.
     static let flagged = Color(uiColor: .systemOrange)
+    /// Something did not work, but nothing was lost by it.
+    ///
+    /// The same orange as `flagged` today, and named apart on purpose: they
+    /// are two meanings that happen to share a colour, and one of them will
+    /// eventually want to stop.
+    static let warning = Color(uiColor: .systemOrange)
     /// Put away until later.
     static let snoozed = Color(uiColor: .systemIndigo)
     /// Connected, saved, safe.

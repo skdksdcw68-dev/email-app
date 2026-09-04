@@ -12,12 +12,12 @@ struct AttentionListView: View {
 
     /// Two ways out of a long list: answer it, or accept it.
     private var bulkActions: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Style.tight) {
             Button {
                 for message in messages { mail.markRead(message.id) }
             } label: {
                 Label("Mark all read", systemImage: "envelope.open")
-                    .font(.subheadline.weight(.semibold))
+                    .font(Style.rowTitleStrong)
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
                     .background(Capsule().fill(Color(uiColor: .tertiarySystemFill)))
@@ -28,7 +28,7 @@ struct AttentionListView: View {
                 isBulkReplying = true
             } label: {
                 Label("Reply with AI", systemImage: "sparkles")
-                    .font(.subheadline.weight(.semibold))
+                    .font(Style.rowTitleStrong)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
@@ -36,8 +36,8 @@ struct AttentionListView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, Style.rowGutter)
+        .padding(.vertical, Style.tight)
         .frame(maxWidth: .infinity)
         .background(.bar)
     }
@@ -53,14 +53,19 @@ struct AttentionListView: View {
                     NavigationLink {
                         MessageDetailView(messageID: message.id)
                     } label: {
-                        AttentionRow(message: message)
+                        MessageRow(message: message, showsPriority: true, showsSummary: true)
                     }
                     .messageSwipeActions(for: message)
                 }
             } footer: {
                 Text("Urgent mail first, then anything waiting on a reply.")
+                    .font(Style.sectionFooter)
             }
         }
+        // This list is reached from the inbox and holds the same rows, so it
+        // is the same kind of list. Grouped put a card and an inset around
+        // mail that sits flat one screen back.
+        .listStyle(.plain)
         .navigationTitle("Needs your attention")
         .navigationBarTitleDisplayMode(.inline)
         // A full-screen context, like reading a message. Leaving the tab bar
@@ -81,36 +86,6 @@ struct AttentionListView: View {
                 )
             }
         }
-    }
-}
-
-private struct AttentionRow: View {
-    let message: Message
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                if let priority = message.topPriority {
-                    TagBadge(tag: priority)
-                }
-                Text(message.sender.name)
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 6)
-                Text(message.listDate)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text(message.subject)
-                .font(.subheadline)
-                .lineLimit(1)
-
-            Text(message.aiSummary ?? message.preview)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-        }
-        .padding(.vertical, 3)
     }
 }
 

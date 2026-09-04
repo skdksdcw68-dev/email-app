@@ -18,7 +18,7 @@ struct TagFilterBar: View {
 
     var body: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 9) {
+            HStack(spacing: Style.tight) {
                 ForEach(tags) { tag in
                     Pill(tag: tag, count: count(tag), isSelected: selection == tag) {
                         withAnimation(.snappy(duration: 0.22)) {
@@ -27,8 +27,8 @@ struct TagFilterBar: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Style.rowGutter)
+            .padding(.vertical, Style.tight)
         }
         .scrollIndicators(.hidden)
         .background(Color(uiColor: .systemBackground))

@@ -331,67 +331,46 @@ struct InboxHomeView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
                 }
-                .foregroundStyle(Color(uiColor: .systemRed))
-                .padding(.horizontal, 14)
+                .foregroundStyle(Color.urgent)
+                .padding(.horizontal, Style.rowGutter)
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color(uiColor: .systemRed).opacity(0.11))
+                    RoundedRectangle(cornerRadius: Style.card, style: .continuous)
+                        .fill(Color.urgent.opacity(0.11))
                 }
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 0, trailing: 16))
+                .listRowInsets(Self.summaryInsets(top: 10, bottom: 0))
             }
 
             if !attention.isEmpty {
                 NavigationLink {
                     AttentionListView()
                 } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.title3)
-                            .foregroundStyle(Color(uiColor: .systemRed))
-                            .frame(width: 26)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(attention.count == 1
-                                 ? "1 email needs your attention"
-                                 : "\(attention.count) emails need your attention")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                            Text(attention.prefix(2).map(\.sender.name).joined(separator: ", ")
-                                 + (attention.count > 2 ? " and others" : ""))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    .padding(.vertical, 3)
+                    SummaryRow(
+                        icon: "exclamationmark.circle.fill",
+                        tint: .urgent,
+                        title: attention.count == 1
+                            ? "1 email needs your attention"
+                            : "\(attention.count) emails need your attention",
+                        detail: attention.prefix(2).map(\.sender.name).joined(separator: ", ")
+                            + (attention.count > 2 ? " and others" : "")
+                    )
                 }
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 10, trailing: 16))
+                .listRowInsets(Self.summaryInsets(top: 6, bottom: 10))
             } else if !mail.messages.isEmpty {
                 // The reward for clearing it. A warning that simply vanishes
                 // gives no sense that anything was achieved -- and an empty
                 // gap where a red row used to be reads like a bug.
-                HStack(spacing: 12) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(Color(uiColor: .systemGreen))
-                        .frame(width: 26)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Your inbox is clean")
-                            .font(.subheadline.weight(.semibold))
-                        Text("Nothing is waiting on you right now.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.vertical, 3)
+                SummaryRow(
+                    icon: "checkmark.circle.fill",
+                    tint: .ok,
+                    title: "Your inbox is clean",
+                    detail: "Nothing is waiting on you right now."
+                )
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 10, trailing: 16))
+                .listRowInsets(Self.summaryInsets(top: 6, bottom: 10))
                 .transition(.opacity)
             }
 
@@ -403,22 +382,22 @@ struct InboxHomeView: View {
                 NavigationLink {
                     SnoozedListView()
                 } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "clock.fill")
-                            .font(.title3)
-                            .foregroundStyle(.indigo)
-                            .frame(width: 26)
-
-                        Text(snoozedCount == 1 ? "1 snoozed" : "\(snoozedCount) snoozed")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                    }
-                    .padding(.vertical, 3)
+                    SummaryRow(
+                        icon: "clock.fill",
+                        tint: .snoozed,
+                        title: snoozedCount == 1 ? "1 snoozed" : "\(snoozedCount) snoozed"
+                    )
                 }
                 .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 10, trailing: 16))
+                .listRowInsets(Self.summaryInsets(top: 0, bottom: 10))
             }
         }
+    }
+
+    /// The summary rows all sit at the same edge as the mail below them; only
+    /// the gap above and below each one differs.
+    private static func summaryInsets(top: CGFloat, bottom: CGFloat) -> EdgeInsets {
+        EdgeInsets(top: top, leading: Style.rowGutter, bottom: bottom, trailing: Style.rowGutter)
     }
 
     /// Counted off the snooze store rather than the mailbox, so it is right
@@ -443,6 +422,44 @@ struct InboxHomeView: View {
                 description: Text("Messages in \(mailbox.title) appear here.")
             )
         }
+    }
+}
+
+/// The rows above the mail: what needs you, what is clear, what is asleep.
+///
+/// One shape, not three copies of it. They differ only in glyph, colour and
+/// words -- and when they were three copies they had already drifted apart by
+/// a couple of points nobody had chosen.
+private struct SummaryRow: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    var detail: String?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(tint)
+                // A fixed width so the titles line up whatever the glyph.
+                .frame(width: 26)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(Style.rowTitleStrong)
+                    .foregroundStyle(.primary)
+
+                if let detail {
+                    Text(detail)
+                        .font(Style.rowDetail)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 3)
     }
 }
 
@@ -581,8 +598,8 @@ extension InboxHomeView {
 
             if let error = mail.searchError {
                 Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .font(Style.rowDetail)
+                    .foregroundStyle(Color.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
