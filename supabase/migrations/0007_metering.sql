@@ -105,6 +105,15 @@ create index if not exists ai_usage_user_time_idx
 alter table public.ai_usage enable row level security;
 
 -- Read your own. That is the whole client-facing surface.
+--
+-- Dropped first so this file can be run twice without erroring. `create
+-- policy` has no `if not exists`, and everything else here does -- which
+-- matters because this one is being applied by hand in the SQL editor rather
+-- than by `db push` (the CLI cannot reach the database from the machine this
+-- was written on), so the migration history will not know it has run and a
+-- later `db push` will try it again.
+drop policy if exists "usage is private to the person who spent it" on public.ai_usage;
+
 create policy "usage is private to the person who spent it"
     on public.ai_usage for select
     using (auth.uid() = user_id);
