@@ -130,6 +130,17 @@ final class AutoReplyStore {
     /// working; this is what makes those three tell the truth about the
     /// mailbox actually in front of the person.
     func adoptActivationForActiveMailbox() {
+        // Nothing to arm without a setup. A mailbox suite could carry an
+        // arming from a setup that has since been deleted, and reading it
+        // back would put an armed flag on a config with no boundaries, no
+        // knowledge and nothing it was told never to say.
+        guard config.isSetUp else {
+            config.isOn = false
+            config.mode = .draft
+            config.watchingSince = nil
+            return
+        }
+
         let activation = AutoReplyActivation.current
         config.isOn = activation.isOn
         config.mode = activation.mode
