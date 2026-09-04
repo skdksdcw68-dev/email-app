@@ -7,14 +7,24 @@ import UIKit
 final class MailStore {
     /// `nil` until the user connects Gmail. Everything in the Mail tab keys off this.
     /// The mailbox in front of you. One at a time; `registry` has the rest.
-    private(set) var account: MailAccount?
+    /// `internal(set)` on the four below, like `heldSend`: a mailbox that is
+    /// not Gmail connects through `MailStore+IMAP`, which is a different file
+    /// and so cannot reach a `private(set)` setter.
+    internal(set) var account: MailAccount?
     private(set) var messages: [Message]
-    private(set) var isConnecting = false
-    private(set) var isRefreshing = false
+    internal(set) var isConnecting = false
+    internal(set) var isRefreshing = false
     private(set) var isEnhancing = false
     /// Surfaced in the UI rather than swallowed -- a declined consent screen
     /// or an expired grant must be visible, not a silently empty inbox.
-    private(set) var connectionError: String?
+    internal(set) var connectionError: String?
+
+    /// The provider adapter for the active mailbox, built once and kept.
+    ///
+    /// An IMAP backend owns a socket, so rebuilding it per call would mean a
+    /// handshake and a login for every chunk of an import. Cleared whenever
+    /// the active mailbox changes.
+    @ObservationIgnored var cachedBackend: (any MailBackend)?
 
     /// Gmail's cursor for the next page. `nil` means the mailbox is exhausted.
     private(set) var nextPageToken: String?
@@ -80,6 +90,10 @@ final class MailStore {
         leaveCurrentMailbox()
 
         account = next
+        // The old mailbox's backend may be holding an open IMAP socket to
+        // somebody else's server. Dropping it here closes it, and stops the
+        // next fetch reaching the mailbox that was just left.
+        cachedBackend = nil
         registry.setActive(next.id)
         // Moves the suite, the in-memory caches and the five file-backed
         // stores together.
@@ -311,7 +325,7 @@ final class MailStore {
     private var isToppingUp = false
 
     /// Where the one-time import has got to. Drives the import screen.
-    private(set) var importProgress: ImportProgress = .idle
+    internal(set) var importProgress: ImportProgress = .idle
     /// Set once the three-month import has completed, so it never runs twice.
     var hasImported: Bool {
         get { MailboxScope.defaults.bool(forKey: "mail.hasImported") }
@@ -570,6 +584,11 @@ final class MailStore {
         // refresh would, and two writers to the mailbox at once is how the
         // counter used to disagree with itself.
         guard isConnected, !isRefreshing, !importProgress.isRunning else { return }
+
+        if account?.provider == .imap {
+            await refreshIMAP()
+            return
+        }
         isRefreshing = true
         connectionError = nil
         defer { isRefreshing = false }
@@ -667,6 +686,10 @@ final class MailStore {
     /// anything noticing.
     func verifyAgainstGmail(force: Bool = false) async {
         guard isConnected else { return }
+        // Named for Gmail because it is Gmail's: it counts against a
+        // `newer_than:` query and Gmail's message ids. The IMAP path keeps its
+        // own ledger and tops up from that.
+        guard account?.provider != .imap else { return }
         if !force, let last = lastVerifiedAt,
            Date.now.timeIntervalSince(last) < Self.verifyInterval { return }
 
@@ -735,13 +758,20 @@ final class MailStore {
         }
 
         importProgress = .counting
-        guard let token = try? await accessToken() else { return nil }
 
-        guard let ids = await Self.retrying({
-            try await GmailService.allMessageIDs(
-                matching: importQuery, accessToken: token
-            )
-        }) else { return nil }
+        let ids: [String]
+        if account?.provider == .imap {
+            guard let refs = await imapRefs() else { return nil }
+            ids = refs
+        } else {
+            guard let token = try? await accessToken() else { return nil }
+            guard let fetched = await Self.retrying({
+                try await GmailService.allMessageIDs(
+                    matching: importQuery, accessToken: token
+                )
+            }) else { return nil }
+            ids = fetched
+        }
 
         let ledger = ImportLedger(pending: ids)
         ledger.save()
@@ -791,11 +821,15 @@ final class MailStore {
             // its turn, so stop rather than spin.
             if chunk.allSatisfy(refused.contains) { break }
 
-            guard let token = try? await accessToken() else { break }
-
-            let fetched = await Self.retrying({
-                try await GmailService.messages(ids: chunk, accessToken: token)
-            }) ?? []
+            let fetched: [Message]
+            if account?.provider == .imap {
+                fetched = await imapMessages(ids: chunk)
+            } else {
+                guard let token = try? await accessToken() else { break }
+                fetched = await Self.retrying({
+                    try await GmailService.messages(ids: chunk, accessToken: token)
+                }) ?? []
+            }
 
             // Only what actually arrived is crossed off. A message Gmail
             // refused mid-chunk used to be marked done along with the rest,
@@ -919,7 +953,7 @@ final class MailStore {
     /// Replacing was fine when the app only ever showed one page. With an
     /// archive of three months behind it, a refresh returning the newest 25
     /// would throw the rest away -- and take every AI tag with it.
-    private func merge(_ fetched: [Message]) {
+    func merge(_ fetched: [Message]) {
         var byRemoteID: [String: Int] = [:]
         for (index, message) in messages.enumerated() {
             if let remoteID = message.remoteID { byRemoteID[remoteID] = index }

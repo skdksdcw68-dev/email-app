@@ -438,10 +438,19 @@ actor IMAPConnection {
     ///
     /// CR and LF cannot appear in a quoted string at all, and anything outside
     /// ASCII is safer sent by length than by quoting. Both go as literals.
+    ///
+    /// 🔴 Checked over unicode scalars, not characters, and that is not
+    /// pedantry. Swift treats CR-LF as **one** `Character`, so
+    /// `contains("\r")` is false for a string that plainly contains one -- and
+    /// `asciiValue` reports the pair as ASCII. A password with a line break in
+    /// it would have passed both tests, been sent as a quoted string, and
+    /// ended the command line early: everything after it would have reached
+    /// the server as a command. A test caught it.
     static func quoted(_ value: String) -> String? {
-        guard !value.contains("\r"), !value.contains("\n"), value.allSatisfy(\.isASCII) else {
-            return nil
-        }
+        let scalars = value.unicodeScalars
+        guard !scalars.contains(where: { $0 == "\r" || $0 == "\n" }),
+              scalars.allSatisfy(\.isASCII)
+        else { return nil }
         let escaped = value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
