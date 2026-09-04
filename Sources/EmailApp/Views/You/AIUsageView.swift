@@ -2,15 +2,15 @@ import SwiftUI
 
 /// What the app has asked the AI to do this month.
 ///
-/// Maily runs on the person's own key, so the bill arrives somewhere else and
-/// the app is normally the last place to know. That is how it goes wrong:
-/// the credit runs out, every AI feature stops at once, and nothing in the
-/// app says why -- it just looks broken.
+/// ⚠️ This used to open by saying Maily runs on the person's own key and the
+/// bill arrives somewhere else. It does not. The key is in the project's
+/// Supabase secrets and every call is spent on the operator's account -- see
+/// the note in `AIUsage`.
 ///
-/// So this is counts, not money. The app cannot see a bill and inventing a
-/// number would be worse than none. What it can honestly say is what it asked
-/// for and what each ask was for, which is the sentence that explains the
-/// figure on the website.
+/// So this is counts, not money, because counts are what the *phone* knows.
+/// The real figure now exists on the server, priced from the provider's own
+/// token counts (migration 0007), and this screen becomes the offline
+/// fallback rather than the answer once there is a plan to count against.
 struct AIUsageView: View {
     @Environment(MailStore.self) private var mail
 
@@ -116,64 +116,5 @@ struct AIUsageView: View {
         } message: {
             Text("Only the counts on this screen. Nothing about your mail or your bill changes.")
         }
-    }
-}
-
-/// The things Maily does without being asked each time.
-///
-/// Only what actually runs. An automations screen listing a weekly summary
-/// that nothing generates would be a promise the app does not keep, and this
-/// is exactly the screen where people go looking for the switch that stops
-/// something -- so everything here has to be real.
-struct AutomationsView: View {
-    @Environment(MailStore.self) private var mail
-    @Environment(AutoReplyStore.self) private var autoReply
-
-    var body: some View {
-        List {
-            Section {
-                row("Sorting new mail", "tray.full.fill",
-                    AppSettings.tagsIncomingMail ? "On" : "Off",
-                    isOn: AppSettings.tagsIncomingMail)
-                row("Following up", "clock.arrow.circlepath",
-                    "\(mail.followUps.count) being watched", isOn: true)
-                row("Auto-Reply", "arrowshape.turn.up.left.2.fill",
-                    autoReply.config.isRunning
-                        ? (autoReply.config.mode == .send ? "Sending" : "Writing drafts")
-                        : "Off",
-                    isOn: autoReply.config.isRunning)
-            } header: {
-                Text("Running")
-            } footer: {
-                Text("Everything Maily does on its own is here. Sorting is changed in AI preferences; follow-ups and Auto-Reply have their own screens.")
-            }
-
-            Section {
-                NavigationLink { AIAutomationSettingsView() } label: {
-                    Label("AI preferences", systemImage: "sparkles").font(.subheadline)
-                }
-                NavigationLink { AutoReplyView() } label: {
-                    Label("Auto-Reply", systemImage: "arrowshape.turn.up.left.2.fill").font(.subheadline)
-                }
-            }
-        }
-        .navigationTitle("Automations")
-        .navigationBarTitleDisplayMode(.inline)
-        .hidesTabBar()
-    }
-
-    private func row(_ title: String, _ symbol: String, _ state: String, isOn: Bool) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.footnote)
-                .foregroundStyle(isOn ? Color.accentColor : .secondary)
-                .frame(width: 24)
-            Text(title).font(.subheadline)
-            Spacer(minLength: 8)
-            Text(state)
-                .font(.caption)
-                .foregroundStyle(isOn ? Color.green : Color.secondary)
-        }
-        .padding(.vertical, 2)
     }
 }

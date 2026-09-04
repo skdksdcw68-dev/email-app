@@ -112,13 +112,38 @@ final class PushDelegate: NSObject, UIApplicationDelegate {
         from account: MailAccount,
         amongSeveral: Bool
     ) async {
+        // 🔴 `account.notifies` is read here, and until now it was read
+        // nowhere at all.
+        //
+        // `MailboxDetailView` has had a "Notify me" switch since multi-mailbox
+        // shipped. It wrote the flag, the flag was stored, and nothing ever
+        // looked at it -- so turning it off did nothing and banners kept
+        // arriving from the mailbox somebody had just silenced. A switch that
+        // lies is worse than no switch.
+        guard account.notifies else { return }
+        guard AppSettings.notifiesNewMail else { return }
+
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized
             || settings.authorizationStatus == .provisional else { return }
 
+        // "Only what matters" filters here rather than at the fetch, because
+        // the mail still has to arrive and be sorted -- this is about what is
+        // worth interrupting somebody for, not what is worth having.
+        //
+        // Falls back to announcing everything when nothing has been tagged
+        // yet: a message the classifier has not reached is not the same as a
+        // message it judged unimportant, and silence on the first would be a
+        // missed email rather than a quiet one.
+        let worthTelling = AppSettings.notifiesOnlyImportant
+            ? messages.filter { $0.topPriority != nil || $0.tags.isEmpty }
+            : messages
+
+        guard !worthTelling.isEmpty else { return }
+
         // Three at most. Six arriving at once is a summary, not six banners.
-        for message in messages.prefix(3) {
+        for message in worthTelling.prefix(3) {
             let content = UNMutableNotificationContent()
             content.title = message.sender.name.isEmpty
                 ? message.sender.address
@@ -152,10 +177,14 @@ final class PushDelegate: NSObject, UIApplicationDelegate {
             )
         }
 
-        if messages.count > 3 {
+        // Counted off what was actually announced, not off everything that
+        // landed -- with "only what matters" on, "12 more arrived" about mail
+        // deliberately kept silent would be the filter announcing what it just
+        // filtered.
+        if worthTelling.count > 3 {
             let content = UNMutableNotificationContent()
             content.title = amongSeveral ? account.title : "Maily"
-            content.body = "\(messages.count - 3) more arrived."
+            content.body = "\(worthTelling.count - 3) more arrived."
             content.sound = nil
             content.userInfo = ["mailbox": account.id.rawValue]
             try? await center.add(

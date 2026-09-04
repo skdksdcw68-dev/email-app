@@ -13,6 +13,11 @@ import UserNotifications
 enum AutoReplyNotice {
 
     static func post(to recipient: String, subject: String) async {
+        // Switchable, but on by default and deliberately separate from the
+        // new-mail switch: somebody who silences a busy inbox has not asked to
+        // stop being told when mail goes out under their name.
+        guard AppSettings.notifiesAutoReply else { return }
+
         let centre = UNUserNotificationCenter.current()
         let settings = await centre.notificationSettings()
         guard settings.authorizationStatus == .authorized

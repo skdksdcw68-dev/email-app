@@ -161,6 +161,10 @@ final class AIMemory {
     var prompt: String { prompt() }
 
     func prompt(now: Date = .now) -> String {
+        // Turned off means nothing stored is sent. The facts stay on disk --
+        // this is a pause, not a delete, and `forgetAll` is the delete.
+        guard AppSettings.remembersThings else { return "" }
+
         let live = current(now: now)
         guard !live.isEmpty else { return "" }
 
@@ -172,6 +176,69 @@ final class AIMemory {
             guard !lines.isEmpty else { return nil }
             return ([kind.promptHeading] + lines).joined(separator: "\n")
         }.joined(separator: "\n")
+    }
+
+    // MARK: - Reading it back
+
+    /// One paragraph per kind, in plain prose.
+    ///
+    /// 🔴 **Composed here, on the device, from what is already stored. It
+    /// never asks the model.**
+    ///
+    /// That is the whole design and it is easy to get wrong, because the
+    /// obvious way to produce "a summary of what I know about you" is to hand
+    /// the facts to a model and ask. Every viewing of this screen would then
+    /// cost money and take a second, to restate sentences that were already
+    /// written in plain English when they were saved.
+    ///
+    /// The facts were written by the model -- during a chat that was
+    /// happening anyway, at no extra cost. Grouping them into paragraphs is
+    /// string work.
+    func summary(now: Date = .now) -> [Paragraph] {
+        let live = current(now: now)
+
+        return Kind.allCases.compactMap { kind in
+            let facts = live.filter { $0.kind == kind }
+            guard !facts.isEmpty else { return nil }
+
+            // Oldest first, so it reads as things accumulating rather than a
+            // stack with the newest on top.
+            let sentences = facts.reversed().map { fact -> String in
+                var line = fact.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                // Each fact is one sentence and was not necessarily saved with
+                // a full stop. Running them together without one gives a
+                // paragraph that reads as a run-on.
+                if let last = line.last, !".!?".contains(last) { line += "." }
+                if let until = fact.until {
+                    line += " (until \(until.formatted(.dateTime.day().month(.wide))))"
+                }
+                return line
+            }
+
+            return Paragraph(kind: kind, body: sentences.joined(separator: " "))
+        }
+    }
+
+    struct Paragraph: Identifiable {
+        let kind: Kind
+        let body: String
+        var id: Kind { kind }
+        var title: String { kind.title }
+    }
+
+    /// Changes the wording of one fact, keeping its kind and its end date.
+    ///
+    /// The screen shows what Maily believes; a person who can only delete a
+    /// belief they disagree with has to lose the true half of it too.
+    func revise(_ id: UUID, to text: String) {
+        let trimmed = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(280))
+        guard !trimmed.isEmpty,
+              let index = facts.firstIndex(where: { $0.id == id })
+        else { return }
+
+        facts[index].text = trimmed
+        persist()
+        push(facts[index])
     }
 
     // MARK: - Sync

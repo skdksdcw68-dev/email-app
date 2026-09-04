@@ -63,6 +63,47 @@ enum AppSettings {
         set { UserDefaults.standard.set(newValue, forKey: "settings.aiSummaries") }
     }
 
+    // MARK: - Notifications
+    //
+    // Per type, because "notifications" is not one thing. Mail arriving is
+    // constant and skippable; a reply Maily sent on somebody's behalf is
+    // neither, and somebody who wants the second without the first had no way
+    // to say so -- there was not a single switch on the notifications screen.
+
+    /// A banner when new mail arrives.
+    static var notifiesNewMail: Bool {
+        get { UserDefaults.standard.object(forKey: "settings.notify.mail") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.notify.mail") }
+    }
+
+    /// A banner when Auto-Reply has sent something for you.
+    ///
+    /// Defaults on and should stay that way: `AutoReplyNotice` exists because
+    /// mail going out under somebody's name without them seeing it first is
+    /// the one thing in this app they must always be told about.
+    static var notifiesAutoReply: Bool {
+        get { UserDefaults.standard.object(forKey: "settings.notify.autoReply") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.notify.autoReply") }
+    }
+
+    /// Only mail Maily judged urgent or needing a reply.
+    static var notifiesOnlyImportant: Bool {
+        get { UserDefaults.standard.object(forKey: "settings.notify.importantOnly") as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.notify.importantOnly") }
+    }
+
+    /// Whether Maily keeps what it is told about the person.
+    ///
+    /// Off does not delete anything -- it stops what is stored being sent, and
+    /// stops new things being added. Somebody turning this off for an
+    /// afternoon should not come back to an empty page, and the difference
+    /// between "paused" and "erased" is the whole reason there is also a
+    /// Forget everything button.
+    static var remembersThings: Bool {
+        get { UserDefaults.standard.object(forKey: "settings.memory") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.memory") }
+    }
+
     /// Extra guidance handed to the model whenever it writes for the user.
     static var customInstructions: String {
         get { UserDefaults.standard.string(forKey: "settings.customInstructions") ?? "" }

@@ -63,12 +63,37 @@ struct AIChatView: View {
     @State private var state = ChatState.fresh
     /// The model call in flight, so the stop button has something to stop.
     @State private var work: Task<Void, Never>?
+
+    /// Tokens that have arrived but not yet been drawn.
+    ///
+    /// A class on purpose, and it is the whole point: `@State` watches the
+    /// *reference*, so appending to a property inside it invalidates nothing.
+    /// A `@State String` would redraw the conversation on every token, which
+    /// is exactly the thing being fixed.
+    @State private var stream = StreamBuffer()
+
+    /// How long tokens are allowed to pile up before being drawn, in
+    /// milliseconds. Twelve updates a second: fast enough to read as typing,
+    /// slow enough that the view is not rebuilt eighty times a second.
+    private static let streamFlushInterval = 80
     @State private var editing: EditingDraft?
     /// The saved conversation this screen is writing to, once it has one.
     @State private var currentID: UUID?
 
     private struct EditingDraft: Identifiable {
         let id: ChatMessage.ID
+    }
+
+    /// Where streamed tokens wait between draws.
+    ///
+    /// Main-actor isolated rather than locked: every writer is a SwiftUI
+    /// callback and `AIService.askStreaming` already declares its `onDelta` as
+    /// `@MainActor`, so there is one thread and a lock would buy nothing but
+    /// a chance to hold it during I/O.
+    @MainActor
+    private final class StreamBuffer {
+        var pending = ""
+        var isFlushScheduled = false
     }
 
     /// What the composer is built from. The UIKit host rebuilds its content
@@ -783,6 +808,10 @@ struct AIChatView: View {
     }
 
     private func currentText(of id: ChatMessage.ID?) -> String {
+        // Whatever is still buffered is text the model has already sent. The
+        // search-request check reads this, and a request split across a flush
+        // boundary would otherwise be missed.
+        drainDelta(into: id)
         guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return "" }
         return turns[index].text
     }
@@ -791,6 +820,10 @@ struct AIChatView: View {
     /// Leaving "SEARCH: upwork welcome" on screen and appending the real
     /// answer under it would show the reader the plumbing.
     private func clearText(of id: ChatMessage.ID?) {
+        // Dropped rather than drained: this is wiping what the model wrote, so
+        // anything still in the buffer belongs to the same discarded pass and
+        // would otherwise reappear at the top of the real answer.
+        stream.pending = ""
         guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
         turns[index].text = ""
         turns[index].isPending = true
@@ -833,15 +866,64 @@ struct AIChatView: View {
 
     /// Appends a fragment as it arrives. No animation on each one: animating
     /// every token turns a smooth stream into a stutter.
+    /// One token in from the model.
+    ///
+    /// 🔴 **This does not touch `turns`.** It used to, and that is what locked
+    /// the phone up while an answer was being written.
+    ///
+    /// `turns` is `@State`, so writing to it invalidates this view -- and this
+    /// view is the whole conversation: every previous turn, its markdown, its
+    /// cards, its trail. The model streams thirty to eighty tokens a second,
+    /// so the app was rebuilding the entire chat that many times a second, on
+    /// the main thread, while also running a linear search through `turns` to
+    /// find which one to append to. The longer the conversation, the worse it
+    /// got, which is why it felt like the phone rather than the app.
+    ///
+    /// Now fragments land in a plain reference type -- mutating it invalidates
+    /// nothing -- and are written across on a timer. Twelve redraws a second
+    /// instead of eighty, and text appearing twelve times a second still reads
+    /// as it being typed.
     private func appendDelta(_ id: ChatMessage.ID?, _ fragment: String) {
-        guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
+        stream.pending += fragment
+        guard !stream.isFlushScheduled else { return }
+
+        stream.isFlushScheduled = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(Self.streamFlushInterval))
+            stream.isFlushScheduled = false
+            flushDelta(into: id)
+        }
+    }
+
+    /// Moves whatever has arrived since the last flush into the turn.
+    private func flushDelta(into id: ChatMessage.ID?) {
+        let fragment = stream.pending
+        stream.pending = ""
+
+        guard !fragment.isEmpty,
+              let id, let index = turns.firstIndex(where: { $0.id == id })
+        else { return }
+
         turns[index].text += fragment
+
         // The trail stays up while what has arrived could still turn into a
         // request to look. "SEARCH: upwork welcome" flashing on screen for
         // the second before the search replaced it was the plumbing showing.
-        if !SearchRequest.couldBecomeRequest(turns[index].text) {
+        //
+        // Only asked while it is still open: once the text cannot become a
+        // request it never can again, because it only grows.
+        if turns[index].isPending, !SearchRequest.couldBecomeRequest(turns[index].text) {
             turns[index].isPending = false
         }
+    }
+
+    /// Anything buffered but not yet shown, moved across now.
+    ///
+    /// Called before every read of a turn's text and before the answer is
+    /// finished, because a flush that is still sitting on the timer is text
+    /// the model sent and the reader has not seen.
+    private func drainDelta(into id: ChatMessage.ID?) {
+        flushDelta(into: id)
     }
 
     /// The answer is complete. Blocks land now, so cards do not pop in
@@ -856,6 +938,8 @@ struct AIChatView: View {
         searchNote: String? = nil,
         found: [Message] = []
     ) {
+        // The last tokens of the answer are usually still on the timer.
+        drainDelta(into: id)
         guard let id, let index = turns.firstIndex(where: { $0.id == id }) else { return }
         turns[index].searchNote = searchNote
 

@@ -70,11 +70,22 @@ private struct PulsingDot: View {
     var body: some View {
         Circle()
             .fill(Color.accentColor)
-            .frame(width: 7, height: 7)
-            .scaleEffect(isUp ? 1 : 0.55)
-            .opacity(isUp ? 1 : 0.4)
+            // Was 7pt shrinking to 0.55 -- under four points at the bottom of
+            // its breath, which is smaller than the full stop at the end of
+            // the line beside it. This is the only thing on screen saying the
+            // app is still working, so it has to be seen without looking for
+            // it.
+            //
+            // Bigger, and it now breathes between 0.8 and 1.1 rather than
+            // 0.55 and 1: the movement reads as a pulse instead of the dot
+            // repeatedly almost vanishing.
+            .frame(width: 11, height: 11)
+            .scaleEffect(isUp ? 1.1 : 0.8)
+            .opacity(isUp ? 1 : 0.55)
+            // A fixed box, so the row does not shift as it breathes.
+            .frame(width: 14, height: 14)
             .onAppear {
-                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                withAnimation(.easeInOut(duration: 0.65).repeatForever(autoreverses: true)) {
                     isUp = true
                 }
             }

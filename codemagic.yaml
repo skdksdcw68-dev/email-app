@@ -114,10 +114,14 @@ workflows:
         # Where this provider's build numbers start.
         #
         # App Store Connect refuses a build number it has already seen, and it
-        # has seen everything the GitHub runs uploaded. Codemagic's own
-        # counter starts at 1, which would collide immediately -- so it is
-        # offset past anything that came before. Raise this, never lower it.
-        BUILD_NUMBER_OFFSET: 500
+        # has seen everything the GitHub runs uploaded -- the highest of those
+        # is 102. Codemagic's own counter starts at 1, so it is offset past
+        # them: the first build here is 151.
+        #
+        # Clear of 102 with room to spare, and still close enough that a build
+        # number in TestFlight reads as the next one rather than as a jump to
+        # somewhere unrelated. Raise this, never lower it.
+        BUILD_NUMBER_OFFSET: 150
 
     scripts:
       - name: Install XcodeGen

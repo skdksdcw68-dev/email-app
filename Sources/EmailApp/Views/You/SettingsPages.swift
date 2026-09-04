@@ -45,11 +45,11 @@ struct AppSettingsView: View {
                     config.isSetUp ? AnyView(AutoReplyEditView()) : AnyView(AutoReplyView())
                 }
                 if config.isSetUp {
-                    SettingsRow("Rules",
-                                value: config.instructions.isEmpty
-                                    ? "None" : "\(config.activeInstructions.count)") {
-                        AutoReplyInstructionsView()
-                    }
+                    // "Rules" was here, and it opened `AutoReplyInstructionsView`
+                    // -- the same page reachable from Auto-Reply as "Custom
+                    // instructions", from Edit setup as "Custom instructions",
+                    // and inline in the setup flow. Four doors, three names,
+                    // one page. This was the fourth.
                     SettingsRow("Boundaries", value: "\(config.mustAsk.count)") {
                         AutoReplySetupView(editing: config, startingAt: .boundaries, singleStep: true)
                     }
@@ -66,9 +66,12 @@ struct AppSettingsView: View {
                 Text("Auto-Reply")
             }
 
+            // Rows now say what the page they open is called. Eight of them
+            // disagreed: "Automation" opened "AI & Automation", "Running"
+            // opened "Automations", "Privacy" opened "Privacy & Security",
+            // "Storage" opened "App". A row is a promise about where it goes.
             Section {
-                SettingsRow("Automation") { AIAutomationSettingsView() }
-                SettingsRow("Running") { AutomationsView() }
+                SettingsRow("AI & Automation") { AIAutomationSettingsView() }
                 SettingsRow("Notifications") { NotificationSettingsView() }
                 SettingsRow("Language", value: "English") { LanguageView() }
             } header: {
@@ -76,7 +79,7 @@ struct AppSettingsView: View {
             }
 
             Section {
-                SettingsRow("Privacy") { PrivacySettingsView() }
+                SettingsRow("Privacy & Security") { PrivacySettingsView() }
                 SettingsRow("Storage", value: "\(mail.messages.count)") {
                     StorageSettingsView()
                 }
@@ -90,26 +93,44 @@ struct AppSettingsView: View {
                 Text("Get help")
             }
 
-            Section {
-                Button(role: .destructive) { isConfirmingSignOut = true } label: {
-                    Text("Log out")
-                        .font(.subheadline)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .padding(.vertical, 2)
+            // Signs out of the **mailbox**, not the account.
+            //
+            // It used to say "Log out" and call `user.signOut()`, which clears
+            // three UserDefaults keys, does not call `AuthService.signOut()`
+            // at all, and leaves the mailbox connected. Meanwhile Privacy had
+            // "Sign out and erase", which did the whole thing. Two buttons,
+            // near-identical words, materially different outcomes, and no way
+            // to tell which was which before pressing one.
+            //
+            // Now: this one disconnects the mailbox in front of you. Ending
+            // the Maily account lives on Edit profile, alone, and says so.
+            if let account = mail.account {
+                Section {
+                    Button(role: .destructive) { isConfirmingSignOut = true } label: {
+                        Text("Sign out of this mailbox")
+                            .font(Style.rowTitle)
+                            .foregroundStyle(Color.urgent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .padding(.vertical, 2)
+                    }
+                    .buttonStyle(.plain)
+                } footer: {
+                    Text("Disconnects \(account.address) from this phone. Your Maily account, your other mailboxes and everything you have taught it stay. To sign out of Maily itself, go to You → Edit profile.")
                 }
-                .buttonStyle(.plain)
             }
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
-        .alert("Log out of Maily?", isPresented: $isConfirmingSignOut) {
+        .alert("Sign out of this mailbox?", isPresented: $isConfirmingSignOut) {
             Button("Cancel", role: .cancel) {}
-            Button("Log out", role: .destructive) { user.signOut() }
+            // `disconnect`, not `user.signOut()`. The old button called the
+            // latter, which ends the Maily *account* -- from a row that read
+            // like it was about the mailbox.
+            Button("Sign out", role: .destructive) { mail.disconnect() }
         } message: {
-            Text("Your mail stays in Gmail. What Maily keeps on this phone goes.")
+            Text("Its mail, read state, snoozes and drafts go from this phone, and Maily's access to it ends. Your mail itself is untouched, and you stay signed in to Maily.")
         }
     }
 
@@ -126,67 +147,77 @@ struct NotificationSettingsView: View {
     @Environment(MailStore.self) private var mail
     @Environment(PushService.self) private var push
 
+    @State private var newMail = AppSettings.notifiesNewMail
+    @State private var autoReplySent = AppSettings.notifiesAutoReply
+    @State private var importantOnly = AppSettings.notifiesOnlyImportant
+    @State private var showingDiagnostics = false
+
     var body: some View {
         List {
-            Section {
-                LabeledContent("Status") {
-                    Text(push.isAuthorized ? "On" : "Off")
-                        .foregroundStyle(push.isAuthorized ? Color.green : Color.secondary)
-                }
-                LabeledContent("This device") {
-                    Text(push.token == nil ? "Not registered" : "Registered")
-                        .foregroundStyle(push.token == nil ? Color.secondary : Color.green)
-                }
-                LabeledContent("Woken by Gmail") {
-                    if let at = push.lastPushAt {
-                        Text(at.formatted(.relative(presentation: .named)))
-                            .foregroundStyle(Color.green)
-                    } else {
-                        Text("Never").foregroundStyle(Color.secondary)
-                    }
-                }
-                if let result = push.lastPushResult {
-                    LabeledContent("Last wake", value: result)
-                }
-            } header: {
-                Text("New mail")
-            } footer: {
-                Text(push.isAuthorized
-                     ? "Maily is woken when mail arrives, reads it on this phone, and writes the notification here. The sender and subject never leave your device."
-                     : "Without this, new mail only appears when you open the app.")
-            }
-
+            // 🔴 One switch when iOS has not agreed yet, and nothing else.
+            //
+            // The screen used to show its whole contents regardless -- status
+            // rows, wake times, diagnostics -- to somebody who had not granted
+            // permission and for whom none of it could be true. Offering a
+            // page of settings that cannot take effect is worse than offering
+            // one thing that can.
             if !push.isAuthorized {
+                permissionGate
+            } else {
                 Section {
-                    Button("Turn on notifications") {
-                        Task { await push.enable(topic: PushService.topic, for: mail.registry.accounts) }
-                    }
-                    Button("Open iOS Settings") {
-                        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                        UIApplication.shared.open(url)
-                    }
-                } footer: {
-                    // iOS shows the permission prompt once and once only. After
-                    // that the button above does nothing visible, and the only
-                    // way back is the Settings app.
-                    Text("If the first button does nothing, iOS has already asked once. Use Settings instead.")
-                }
-            }
+                    Toggle("New mail", isOn: $newMail)
+                        .onChange(of: newMail) { _, value in AppSettings.notifiesNewMail = value }
 
-            if let error = push.lastError {
-                Section {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
+                    if newMail {
+                        Toggle("Only what matters", isOn: $importantOnly)
+                            .onChange(of: importantOnly) { _, value in
+                                AppSettings.notifiesOnlyImportant = value
+                            }
+                    }
                 } header: {
-                    Text("Last problem")
+                    Text("New mail")
+                } footer: {
+                    Text(importantOnly
+                         ? "Only mail Maily tagged as urgent or needing a reply. Anything it has not read yet still comes through, because unread is not the same as unimportant."
+                         : "Maily is woken when mail arrives, reads it on this phone, and writes the notification here. The sender and subject never leave your device.")
                 }
+
+                Section {
+                    Toggle("Replies Maily sent for me", isOn: $autoReplySent)
+                        .onChange(of: autoReplySent) { _, value in
+                            AppSettings.notifiesAutoReply = value
+                        }
+                } header: {
+                    Text("Auto-Reply")
+                } footer: {
+                    Text("Mail going out under your name without you seeing it first is the one thing worth interrupting you for. Separate from new mail on purpose — silencing a busy inbox should not silence this.")
+                }
+
+                // Per mailbox, and this now does something: the flag was
+                // written by a switch on each mailbox's page and read by
+                // nothing at all.
+                if mail.registry.hasSeveral {
+                    Section {
+                        ForEach(mail.registry.accounts) { account in
+                            Toggle(account.title, isOn: Binding(
+                                get: { account.notifies },
+                                set: { on in mail.registry.update(account.id) { $0.notifies = on } }
+                            ))
+                        }
+                    } header: {
+                        Text("Which mailboxes")
+                    } footer: {
+                        Text("The first thing anybody with two mailboxes wants is mail from one and quiet from the other.")
+                    }
+                }
+
+                diagnostics
             }
 
             if !mail.isConnected {
                 Section {
-                    Label("Connect a mailbox first.", systemImage: "tray")
-                        .font(.footnote)
+                    Text("Connect a mailbox first.")
+                        .font(Style.rowDetail)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -196,34 +227,120 @@ struct NotificationSettingsView: View {
         .hidesTabBar()
         .task { await push.refreshAuthorization() }
     }
+
+    /// The only thing on screen until iOS has said yes.
+    private var permissionGate: some View {
+        Section {
+            Toggle("Allow notifications", isOn: Binding(
+                get: { push.isAuthorized },
+                set: { wantsOn in
+                    guard wantsOn else { return }
+                    Task { await push.enable(topic: PushService.topic, for: mail.registry.accounts) }
+                }
+            ))
+
+            // iOS shows its prompt once per install and never again. After a
+            // refusal the switch above genuinely cannot do anything, and
+            // saying so is better than a control that silently fails.
+            Button("Open iOS Settings") {
+                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                UIApplication.shared.open(url)
+            }
+            .font(Style.rowTitle)
+        } header: {
+            Text("Notifications")
+        } footer: {
+            Text("Without this, new mail only appears when you open Maily. If the switch does nothing, iOS has already asked once — use Settings instead.")
+        }
+    }
+
+    /// Kept, but folded away.
+    ///
+    /// These four lines are how a "notifications are not arriving" report gets
+    /// diagnosed, and they have earned their place more than once. They are
+    /// also not settings, and they were the entire screen -- somebody looking
+    /// for a switch found a status report.
+    private var diagnostics: some View {
+        Section {
+            DisclosureGroup("If something is not arriving", isExpanded: $showingDiagnostics) {
+                LabeledContent("This device") {
+                    Text(push.token == nil ? "Not registered" : "Registered")
+                        .foregroundStyle(push.token == nil ? Color.secondary : Color.ok)
+                }
+                LabeledContent("Last woken") {
+                    if let at = push.lastPushAt {
+                        Text(at.formatted(.relative(presentation: .named)))
+                    } else {
+                        Text("Never").foregroundStyle(.secondary)
+                    }
+                }
+                if let result = push.lastPushResult {
+                    LabeledContent("Last wake", value: result)
+                }
+                if let error = push.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(Style.rowDetail)
+                        .foregroundStyle(Color.warning)
+                }
+            }
+            .font(Style.rowTitle)
+        }
+    }
 }
 
 /// What the AI may do, what it must ask about, and the rules that steer it.
 struct AIAutomationSettingsView: View {
     @Environment(MailStore.self) private var mail
+    @Environment(AutoReplyStore.self) private var autoReply
 
     @State private var tagging = AppSettings.tagsIncomingMail
     @State private var summaries = AppSettings.writesSummaries
     @State private var asksBeforeBulk = !BulkReplyFlow.hasConsented
+
+    private var autoReplyState: String {
+        guard autoReply.config.isRunning else { return "Off" }
+        return autoReply.config.mode == .send ? "Sending" : "Writing drafts"
+    }
 
     private var important: [Person] { mail.people.filter(\.isImportant) }
     private var muted: [Person] { mail.people.filter(\.isMuted) }
 
     var body: some View {
         List {
-            // The third copy of the same two switches, removed. They live on
-            // Preferences; this points at them.
+            // What is actually running, and switchable where it can be.
+            //
+            // This was its own page called "Running", reached from a Settings
+            // row called "Running" that opened a page titled "Automations".
+            // Three read-only rows saying On or Off, two links to pages that
+            // are already in Settings, and no way to change anything from the
+            // one screen people open when they want something to stop.
+            //
+            // Folded in here, with the switch where there is one.
             Section {
-                NavigationLink { AIPreferencesView() } label: {
-                    LabeledContent("Reading and summaries") {
-                        Text(tagging ? "On" : "Off")
+                Toggle("Sorting new mail", isOn: $tagging)
+                    .onChange(of: tagging) { _, value in AppSettings.tagsIncomingMail = value }
+
+                Toggle("Summarising what I open", isOn: $summaries)
+                    .onChange(of: summaries) { _, value in AppSettings.writesSummaries = value }
+
+                // Not a toggle, because turning Auto-Reply on is a decision
+                // with a confirmation attached and it belongs on its own
+                // screen. This says what it is doing and goes there.
+                NavigationLink { AutoReplyView() } label: {
+                    LabeledContent("Auto-Reply") {
+                        Text(autoReplyState)
                     }
                     .font(Style.rowTitle)
                 }
+
+                LabeledContent("Following up") {
+                    Text("\(mail.followUps.count) watched")
+                }
+                .font(Style.rowTitle)
             } header: {
-                Text("AI permissions")
+                Text("Running now")
             } footer: {
-                Text("What Maily is allowed to do with mail as it arrives.")
+                Text("Everything Maily does on its own. With sorting off it still files mail using rules on this phone, which cost nothing.")
             }
 
             Section {
@@ -394,9 +511,35 @@ struct MemorySettingsView: View {
     @Environment(AIMemory.self) private var memory
 
     @State private var showingClear = false
+    @State private var isOn = AppSettings.remembersThings
 
     var body: some View {
         List {
+            Section {
+                Toggle("Remember things about me", isOn: $isOn)
+                    .onChange(of: isOn) { _, value in AppSettings.remembersThings = value }
+            } footer: {
+                // Pause, not delete, and it says which. Somebody who turns
+                // this off for an afternoon should not come back to an empty
+                // page -- that is what Forget everything is for.
+                Text(isOn
+                     ? "Maily keeps what you tell it to remember and uses it when it writes for you."
+                     : "Nothing new is kept and nothing already here is used. What Maily already knows is still below, and comes back if you turn this on again.")
+            }
+
+            if !memory.facts.isEmpty {
+                Section {
+                    NavigationLink { MemorySummaryView() } label: {
+                        LabeledContent("Memory summary") {
+                            Text("\(memory.facts.count)")
+                        }
+                        .font(Style.rowTitle)
+                    }
+                } footer: {
+                    Text("Everything Maily knows about you, read as one page.")
+                }
+            }
+
             if memory.facts.isEmpty {
                 Section {
                     ContentUnavailableView(
@@ -449,6 +592,92 @@ struct MemorySettingsView: View {
             Button("Forget", role: .destructive) { memory.forgetAll() }
         } message: {
             Text("Maily will stop applying all \(memory.facts.count) of these. It cannot be undone.")
+        }
+    }
+}
+
+/// What Maily knows about you, as prose rather than a list of rows.
+///
+/// 🔴 **Written here, on the phone, from what is already stored. No model
+/// call, no tokens, no wait.**
+///
+/// Worth being explicit because the obvious implementation is the wrong one:
+/// "summarise what you know about me" reads like a job for the model, and
+/// doing it that way would charge for every viewing of this screen to restate
+/// sentences that were already plain English when they were saved. The facts
+/// were written by the model, inside a chat that was happening anyway. This
+/// only groups them.
+///
+/// Each line is editable, because a page showing what an assistant believes
+/// about somebody is useless if the only response to a wrong belief is to
+/// delete the true half along with it.
+struct MemorySummaryView: View {
+    @Environment(AIMemory.self) private var memory
+
+    @State private var editing: AIMemory.Fact?
+    @State private var revised = ""
+
+    var body: some View {
+        List {
+            ForEach(memory.summary()) { paragraph in
+                Section {
+                    Text(paragraph.body)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .listRowSeparator(.hidden)
+
+                    DisclosureGroup("Change these") {
+                        ForEach(memory.facts.filter { $0.kind == paragraph.kind }) { fact in
+                            Button {
+                                revised = fact.text
+                                editing = fact
+                            } label: {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text(fact.text)
+                                        .font(Style.rowDetail)
+                                        .foregroundStyle(fact.isExpired() ? .secondary : .primary)
+                                        .multilineTextAlignment(.leading)
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "pencil")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tint)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                        }
+                        .onDelete { offsets in
+                            let facts = memory.facts.filter { $0.kind == paragraph.kind }
+                            for index in offsets { memory.forget(facts[index].id) }
+                        }
+                    }
+                    .font(Style.rowDetail)
+                } header: {
+                    Text(paragraph.title)
+                }
+            }
+        }
+        .navigationTitle("Memory summary")
+        .navigationBarTitleDisplayMode(.inline)
+        .hidesTabBar()
+        .overlay {
+            if memory.facts.isEmpty {
+                ContentUnavailableView(
+                    "Nothing yet",
+                    systemImage: "brain",
+                    description: Text("Tell Maily \"remember that I sign off as Abel\" and it will keep it.")
+                )
+            }
+        }
+        .alert("Change this", isPresented: .constant(editing != nil)) {
+            TextField("", text: $revised)
+            Button("Cancel", role: .cancel) { editing = nil }
+            Button("Save") {
+                if let editing { memory.revise(editing.id, to: revised) }
+                editing = nil
+            }
+        } message: {
+            Text("Maily will use these words instead.")
         }
     }
 }
