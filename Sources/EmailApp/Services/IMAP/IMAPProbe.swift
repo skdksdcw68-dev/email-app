@@ -1,16 +1,22 @@
 import Foundation
 import Darwin
 
-/// Finding a mailbox by trying, rather than by asking.
+/// Checking one server, once.
 ///
-/// The add-account screen collects an address and a password. This turns that
-/// into a working connection, or into a specific reason it is not one.
+/// ⚠️ This used to *search*: up to eight candidate hosts in turn, thirty
+/// seconds apiece, on the theory that nobody should have to know what an IMAP
+/// server is. It was a bad trade and it is worth writing down why, because the
+/// idea is tempting enough to come back.
 ///
-/// ⏱️ **Speed is a feature here, and the first version did not have it.** Ten
-/// candidate hosts at a thirty second timeout each is five minutes of
-/// spinner, which nobody waits through -- and most of those candidates do not
-/// exist at all. So a name is resolved before anything is dialled, which
-/// takes about a tenth of a second and removes most of the list.
+/// It was slow -- minutes of spinner in the bad case, which is exactly the
+/// case where somebody is already unsure it is working. And when it failed it
+/// could not say anything useful: a refusal means *a* server said no, but the
+/// app had picked that server, so it could not tell "your password is wrong"
+/// from "your mailbox is not on the machine I guessed". Those need opposite
+/// responses and the search made them identical.
+///
+/// Gmail's own app just asks. So the fields are asked for, prefilled from the
+/// domain, and this dials the one server that was actually typed in.
 enum IMAPProbe {
 
     /// How long one host gets. Short on purpose: a mail server that has not
@@ -52,18 +58,7 @@ enum IMAPProbe {
         case refused(reason: String, host: String)
     }
 
-    /// Where the search has got to, so the screen can show something moving.
-    struct Progress: Sendable {
-        var host: String
-        var attempt: Int
-        var total: Int
-
-        var fraction: Double {
-            total > 0 ? Double(attempt) / Double(total) : 0
-        }
-    }
-
-    // MARK: - One host
+    // MARK: - The attempt
 
     static func verify(_ config: IMAPConfig, password: String) async -> Outcome {
         // Nothing to dial if the name does not exist. This is the whole
@@ -120,50 +115,5 @@ enum IMAPProbe {
                 continuation.resume(returning: status == 0)
             }
         }
-    }
-
-    // MARK: - The search
-
-    /// The whole search: the likely answer first, then the usual suspects.
-    ///
-    /// 🔴 Stops the moment a server *answers* and rejects the password. Trying
-    /// the same password against nine more hosts is how an account gets locked
-    /// out, and it would not help -- a refusal means a host was found.
-    ///
-    /// Which is exactly why `refused` carries the host it came from. A refusal
-    /// can mean the password is wrong, or it can mean the app dialled a real
-    /// server that this mailbox is simply not on. Those look identical from
-    /// here and only the person signing in can tell them apart -- so the app
-    /// says which door it knocked on rather than guessing on their behalf.
-    static func discover(
-        address: String,
-        password: String,
-        onProgress: @Sendable @escaping (Progress) -> Void = { _ in }
-    ) async -> Outcome {
-        let first = MailServerGuess.first(for: address)
-        let rest = MailServerGuess.alternatives(for: address)
-            .filter { $0.imapHost != first.config.imapHost }
-        let total = 1 + rest.count
-
-        onProgress(Progress(host: first.config.imapHost, attempt: 1, total: total))
-        let opening = await verify(first.config, password: password)
-        switch opening {
-        case .ok, .refused: return opening
-        case .unreachable: break
-        }
-
-        var lastReason = "Could not reach \(first.config.imapHost)."
-
-        for (index, candidate) in rest.enumerated() {
-            onProgress(Progress(host: candidate.imapHost, attempt: index + 2, total: total))
-
-            switch await verify(candidate, password: password) {
-            case .ok(let success): return .ok(success)
-            case .refused(let reason, let host): return .refused(reason: reason, host: host)
-            case .unreachable(let reason): lastReason = reason
-            }
-        }
-
-        return .unreachable(lastReason)
     }
 }

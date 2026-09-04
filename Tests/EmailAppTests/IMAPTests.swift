@@ -127,17 +127,22 @@ final class IMAPTests: XCTestCase {
         XCTAssertEqual(guess.config.imapHost, "imap.example.com")
     }
 
-    func testAKnownProviderHasNoAlternativesToTry() {
-        // Trying nine more hosts for a Gmail address would find nothing and
-        // would put the same password in front of nine servers.
-        XCTAssertTrue(MailServerGuess.alternatives(for: "a@gmail.com").isEmpty)
+    func testAKnownProviderFillsInItsPorts() {
+        // Outlook is the case where the ports differ from the common pair:
+        // 993 in, but 587 with STARTTLS out rather than 465.
+        let guess = MailServerGuess.first(for: "someone@outlook.com")
+        XCTAssertEqual(guess.config.imapPort, 993)
+        XCTAssertEqual(guess.config.smtpPort, 587)
+        XCTAssertEqual(guess.config.smtpSecurity, .startTLS)
     }
 
-    func testACustomDomainGetsAlternativesWorthTrying() {
-        let options = MailServerGuess.alternatives(for: "abel@somecompany.com")
-        XCTAssertTrue(options.contains { $0.imapHost == "mail.somecompany.com" })
-        // The shared hosts a small business is actually likely to be on.
-        XCTAssertTrue(options.contains { $0.imapHost == "mail.privateemail.com" })
+    func testTheFieldsAreNeverLeftEmpty() {
+        // Whatever the domain, the form opens with something to correct
+        // rather than four blank boxes.
+        let guess = MailServerGuess.first(for: "onboarding@drobefashion.com")
+        XCTAssertFalse(guess.config.imapHost.isEmpty)
+        XCTAssertFalse(guess.config.smtpHost.isEmpty)
+        XCTAssertFalse(guess.config.username.isEmpty)
     }
 
     func testProtonIsCalledOutRatherThanQuietlyFailing() {

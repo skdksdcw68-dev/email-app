@@ -35,10 +35,7 @@ struct AddMailboxFlow: View {
     @State private var imapAddress = ""
     @State private var imapPassword = ""
     @State private var server = IMAPConfig(imapHost: "", smtpHost: "", username: "")
-    @State private var showsServerFields = false
     @State private var isTesting = false
-    @State private var probe: IMAPProbe.Progress?
-    @State private var serverNote: String?
 
     // MARK: - The step graph
 
@@ -60,10 +57,7 @@ struct AddMailboxFlow: View {
             // apart with a colour either.
             case .naming: !firstRun
             case .googleConsent: provider != .imap
-            case .imapSignIn: provider == .imap
-            // Only when the guess was wrong. Most people never see this, and
-            // the ones who do are the ones who need it.
-            case .imapServer: provider == .imap && showsServerFields
+            case .imapSignIn, .imapServer: provider == .imap
             default: true
             }
         }
@@ -227,14 +221,45 @@ struct AddMailboxFlow: View {
     /// loses people on the second one.
     private var imapSignInStep: some View {
         AutoReplyStep(
-            "Sign in to your mailbox",
-            "Works with business email, your own domain, and most providers."
+            "Add your email address",
+            "Business email, your own domain, or most other providers."
         ) {
             VStack(alignment: .leading, spacing: 20) {
                 FieldBlock(label: "Email address", hint: "you@yourcompany.com", text: $imapAddress)
                     .textInputAutocapitalization(.never)
                     .keyboardType(.emailAddress)
                     .textContentType(.username)
+
+                if let warning = MailServerGuess.first(for: imapAddress).warning,
+                   imapAddress.contains("@") {
+                    Label(warning, systemImage: "info.circle")
+                        .font(Style.rowDetail)
+                        .foregroundStyle(Color.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// The server, asked for rather than hunted for.
+    ///
+    /// This screen replaced a search that tried up to eight hosts in turn,
+    /// thirty seconds apiece. It was clever and it was wrong: slow when it
+    /// worked, and when it failed it could only say "a server refused you"
+    /// without being able to say which -- because it had picked the server.
+    ///
+    /// Gmail's own app just asks. So does this now. The fields arrive
+    /// prefilled from the domain, so for most people it is still one tap; for
+    /// everybody else it is the four things their host's help page lists,
+    /// under the same names their host uses.
+    private var imapServerStep: some View {
+        AutoReplyStep(
+            "Incoming server settings",
+            "Your email provider lists these as IMAP settings."
+        ) {
+            VStack(alignment: .leading, spacing: 20) {
+                FieldBlock(label: "Username", hint: "Usually your full email address", text: $server.username)
+                    .textInputAutocapitalization(.never)
 
                 VStack(alignment: .leading, spacing: Style.tight) {
                     Text("Password").font(Style.rowTitleStrong)
@@ -245,34 +270,33 @@ struct AddMailboxFlow: View {
                         .cardBackground()
                 }
 
-                if let warning = MailServerGuess.first(for: imapAddress).warning,
-                   imapAddress.contains("@") {
-                    Label(warning, systemImage: "info.circle")
-                        .font(Style.rowDetail)
-                        .foregroundStyle(Color.warning)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                FieldBlock(label: "IMAP server", hint: "imap.yourcompany.com", text: $server.imapHost)
+                    .textInputAutocapitalization(.never)
+
+                portField("Port", port: $server.imapPort)
+
+                securityPicker("Security type", security: $server.imapSecurity, port: $server.imapPort)
+
+                Divider().padding(.vertical, 4)
+
+                Text("Outgoing server settings")
+                    .font(Style.rowTitleStrong)
+
+                FieldBlock(label: "SMTP server", hint: "smtp.yourcompany.com", text: $server.smtpHost)
+                    .textInputAutocapitalization(.never)
+
+                portField("Port", port: $server.smtpPort)
+
+                securityPicker("Security type", security: $server.smtpSecurity, port: $server.smtpPort)
 
                 if isTesting {
-                    searchProgress
-                } else {
-                    // Always offered, never buried behind a failure.
-                    //
-                    // Gmail's own app asks for the IMAP server, the port and
-                    // the security type before it will try anything. Asking is
-                    // worse for the many and essential for the few, so the app
-                    // guesses first and keeps this here for anybody who
-                    // already knows -- rather than making them fail once to
-                    // earn the form.
-                    Button("Enter server settings myself") {
-                        server = MailServerGuess.first(for: imapAddress).config
-                        withAnimation(.snappy(duration: 0.25)) {
-                            showsServerFields = true
-                            index += 1
-                        }
+                    HStack(spacing: Style.tight) {
+                        ProgressView().controlSize(.small)
+                        Text("Connecting to \(server.imapHost)…")
+                            .font(Style.rowDetail)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
-                    .font(Style.rowDetail)
-                    .disabled(!imapAddress.contains("@"))
                 }
 
                 Text("Your password is kept in this phone's Keychain and used only to reach your mail server. It is not sent anywhere else.")
@@ -283,65 +307,38 @@ struct AddMailboxFlow: View {
         }
     }
 
-    /// What the search is doing, rather than a spinner that says nothing.
-    ///
-    /// A bare spinner on a job that can take half a minute reads as a hang,
-    /// and somebody who thinks it has hung closes it. A bar that visibly moves
-    /// and a host that visibly changes say the same thing the spinner was
-    /// trying to: it is working, and it is nearly there.
-    private var searchProgress: some View {
+    private func portField(_ label: String, port: Binding<Int>) -> some View {
         VStack(alignment: .leading, spacing: Style.tight) {
-            ProgressView(value: probe?.fraction ?? 0)
-                .tint(Color.accentColor)
-
-            HStack(spacing: Style.tight) {
-                Text(probe.map { "Checking \($0.host)" } ?? "Checking your mailbox")
-                    .font(Style.rowDetail)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-
-                if let probe {
-                    Text("\(probe.attempt) of \(probe.total)")
-                        .font(Style.caption)
-                        .foregroundStyle(.tertiary)
-                        .monospacedDigit()
-                }
-            }
+            Text(label).font(Style.rowTitleStrong)
+            TextField("", value: port, format: .number.grouping(.never))
+                .keyboardType(.numberPad)
+                .padding(.horizontal, 14)
+                .frame(height: 46)
+                .cardBackground()
         }
-        .animation(.snappy(duration: 0.3), value: probe?.attempt)
     }
 
-    /// Only reached when the guessing failed.
-    private var imapServerStep: some View {
-        AutoReplyStep(
-            "Where is your mail?",
-            serverNote ?? "Your provider's help pages list these as IMAP and SMTP settings."
-        ) {
-            VStack(alignment: .leading, spacing: 20) {
-                FieldBlock(label: "IMAP server", hint: "imap.yourcompany.com", text: $server.imapHost)
-                    .textInputAutocapitalization(.never)
-
-                FieldBlock(label: "Username", hint: "Usually your full email address", text: $server.username)
-                    .textInputAutocapitalization(.never)
-
-                FieldBlock(label: "Outgoing (SMTP) server", hint: "smtp.yourcompany.com", text: $server.smtpHost)
-                    .textInputAutocapitalization(.never)
-
-                VStack(alignment: .leading, spacing: Style.tight) {
-                    Text("Outgoing port").font(Style.rowTitleStrong)
-                    Picker("Outgoing port", selection: $server.smtpPort) {
-                        Text("465 (SSL)").tag(465)
-                        Text("587 (STARTTLS)").tag(587)
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: server.smtpPort) { _, port in
-                        server.smtpSecurity = port == 587 ? .startTLS : .tls
-                    }
+    /// The port and the encryption are two ways of saying one thing, and
+    /// people get them out of step. Changing either moves the other to the
+    /// pairing that actually exists.
+    private func securityPicker(
+        _ label: String,
+        security: Binding<TransportSecurity>,
+        port: Binding<Int>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Style.tight) {
+            Text(label).font(Style.rowTitleStrong)
+            Picker(label, selection: security) {
+                Text("SSL/TLS").tag(TransportSecurity.tls)
+                Text("STARTTLS").tag(TransportSecurity.startTLS)
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: security.wrappedValue) { _, choice in
+                if port.wrappedValue == 993 || port.wrappedValue == 143 {
+                    port.wrappedValue = choice == .tls ? 993 : 143
+                } else if port.wrappedValue == 465 || port.wrappedValue == 587 {
+                    port.wrappedValue = choice == .tls ? 465 : 587
                 }
-
-                if isTesting { searchProgress }
             }
         }
     }
@@ -446,8 +443,8 @@ struct AddMailboxFlow: View {
         switch step {
         case .provider:      "Continue"
         case .googleConsent: "Sign in with Google"
-        case .imapSignIn:    "Sign in"
-        case .imapServer:    "Try again"
+        case .imapSignIn:    "Next"
+        case .imapServer:    "Sign in"
         case .naming:        "Continue"
         case .importScope:   "Bring it over"
         case .importing:     nil
@@ -459,9 +456,10 @@ struct AddMailboxFlow: View {
         switch step {
         case .provider: provider != nil
         case .imapSignIn:
-            imapAddress.contains("@") && !imapPassword.isEmpty && !isTesting
+            imapAddress.contains("@")
         case .imapServer:
-            !server.imapHost.isEmpty && !server.username.isEmpty && !isTesting
+            !server.imapHost.isEmpty && !server.username.isEmpty
+                && !server.smtpHost.isEmpty && !imapPassword.isEmpty && !isTesting
         default: true
         }
     }
@@ -471,9 +469,12 @@ struct AddMailboxFlow: View {
         case .googleConsent:
             Task { await connect() }
         case .imapSignIn:
-            Task { await signInToIMAP(using: nil) }
+            // Prefilled from the domain, so most people read four correct
+            // fields and press Sign in. Nothing is dialled yet.
+            server = MailServerGuess.first(for: imapAddress).config
+            withAnimation(.snappy(duration: 0.25)) { index += 1 }
         case .imapServer:
-            Task { await signInToIMAP(using: server) }
+            Task { await signInToIMAP() }
         case .importScope:
             Task { await runImport() }
         case .done:
@@ -502,15 +503,20 @@ struct AddMailboxFlow: View {
         withAnimation(.snappy(duration: 0.25)) { index += 1 }
     }
 
-    /// Signs in to an IMAP mailbox, guessing the server unless one is given.
+    /// Signs in to the server that was actually typed in. One attempt.
+    ///
+    /// It used to search: up to eight hosts in turn, thirty seconds each. It
+    /// was slow when it worked, and when it failed it could not say which
+    /// server had refused, because the app had chosen the server rather than
+    /// the person. Asking is faster and the error means something.
     ///
     /// The order matters and is the opposite of what is obvious: nothing is
     /// saved until a server has actually accepted the password. An account
     /// record written first would leave a broken mailbox in the list every
-    /// time somebody mistyped their password.
-    private func signInToIMAP(using known: IMAPConfig?) async {
+    /// time somebody mistyped theirs.
+    private func signInToIMAP() async {
         isTesting = true
-        defer { isTesting = false; probe = nil }
+        defer { isTesting = false }
 
         let address = MailboxID.canonical(imapAddress)
 
@@ -519,46 +525,15 @@ struct AddMailboxFlow: View {
             return
         }
 
-        let outcome: IMAPProbe.Outcome
-        if let known {
-            probe = IMAPProbe.Progress(host: known.imapHost, attempt: 1, total: 1)
-            outcome = await IMAPProbe.verify(known, password: imapPassword)
-        } else {
-            outcome = await IMAPProbe.discover(address: address, password: imapPassword) { step in
-                Task { @MainActor in probe = step }
-            }
-        }
-
-        switch outcome {
+        switch await IMAPProbe.verify(server, password: imapPassword) {
         case .ok(let success):
             await adopt(success, address: address)
 
-        case .refused(_, let host):
-            // A server answered and said no, which means one of two things
-            // that look identical from here: the password is wrong, or this is
-            // a real server that this mailbox is not on. Only the person can
-            // tell, so the app names the door it knocked on instead of
-            // deciding for them -- and the manual form is one tap away either
-            // way.
-            failure = """
-            \(host) answered, but did not accept that username and password.
-
-            If that is not your mail server, tap "Enter server settings myself" and put the right one in.
-            """
+        case .refused(let reason, _):
+            failure = reason
 
         case .unreachable(let reason):
-            // Nothing answered anywhere. This is the case the manual form is
-            // for, prefilled with the best guess so far.
-            server = known ?? MailServerGuess.first(for: address).config
-            serverNote = reason
-            if showsServerFields {
-                failure = reason
-            } else {
-                withAnimation(.snappy(duration: 0.25)) {
-                    showsServerFields = true
-                    index += 1
-                }
-            }
+            failure = reason
         }
     }
 

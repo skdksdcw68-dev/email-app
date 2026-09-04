@@ -1,17 +1,22 @@
 import Foundation
 
-/// Working out where somebody's mail actually lives, from their address.
+/// What to put in the server fields before anybody types.
 ///
-/// Nobody knows their IMAP host. They know their email address and their
-/// password, and asking for "imap.yourcompany.com, port 993, STARTTLS or
-/// SSL/TLS?" is where every other app loses them. So the app guesses, tests
-/// the guess for real, and only shows the fields when the guess was wrong.
+/// Not a search -- the app asks for the server the way Gmail's own app does,
+/// and this only decides what those fields say when the screen opens. A known
+/// provider fills in correctly and the person presses Sign in; an unknown
+/// domain gets `imap.` and `smtp.`, which is the convention most hosts follow
+/// and is easy to correct when it is wrong.
+///
+/// The difference from the version this replaced is who chooses. Guessing in
+/// the *fields* is free: it is visible, and it is edited before anything is
+/// dialled. Guessing at the *connection* was not -- it took minutes, and a
+/// failure could not say which server had refused.
 ///
 /// ⚠️ Deliberately offline. Thunderbird's autoconfig service would answer more
 /// of these, and it would mean posting the person's mail domain to Mozilla
 /// before they have connected anything. For a business mailbox the domain
-/// *is* the company. A table and a naming convention get most of the way there
-/// without telling anybody.
+/// *is* the company.
 enum MailServerGuess {
 
     /// A guess, and how much faith to put in it.
@@ -81,28 +86,7 @@ enum MailServerGuess {
         ),
     ]
 
-    /// Hosting companies whose servers are named after *themselves* rather
-    /// than after the customer's domain. A company mailbox at these looks like
-    /// `you@yourcompany.com` and connects to the host's server.
-    ///
-    /// Only reachable by trying, which is what the test button is for -- the
-    /// domain gives no clue which of these it is on.
-    static let commonHosts: [(label: String, imap: String, smtp: String, smtpPort: Int)] = [
-        // Titan before Hostinger's own, deliberately. Hostinger sells both and
-        // resells Titan on most of its plans, so a Hostinger domain is more
-        // often here than on `imap.hostinger.com` -- which is a real server
-        // that answers, and refuses, and looks exactly like a wrong password.
-        ("Titan", "imap.titan.email", "smtp.titan.email", 465),
-        ("Namecheap", "mail.privateemail.com", "mail.privateemail.com", 465),
-        ("Hostinger", "imap.hostinger.com", "smtp.hostinger.com", 465),
-        ("GoDaddy", "imap.secureserver.net", "smtpout.secureserver.net", 465),
-        ("IONOS", "imap.ionos.com", "smtp.ionos.com", 465),
-        ("Rackspace", "secure.emailsrvr.com", "secure.emailsrvr.com", 465),
-        ("Microsoft 365", "outlook.office365.com", "smtp.office365.com", 587),
-        ("Google Workspace", "imap.gmail.com", "smtp.gmail.com", 465),
-    ]
-
-    /// The first thing to try for this address.
+    /// What the fields open with.
     static func first(for address: String) -> Guess {
         let canonical = MailboxID.canonical(address)
         let domain = String(canonical.split(separator: "@").last ?? "")
@@ -139,37 +123,5 @@ enum MailServerGuess {
             isKnownHost: false,
             warning: nil
         )
-    }
-
-    /// What else to try when the first guess could not be reached.
-    ///
-    /// `mail.company.com` is as common as `imap.company.com`, and a shared
-    /// host is common again. Trying a handful automatically is the difference
-    /// between "it works" and a support conversation about port numbers.
-    static func alternatives(for address: String) -> [IMAPConfig] {
-        let canonical = MailboxID.canonical(address)
-        let domain = String(canonical.split(separator: "@").last ?? "")
-        guard table[domain] == nil else { return [] }
-
-        var options: [IMAPConfig] = []
-
-        for host in ["mail.\(domain)", domain, "imap.\(domain)"] {
-            options.append(IMAPConfig(
-                imapHost: host, imapPort: 993,
-                smtpHost: host.replacingOccurrences(of: "imap.", with: "smtp."), smtpPort: 465,
-                username: canonical, imapSecurity: .tls, smtpSecurity: .tls
-            ))
-        }
-
-        for host in commonHosts {
-            options.append(IMAPConfig(
-                imapHost: host.imap, imapPort: 993,
-                smtpHost: host.smtp, smtpPort: host.smtpPort,
-                username: canonical, imapSecurity: .tls,
-                smtpSecurity: host.smtpPort == 587 ? .startTLS : .tls
-            ))
-        }
-
-        return options
     }
 }
