@@ -17,9 +17,29 @@ final class AutoReplyStore {
 
     let fileURL: URL
 
+    /// Read in `deinit`, which is not on the main actor. Written once, in
+    /// `init`, so there is nothing to race.
+    nonisolated(unsafe) private var switchObserver: NSObjectProtocol?
+
     init(fileURL: URL? = nil) {
         self.fileURL = fileURL ?? Self.defaultURL
         load()
+        adoptActivationForActiveMailbox()
+
+        // The setup is shared across mailboxes; being armed is not. When the
+        // mailbox changes, the three fields that decide whether an agent is
+        // answering have to change with it -- otherwise switching to a
+        // freshly added work account would show, and act on, the personal
+        // account's arming.
+        switchObserver = NotificationCenter.default.addObserver(
+            forName: .activeMailboxChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.adoptActivationForActiveMailbox() }
+        }
+    }
+
+    deinit {
+        if let switchObserver { NotificationCenter.default.removeObserver(switchObserver) }
     }
 
     private static var defaultURL: URL {
@@ -41,16 +61,23 @@ final class AutoReplyStore {
     /// mean an edit -- or a setup flow with a stale copy -- could quietly
     /// turn sending on or off behind them.
     func complete(_ config: AutoReplyConfig) {
-        var value = config
-        value.instructions = Self.tidied(value.instructions)
-        value.isSetUp = true
-        value.isOn = true
-        value.knowledgeConfirmed = true
-        value.mode = self.config.isSetUp ? self.config.mode : .draft
+        var activation = AutoReplyActivation.current
+        activation.isOn = true
+        activation.mode = self.config.isSetUp ? activation.mode : .draft
         // From now on, not from three months ago. An edit keeps the
         // original line so a tweak does not make it forget what it has
         // already been watching.
-        value.watchingSince = self.config.watchingSince ?? .now
+        activation.watchingSince = activation.watchingSince ?? .now
+        // Armed on the mailbox this was set up from, and only that one.
+        AutoReplyActivation.current = activation
+
+        var value = config
+        value.instructions = Self.tidied(value.instructions)
+        value.isSetUp = true
+        value.knowledgeConfirmed = true
+        value.isOn = activation.isOn
+        value.mode = activation.mode
+        value.watchingSince = activation.watchingSince
         value.updatedAt = .now
         self.config = value
         persist()
@@ -59,12 +86,23 @@ final class AutoReplyStore {
     /// Keeps everything and stops acting on it. The setup survives, because
     /// switching off for a week and being asked twenty questions again is
     /// how a feature gets switched off for good.
+    /// Armed on **this mailbox**, not on the account.
+    ///
+    /// The setup is shared; being switched on is not. Connecting a work
+    /// address to an app where this was already on would otherwise arm an
+    /// agent to answer mail from an address nobody consented to, on the first
+    /// sync, in a voice tuned for different people. See `AutoReplyActivation`.
     func setOn(_ isOn: Bool) {
         guard config.isSetUp else { return }
-        config.isOn = isOn
+        var activation = AutoReplyActivation.current
+        activation.isOn = isOn
         // Switching back on after a break starts from now. The week it was
         // off is not a backlog to work through.
-        if isOn { config.watchingSince = .now }
+        if isOn { activation.watchingSince = .now }
+        AutoReplyActivation.current = activation
+
+        config.isOn = isOn
+        if isOn { config.watchingSince = activation.watchingSince }
         config.updatedAt = .now
         persist()
     }
@@ -72,11 +110,30 @@ final class AutoReplyStore {
     /// The one that matters. Only a person can call this, only from the
     /// Auto-Reply screen, and the UI will not offer `.send` until the
     /// verification layer is in place.
+    ///
+    /// Per-mailbox too: a mailbox trusted to send is not every mailbox.
     func setMode(_ mode: AutoReplyConfig.RunMode) {
         guard config.isSetUp else { return }
+        var activation = AutoReplyActivation.current
+        activation.mode = mode
+        AutoReplyActivation.current = activation
+
         config.mode = mode
         config.updatedAt = .now
         persist()
+    }
+
+    /// Pulls this mailbox's arming into the config the rest of the app reads.
+    ///
+    /// Called when the active mailbox changes. The shared file still carries
+    /// `isOn`, `mode` and `watchingSince` so every existing reader keeps
+    /// working; this is what makes those three tell the truth about the
+    /// mailbox actually in front of the person.
+    func adoptActivationForActiveMailbox() {
+        let activation = AutoReplyActivation.current
+        config.isOn = activation.isOn
+        config.mode = activation.mode
+        config.watchingSince = activation.watchingSince
     }
 
     /// Wipes the setup entirely. Asked for explicitly, and confirmed.

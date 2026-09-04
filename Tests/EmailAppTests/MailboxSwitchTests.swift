@@ -131,3 +131,83 @@ struct MailboxSwitchTests {
         return message
     }
 }
+
+/// Auto-Reply's setup is shared across mailboxes; being armed is not.
+///
+/// This is the safety line. Connecting a work address to an app where
+/// Auto-Reply was already on must not arm an agent to answer mail from an
+/// address nobody consented to.
+@MainActor
+@Suite(.serialized)
+struct AutoReplyActivationTests {
+
+    private func scoped(_ address: String) -> MailboxID {
+        let id = MailboxID.derive(provider: .gmail, address: address)
+        MailboxScope.activate(id)
+        return id
+    }
+
+    @Test func afreshMailboxIsNotArmed() {
+        let id = scoped("never-asked@example.com")
+        MailboxScope.purge(id)
+        _ = scoped("never-asked@example.com")
+
+        #expect(AutoReplyActivation.current == .off)
+        #expect(!AutoReplyActivation.current.isOn)
+        #expect(AutoReplyActivation.current.mode == .draft)
+
+        MailboxScope.purge(id)
+    }
+
+    @Test func armingOneMailboxLeavesTheOtherAlone() {
+        let work = scoped("work@example.com")
+        AutoReplyActivation.current = AutoReplyActivation(
+            isOn: true, mode: .send, watchingSince: .now
+        )
+        #expect(AutoReplyActivation.current.isOn)
+
+        // The whole point: switching to another mailbox must not inherit it.
+        let personal = scoped("personal@example.com")
+        #expect(!AutoReplyActivation.current.isOn)
+        #expect(AutoReplyActivation.current.mode == .draft)
+
+        // And going back finds it exactly as it was left.
+        MailboxScope.activate(work)
+        #expect(AutoReplyActivation.current.isOn)
+        #expect(AutoReplyActivation.current.mode == .send)
+
+        MailboxScope.purge(work)
+        MailboxScope.purge(personal)
+    }
+
+    @Test func sendingIsPerMailboxToo() {
+        // A mailbox trusted to send on its own is not every mailbox.
+        let trusted = scoped("trusted@example.com")
+        AutoReplyActivation.current = AutoReplyActivation(isOn: true, mode: .send, watchingSince: .now)
+
+        let other = scoped("other@example.com")
+        AutoReplyActivation.current = AutoReplyActivation(isOn: true, mode: .draft, watchingSince: .now)
+
+        MailboxScope.activate(trusted)
+        #expect(AutoReplyActivation.current.mode == .send)
+        MailboxScope.activate(other)
+        #expect(AutoReplyActivation.current.mode == .draft)
+
+        MailboxScope.purge(trusted)
+        MailboxScope.purge(other)
+    }
+
+    @Test func watchingSinceIsPerMailbox() {
+        // A newly connected account has three months of backlog. Arming it
+        // against a date from months ago would work through every one.
+        let old = scoped("old@example.com")
+        let longAgo = Date.now.addingTimeInterval(-60 * 60 * 24 * 90)
+        AutoReplyActivation.current = AutoReplyActivation(isOn: true, mode: .draft, watchingSince: longAgo)
+
+        let fresh = scoped("fresh@example.com")
+        #expect(AutoReplyActivation.current.watchingSince == nil)
+
+        MailboxScope.purge(old)
+        MailboxScope.purge(fresh)
+    }
+}

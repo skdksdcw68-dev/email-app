@@ -90,7 +90,38 @@ enum MailboxMigration {
 
         copyKeys(from: defaults, to: MailboxScope.defaults(for: account.id))
         moveFiles(for: account.id)
+        liftAutoReplyArming(into: account.id)
         return account
+    }
+
+    /// Moves "is Auto-Reply switched on, and does it send" out of the shared
+    /// setup and into the mailbox it was switched on for.
+    ///
+    /// The setup itself stays shared -- tone, work, boundaries, what it may
+    /// never say. Those are about the person. Being *armed* is about one
+    /// address, and leaving it shared means the next mailbox connected
+    /// inherits an agent answering mail on an address nobody consented to.
+    ///
+    /// Reads the file directly rather than through `AutoReplyStore`, because
+    /// this runs before any store exists.
+    private static func liftAutoReplyArming(into id: MailboxID) {
+        struct Armed: Decodable {
+            var isOn: Bool?
+            var mode: AutoReplyConfig.RunMode?
+            var watchingSince: Date?
+        }
+
+        let url = MailboxPaths.root.appending(path: "autoreply.json")
+        guard let data = try? Data(contentsOf: url),
+              let armed = try? JSONDecoder().decode(Armed.self, from: data)
+        else { return }
+
+        AutoReplyActivation.adopt(
+            isOn: armed.isOn ?? false,
+            mode: armed.mode ?? .draft,
+            watchingSince: armed.watchingSince,
+            into: MailboxScope.defaults(for: id)
+        )
     }
 
     /// Called once the registry holding the migrated mailbox has been saved.
