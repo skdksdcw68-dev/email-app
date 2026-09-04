@@ -11,6 +11,13 @@ import UIKit
 /// Account-wide, not per-mailbox: it belongs to the person, the same way
 /// `AIMemory` and the onboarding answers do. Signing out removes it; adding or
 /// dropping a mailbox does not.
+///
+/// `@MainActor` rather than lock-guarded like `AIUsage` and
+/// `PersonPreferences`, and the reason is `UIImage`: it is not `Sendable`, so
+/// it cannot go inside `Guarded` at all -- `OSAllocatedUnfairLock` requires
+/// its state to be. Nothing here is read off the main actor anyway. Only views
+/// draw a face.
+@MainActor
 enum ProfilePhoto {
 
     /// Bumped when the picture changes, so views redraw. A file on disk is
@@ -41,16 +48,20 @@ enum ProfilePhoto {
 
     /// Cached, because the You header draws this on every redraw and a disk
     /// read per frame is a scroll that stutters.
-    private static let cache = Guarded<UIImage??>(nil)
+    ///
+    /// Double optional on purpose: the outer one is "have we looked yet", the
+    /// inner one is "was there a picture". Collapsing them would mean going
+    /// back to disk on every draw for somebody who has not set one.
+    private static var cache: UIImage??
 
     static var image: UIImage? {
-        if let cached = cache.read({ $0 }) { return cached }
+        if let cached = cache { return cached }
 
         let loaded = url
             .flatMap { try? Data(contentsOf: $0) }
             .flatMap(UIImage.init(data:))
 
-        cache.withLock { $0 = loaded }
+        cache = .some(loaded)
         return loaded
     }
 
@@ -67,7 +78,7 @@ enum ProfilePhoto {
             // Complete protection: this is a face, and it is one of the few
             // files here that is obviously a person.
             try data.write(to: url, options: [.atomic, .completeFileProtection])
-            cache.withLock { $0 = UIImage(data: data) }
+            cache = .some(UIImage(data: data))
             NotificationCenter.default.post(name: changed, object: nil)
             return true
         } catch {
@@ -77,7 +88,7 @@ enum ProfilePhoto {
 
     static func remove() {
         if let url { try? FileManager.default.removeItem(at: url) }
-        cache.withLock { $0 = .some(nil) }
+        cache = .some(nil)
         NotificationCenter.default.post(name: changed, object: nil)
     }
 
@@ -119,7 +130,9 @@ struct ProfileAvatar: View {
     let contact: Contact
     var size: CGFloat = 56
 
-    @State private var image: UIImage? = ProfilePhoto.image
+    // Loaded in `onAppear` rather than as a default value: a property
+    // initialiser is not main-actor isolated, and `ProfilePhoto` is.
+    @State private var image: UIImage?
 
     var body: some View {
         Group {
@@ -133,6 +146,7 @@ struct ProfileAvatar: View {
                 SenderAvatar(contact: contact, size: size)
             }
         }
+        .onAppear { image = ProfilePhoto.image }
         .onReceive(NotificationCenter.default.publisher(for: ProfilePhoto.changed)) { _ in
             image = ProfilePhoto.image
         }
