@@ -421,11 +421,30 @@ final class MailStore {
         registry.upsert(account)
     }
 
-    /// Called at launch. Re-establishes the Google session without a consent
-    /// screen and pulls fresh mail; falls back to the connect screen only if
-    /// the grant is genuinely gone.
+    /// Called at launch, and at the end of every switch. Re-establishes the
+    /// Google session without a consent screen and pulls fresh mail; falls
+    /// back to the connect screen only if the grant is genuinely gone.
+    ///
+    /// 🔴 **Gmail's restore, and only Gmail's.** This ran for whatever mailbox
+    /// was active, which was harmless while every mailbox was a Google one and
+    /// became a serious bug the moment one was not: switching to an IMAP
+    /// mailbox called this, `restoreGmail()` answered with the *Google*
+    /// session, the addresses did not match, and the branch below replaced the
+    /// active account with the Google one. The mailbox was in the list, it
+    /// just could never be opened -- it bounced straight back to Gmail.
+    ///
+    /// Worse if there is no Google session at all: the guard below would mark
+    /// the IMAP mailbox `needsReauth` for a grant it never had, and drop it.
     func restore() async {
         guard isConnected, !isRefreshing else { return }
+
+        guard account?.provider == .gmail else {
+            // The same tail, without the half that only Google can answer:
+            // finish an interrupted import, otherwise pull what is new.
+            if hasImported { await refreshIMAP() } else { await importRecentMail() }
+            return
+        }
+
         isRefreshing = true
         defer { isRefreshing = false }
 
@@ -1733,7 +1752,6 @@ final class MailStore {
         try checkSize(of: attachments)
         let stamp = epoch
 
-        let token = try await accessToken()
         let envelope = MIMEBuilder.Envelope(
             from: MIMEBuilder.address(name: account.displayName, email: account.address),
             to: address,
@@ -1747,11 +1765,24 @@ final class MailStore {
             attachments: attachments
         )
 
-        let sent = try await GmailService.send(
-            accessToken: token,
-            envelope: envelope,
-            threadID: original?.threadID
-        )
+        let sent: SentReceipt
+        if account.provider == .imap {
+            // SMTP, on a different host, with possibly a different password --
+            // and it files its own copy in Sent, which Gmail does for free.
+            guard let backend else { throw SendError.notConnected }
+            sent = try await backend.send(
+                envelope,
+                inThread: original?.threadID.map(ThreadRef.init)
+            )
+        } else {
+            let token = try await accessToken()
+            let receipt = try await GmailService.send(
+                accessToken: token,
+                envelope: envelope,
+                threadID: original?.threadID
+            )
+            sent = SentReceipt(id: receipt.id, thread: receipt.threadID)
+        }
 
         var local = Message(
             sender: Contact(name: account.displayName, address: account.address),
@@ -1764,7 +1795,7 @@ final class MailStore {
             tags: [.noReplyNeeded]
         )
         local.remoteID = sent.id
-        local.threadID = sent.threadID
+        local.threadID = sent.thread
         local.hasAttachment = !attachments.isEmpty
 
         // The message went from the mailbox that is still in front of the
