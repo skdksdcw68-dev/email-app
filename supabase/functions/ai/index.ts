@@ -14,6 +14,10 @@
 // never the whole mailbox. That is a privacy position and a cost one, and it
 // matters for Google's Limited Use rules on Gmail data.
 
+// Same version `push/index.ts` already pins, so the two functions cannot end
+// up on different JWT libraries.
+import { decode, verify } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
+
 const OPENAI_KEY = Deno.env.get("OPENAI_API_KEY");
 
 // Reading mail and writing it are not the same job, and they should not pay
@@ -60,7 +64,159 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function openai(model: string, messages: unknown[], jsonMode: boolean) {
+// ------------------------------------------------------------------ who
+
+// Until now this function did not know who was calling it, and could not have
+// found out: it never looked at the token. The iOS client sends the signed-in
+// user's JWT when there is one and the project's **anon key** when there is
+// not -- and the anon key ships inside the .ipa. So anybody who pulls strings
+// out of the binary has had a free OpenAI account on the operator's card.
+//
+// The anon key is a JWT too, which is what made the two indistinguishable
+// without looking. It carries `"role":"anon"` and, crucially, **no `sub`**.
+// A real session token has the user id there. That absence is the whole
+// discriminator.
+//
+// Verified locally with the project's JWT secret rather than by asking GoTrue.
+// `classify` runs fifteen-concurrent on every message that arrives, and a
+// network round trip per call to ask "who is this" would put GoTrue on the
+// critical path of reading mail.
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const JWT_SECRET = Deno.env.get("SUPABASE_JWT_SECRET");
+
+/// Who is asking, and what for. Threaded to every action so metering happens
+/// where the tokens are counted rather than being reconstructed afterwards.
+interface Ctx {
+  userId: string | null;
+  action: string;
+}
+
+let cachedKey: CryptoKey | null = null;
+
+async function signingKey(): Promise<CryptoKey | null> {
+  if (cachedKey) return cachedKey;
+  if (!JWT_SECRET) return null;
+
+  cachedKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(JWT_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"],
+  );
+  return cachedKey;
+}
+
+/// The user id in the caller's token, or null for an anonymous call.
+///
+/// Null is not an error yet. This deploy *counts* anonymous calls so it can be
+/// seen how many exist before they start being refused -- turning them away on
+/// the same day the metering lands would break installed builds that have no
+/// code to explain a 401.
+async function identify(request: Request): Promise<string | null> {
+  const header = request.headers.get("Authorization") ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  if (!token) return null;
+
+  const key = await signingKey();
+
+  try {
+    // ⚠️ `SUPABASE_JWT_SECRET` is **not** one of the variables Supabase
+    // injects automatically -- only URL, anon key, service role key and DB
+    // URL are. It has to be set by hand:
+    //
+    //     supabase secrets set SUPABASE_JWT_SECRET=... --project-ref <ref>
+    //
+    // Without it this falls back to reading the token without checking the
+    // signature. That is enough for counting -- the platform gateway has
+    // already verified the JWT before this function was invoked, and the
+    // worst a forged `sub` buys today is spend attributed to the wrong id.
+    //
+    // 🔴 It stops being enough the moment this decides who may *spend*.
+    // Before the 402 gate ships, the secret is mandatory and the fallback
+    // below should become a refusal.
+    const claims = key
+      ? await verify(token, key)
+      : (decode(token)[1] as Record<string, unknown>);
+
+    if (!key) console.warn("SUPABASE_JWT_SECRET is unset: token read, not verified");
+
+    const sub = claims.sub;
+    // Checking for the claim rather than for `role !== "anon"`: anything that
+    // is not a person has no subject, so this stays right for whatever else
+    // Supabase mints later.
+    return typeof sub === "string" && sub.length > 0 ? sub : null;
+  } catch {
+    // A token that does not verify is treated exactly like no token. It is
+    // not this function's job to explain why somebody's JWT is wrong.
+    return null;
+  }
+}
+
+// ------------------------------------------------------------------ metering
+
+/// What OpenAI said the call cost, in tokens.
+///
+/// Two of these are subsets, and `record_ai_usage` has to know that or it
+/// charges twice for the same token: `cached` is part of `prompt`, and
+/// `reasoning` is already inside `completion`.
+interface Usage {
+  prompt: number;
+  cached: number;
+  completion: number;
+  reasoning: number;
+}
+
+function readUsage(usage: Record<string, unknown> | undefined | null): Usage | null {
+  if (!usage) return null;
+  const promptDetails = (usage.prompt_tokens_details ?? {}) as Record<string, number>;
+  const completionDetails = (usage.completion_tokens_details ?? {}) as Record<string, number>;
+
+  return {
+    prompt: Number(usage.prompt_tokens ?? 0),
+    cached: Number(promptDetails.cached_tokens ?? 0),
+    completion: Number(usage.completion_tokens ?? 0),
+    reasoning: Number(completionDetails.reasoning_tokens ?? 0),
+  };
+}
+
+/// Writes one call to the ledger.
+///
+/// 🔴 Never throws, and never fails a request. Somebody waiting on a reply
+/// they asked for should not lose it because a bookkeeping insert timed out --
+/// the money is already spent by that point either way, and a missing row is a
+/// far smaller problem than a missing answer.
+async function meter(ctx: Ctx, model: string, usage: Usage | null) {
+  if (!usage || !ctx.userId || !SUPABASE_URL || !SERVICE_ROLE) return;
+
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/rpc/record_ai_usage`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_ROLE,
+        Authorization: `Bearer ${SERVICE_ROLE}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        p_user: ctx.userId,
+        p_action: ctx.action,
+        p_model: model,
+        p_prompt: usage.prompt,
+        p_cached: usage.cached,
+        p_completion: usage.completion,
+        p_reasoning: usage.reasoning,
+      }),
+    });
+  } catch (error) {
+    console.error("metering failed", ctx.action, model, String(error));
+  }
+}
+
+// ------------------------------------------------------------------ provider
+
+async function openai(ctx: Ctx, model: string, messages: unknown[], jsonMode: boolean) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -78,6 +234,12 @@ async function openai(model: string, messages: unknown[], jsonMode: boolean) {
   if (!response.ok) {
     throw new Error(payload?.error?.message ?? `provider returned ${response.status}`);
   }
+
+  // These counts have been arriving on every call since the first day and
+  // were being dropped on the floor. Read before the content is returned,
+  // because after the return there is no `payload` left to look at.
+  await meter(ctx, model, readUsage(payload.usage));
+
   return payload.choices[0].message.content as string;
 }
 
@@ -122,7 +284,7 @@ the reader by a person, or by someone acting for one, that carries any of
 those. False for newsletters, promotions, receipts, alerts, notifications
 and anything that wants nothing from the reader. Most mail is false.`;
 
-async function classify(body: Record<string, string>) {
+async function classify(body: Record<string, string>, ctx: Ctx) {
   const content = [
     `From: ${body.from ?? ""}`,
     `Subject: ${body.subject ?? ""}`,
@@ -130,7 +292,7 @@ async function classify(body: Record<string, string>) {
     (body.body ?? "").slice(0, BODY_LIMIT),
   ].join("\n");
 
-  const raw = await openai(
+  const raw = await openai(ctx,
     CLASSIFY_MODEL,
     [
       { role: "system", content: CLASSIFY_SYSTEM },
@@ -193,7 +355,7 @@ Rules:
 - At most four items in each list. If there are more, keep the ones with
   dates and the ones that sound like they matter.`;
 
-async function extract(body: Record<string, string>) {
+async function extract(body: Record<string, string>, ctx: Ctx) {
   const content = [
     `From: ${body.from ?? ""}`,
     `To: ${body.to ?? ""}`,
@@ -203,7 +365,7 @@ async function extract(body: Record<string, string>) {
     (body.body ?? "").slice(0, EXTRACT_BODY_LIMIT),
   ].join("\n");
 
-  const raw = await openai(
+  const raw = await openai(ctx,
     CLASSIFY_MODEL,
     [
       { role: "system", content: EXTRACT_SYSTEM },
@@ -261,8 +423,8 @@ Rules:
 - Keep their own words for the rules. They wrote those deliberately.
 - An empty list is the right answer when they chose nothing.`;
 
-async function autoReplyUnderstanding(body: Record<string, string>) {
-  const raw = await openai(
+async function autoReplyUnderstanding(body: Record<string, string>, ctx: Ctx) {
+  const raw = await openai(ctx,
     DRAFT_MODEL,
     [
       { role: "system", content: UNDERSTANDING_SYSTEM },
@@ -325,8 +487,8 @@ Rules that decide the reply:
   the setup allows it. That is the honest picture, and it is the half that
   shows the thing works.`;
 
-async function autoReplyExample(body: Record<string, string>) {
-  const raw = await openai(
+async function autoReplyExample(body: Record<string, string>, ctx: Ctx) {
+  const raw = await openai(ctx,
     DRAFT_MODEL,
     [
       { role: "system", content: EXAMPLE_SYSTEM },
@@ -376,8 +538,8 @@ function setupLines(body: Record<string, string>) {
 
 // ------------------------------------------------------------------- draft
 
-async function draft(body: Record<string, string>) {
-  const reply = await openai(DRAFT_MODEL, draftMessages(body), false);
+async function draft(body: Record<string, string>, ctx: Ctx) {
+  const reply = await openai(ctx, DRAFT_MODEL, draftMessages(body), false);
   return json({ body: reply.trim(), model: DRAFT_MODEL });
 }
 
@@ -449,7 +611,7 @@ Rules:
 // Rewrites what the user already typed. The hard part is restraint: the
 // instinct of a model asked to "improve" an email is to inflate it into
 // corporate filler, which is worse than what it was handed.
-async function refine(body: Record<string, string>) {
+async function refine(body: Record<string, string>, ctx: Ctx) {
   const tone = body.tone ?? "match how I already write";
   const formal = /formal|professional/i.test(tone);
 
@@ -494,7 +656,7 @@ quotes around it.`;
 
   const content = `${context}The user's draft to improve:\n${body.text ?? ""}`;
 
-  const improved = await openai(
+  const improved = await openai(ctx,
     DRAFT_MODEL,
     [
       { role: "system", content: system },
@@ -511,7 +673,7 @@ quotes around it.`;
 // One requested change to a draft the assistant wrote, and nothing else.
 // The failure mode to guard against is the model "helpfully" rewriting the
 // whole thing when asked to warm up one line.
-async function revise(body: Record<string, string>) {
+async function revise(body: Record<string, string>, ctx: Ctx) {
   const tone = body.tone ?? "match how I already write";
 
   const system = `You revise an email draft. Apply exactly the change asked for and
@@ -558,7 +720,7 @@ quotes around it.`;
 
   const content = `${context}The draft:\n${body.text ?? ""}\n\nThe change asked for:\n${body.instruction ?? ""}`;
 
-  const revised = await openai(
+  const revised = await openai(ctx,
     DRAFT_MODEL,
     [
       { role: "system", content: system },
@@ -616,13 +778,13 @@ Rules:
   Not a restatement of the query.
 - Never use dashes as punctuation in the explanation.`;
 
-async function search(body: Record<string, unknown>) {
+async function search(body: Record<string, unknown>, ctx: Ctx) {
   const question = String(body.question ?? "").slice(0, 300);
   if (!question) return json({ error: "Nothing to search for." }, 400);
 
   const today = body.today ? `Today is ${String(body.today).slice(0, 60)}.\n` : "";
 
-  const raw = await openai(
+  const raw = await openai(ctx,
     CLASSIFY_MODEL,
     [
       { role: "system", content: SEARCH_SYSTEM },
@@ -760,7 +922,7 @@ Rules:
 // which on a ten second answer is the difference between the app looking fast
 // and the app looking stuck. The provider's SSE body is passed straight
 // through; the app parses the deltas.
-async function askStream(body: Record<string, unknown>) {
+async function askStream(body: Record<string, unknown>, ctx: Ctx) {
   const question = String(body.question ?? "").slice(0, 500);
   if (!question) return json({ error: "No question was asked." }, 400);
 
@@ -774,6 +936,11 @@ async function askStream(body: Record<string, unknown>) {
       model: DRAFT_MODEL,
       messages: askMessages(question, body),
       stream: true,
+      // Without this a streamed answer reports no usage at all, so the most
+      // expensive action in the app was the one costing an unknown amount.
+      // OpenAI answers by adding one final chunk carrying `usage`, just
+      // before [DONE].
+      stream_options: { include_usage: true },
     }),
   });
 
@@ -782,13 +949,86 @@ async function askStream(body: Record<string, unknown>) {
     return json({ error: detail.slice(0, 300) || "The AI service failed." }, 502);
   }
 
-  return new Response(response.body, {
+  // Two readers over one body. The client's half is passed through untouched
+  // -- no re-serialising, no added latency -- and the other is drained here
+  // only to find the usage chunk.
+  //
+  // ⚠️ Safe for builds already on phones. The usage chunk has `choices: []`,
+  // and `AIService.askStreaming` guards on `choices.first`, so a client that
+  // knows nothing about this skips it exactly as it always did.
+  const [toClient, toMeter] = response.body.tee();
+
+  drainUsage(toMeter, ctx);
+
+  return new Response(toClient, {
     headers: {
       ...CORS,
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
     },
   });
+}
+
+/// Reads a streamed response to the end looking for its usage chunk.
+///
+/// 🔴 Deliberately runs to completion even if the person taps stop. Those
+/// tokens have already been generated and already been paid for; hanging up
+/// early would mean the one case where somebody changes their mind is the one
+/// case that costs the operator money and records nothing.
+///
+/// `tee()` buffers for whichever branch is behind, so this has to consume
+/// eagerly -- a slow reader here would hold the client's half up too.
+function drainUsage(stream: ReadableStream<Uint8Array>, ctx: Ctx) {
+  const work = (async () => {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let last: Usage | null = null;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE frames are separated by a blank line. Anything after the last
+        // one is a partial frame and waits for the next read.
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
+
+        for (const frame of frames) {
+          const line = frame.split("\n").find((part) => part.startsWith("data: "));
+          if (!line) continue;
+
+          const payload = line.slice(6).trim();
+          if (!payload || payload === "[DONE]") continue;
+
+          try {
+            const chunk = JSON.parse(payload);
+            const usage = readUsage(chunk.usage);
+            // Keep the last one that actually carried counts rather than
+            // stopping at the first -- the order of the trailing chunks is
+            // the provider's business, not this function's.
+            if (usage && usage.prompt + usage.completion > 0) last = usage;
+          } catch {
+            // A frame that will not parse is not worth failing a bill over.
+          }
+        }
+      }
+    } catch (error) {
+      console.error("usage drain failed", String(error));
+    }
+
+    await meter(ctx, DRAFT_MODEL, last);
+  })();
+
+  // Keep the isolate alive past the response, or returning it tears this down
+  // mid-drain and the call is never recorded.
+  const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } })
+    .EdgeRuntime;
+  if (runtime?.waitUntil) {
+    runtime.waitUntil(work);
+  }
 }
 
 /// Shared by the streaming and non-streaming paths so the two can never drift.
@@ -995,11 +1235,11 @@ Never explain that you are about to look: the line, and nothing else.`;
   ];
 }
 
-async function ask(body: Record<string, unknown>) {
+async function ask(body: Record<string, unknown>, ctx: Ctx) {
   const question = String(body.question ?? "").slice(0, 500);
   if (!question) return json({ error: "No question was asked." }, 400);
 
-  const answer = await openai(DRAFT_MODEL, askMessages(question, body), false);
+  const answer = await openai(ctx, DRAFT_MODEL, askMessages(question, body), false);
   return json({ answer: answer.trim(), model: DRAFT_MODEL });
 }
 
@@ -1058,7 +1298,7 @@ they allowed. Be honest and be harsh: 0.9 and above only when the message is
 squarely one of their allowed kinds and every fact you used was handed to
 you. Anything you had to interpret belongs below 0.7.`;
 
-async function autoReply(body: Record<string, string>) {
+async function autoReply(body: Record<string, string>, ctx: Ctx) {
   const content = [
     `Their setup:\n${body.briefing ?? ""}`,
     body.thread ? `\nEarlier in this conversation:\n${body.thread}` : "",
@@ -1066,7 +1306,7 @@ async function autoReply(body: Record<string, string>) {
     body.today ? `\nToday is ${body.today}.` : "",
   ].join("\n");
 
-  const raw = await openai(
+  const raw = await openai(ctx,
     DRAFT_MODEL,
     [
       { role: "system", content: AUTOREPLY_SYSTEM },
@@ -1110,29 +1350,43 @@ Deno.serve(async (request) => {
 
   try {
     const payload = await request.json();
+
+    // Who, and what for. Built once here rather than in eleven places, so an
+    // action added later cannot forget to be counted.
+    //
+    // A null `userId` is an anonymous caller -- somebody using the anon key
+    // out of the .ipa, or a token that would not verify. Their calls still
+    // run today and are simply not recorded; the next deploy refuses them.
+    // Doing both at once would have broken installed builds, which have no
+    // code to explain a 401 and would have shown a bare error instead.
+    const ctx: Ctx = {
+      userId: await identify(request),
+      action: String(payload.action ?? "unknown"),
+    };
+
     switch (payload.action) {
       case "classify":
-        return await classify(payload);
+        return await classify(payload, ctx);
       case "autoreply":
-        return await autoReply(payload);
+        return await autoReply(payload, ctx);
       case "autoreply_understanding":
-        return await autoReplyUnderstanding(payload);
+        return await autoReplyUnderstanding(payload, ctx);
       case "autoreply_example":
-        return await autoReplyExample(payload);
+        return await autoReplyExample(payload, ctx);
       case "extract":
-        return await extract(payload);
+        return await extract(payload, ctx);
       case "draft":
-        return await draft(payload);
+        return await draft(payload, ctx);
       case "refine":
-        return await refine(payload);
+        return await refine(payload, ctx);
       case "revise":
-        return await revise(payload);
+        return await revise(payload, ctx);
       case "search":
-        return await search(payload);
+        return await search(payload, ctx);
       case "ask":
-        return await ask(payload);
+        return await ask(payload, ctx);
       case "ask_stream":
-        return await askStream(payload);
+        return await askStream(payload, ctx);
       default:
         return json({ error: `unknown action: ${payload.action}` }, 400);
     }

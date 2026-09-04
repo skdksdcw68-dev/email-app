@@ -129,35 +129,23 @@ struct YouView: View {
     @ViewBuilder
     private var accounts: some View {
         Section {
-            if let account = mail.account {
-                HStack(spacing: 12) {
-                    SenderAvatar(
-                        contact: Contact(name: account.displayName, address: account.address),
-                        size: 34
-                    )
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Current")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.tint)
-                        Text(account.address)
-                            .font(.subheadline)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.vertical, 2)
-            } else {
+            if mail.account == nil {
                 Label("No mailbox connected", systemImage: "envelope.badge.shield.half.filled")
-                    .font(.subheadline)
+                    .font(Style.rowTitle)
                     .foregroundStyle(.secondary)
             }
 
-            // The others, tap to switch. Only drawn when there are others --
-            // a strip of one is a row that does nothing.
-            if mail.registry.hasSeveral {
-                otherMailboxes
-            }
+            // No "Current" row.
+            //
+            // The top of this page is already the account you are in -- the
+            // face, the name and the address, at full size. Repeating it here
+            // as a smaller row with a blue "Current" label was the same
+            // mailbox twice on one screen, and it made this section read as a
+            // list of accounts when what it is is a list of *other* accounts.
+            //
+            // Telegram's Settings does the same thing: you at the top, the
+            // ones you can move to underneath.
+            otherMailboxes
 
             // Two rows, and finally two destinations. They pushed the same
             // page as each other for months, which is why adding an account
