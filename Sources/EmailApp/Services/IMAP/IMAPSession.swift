@@ -300,7 +300,7 @@ actor IMAPSession {
             + Self.addresses(envelope.bcc)
 
         try await smtp.deliver(
-            raw: Data(MIMEBuilder.raw(forWire).utf8),
+            raw: Data(MIMEBuilder.message(forWire).utf8),
             from: account.address,
             to: recipients
         )

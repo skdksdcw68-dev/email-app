@@ -71,18 +71,15 @@ struct MailboxSwitcher: View {
 
     var body: some View {
         Menu {
-            ForEach(mail.registry.accounts) { account in
+            // Only what you can move to. The active mailbox is the face on
+            // the button that opened this menu, so listing it again with a
+            // tick beside it was saying twice what the avatar already said --
+            // and it put an item in the menu that does nothing when tapped.
+            ForEach(mail.registry.accounts.filter { $0.id != mail.account?.id }) { account in
                 Button {
-                    guard account.id != mail.account?.id else { return }
                     Task { await mail.activate(account) }
                 } label: {
-                    Label {
-                        Text(account.title)
-                    } icon: {
-                        if account.id == mail.account?.id {
-                            Image(systemName: "checkmark")
-                        }
-                    }
+                    Label(account.title, systemImage: "arrow.left.arrow.right")
                 }
             }
 

@@ -120,7 +120,7 @@ struct IMAPBackend: MailBackend {
             var filed = envelope
             filed.bcc = nil
             try? await session.append(
-                MIMEBuilder.raw(filed), to: sent, flags: ["\\Seen"]
+                MIMEBuilder.message(filed), to: sent, flags: ["\\Seen"]
             )
         }
         return receipt
@@ -137,7 +137,7 @@ struct IMAPBackend: MailBackend {
         // text if the append fails, and the text is the only thing here that
         // cannot be recreated.
         try await session.select(folder)
-        try await session.append(MIMEBuilder.raw(envelope), to: folder, flags: ["\\Draft"])
+        try await session.append(MIMEBuilder.message(envelope), to: folder, flags: ["\\Draft"])
 
         if let existing, let uid = Int(IMAPSession.uidPart(of: existing.primary)) {
             try? await session.delete(uid: uid, in: folder)

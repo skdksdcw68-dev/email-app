@@ -19,15 +19,30 @@ struct MailboxListView: View {
 
     var body: some View {
         List {
-            // Accounts and "Add account" in one card, the way Telegram and
-            // Slack do it. They are one idea -- the mailboxes you have, and
-            // making another -- and a separate row floating below the card
-            // read as a different kind of thing entirely.
+            // The one you are in, at the top, as a statement rather than a
+            // choice.
+            if let active = mail.account {
+                Section {
+                    currentCard(active)
+                }
+            }
+
+            // And below it, only the ones you can move to.
+            //
+            // Telegram's shape, and Abel asked for it by name. The active
+            // account was in this list with a tick beside it, which is a row
+            // that cannot be tapped, sitting among rows whose whole purpose is
+            // being tapped. Naming it above and listing the rest turns a list
+            // of accounts into a list of destinations.
             Section {
-                ForEach(registry.accounts) { account in
+                ForEach(registry.accounts.filter { $0.id != mail.account?.id }) { account in
                     row(account)
                 }
                 addRow
+            } header: {
+                if registry.hasSeveral {
+                    Text("Switch to")
+                }
             }
 
             if registry.hasSeveral {
@@ -66,12 +81,49 @@ struct MailboxListView: View {
 
     // MARK: - Rows
 
-    private func row(_ account: MailAccount) -> some View {
-        let isActive = account.id == mail.account?.id
+    /// The mailbox you are in. Bigger, and it does not offer to switch to
+    /// itself -- tapping it opens its settings, which is the only thing left
+    /// to want from it.
+    private func currentCard(_ account: MailAccount) -> some View {
+        NavigationLink {
+            MailboxDetailView(mailbox: account.id)
+        } label: {
+            HStack(spacing: 14) {
+                SenderAvatar(contact: account.contact, size: 52)
+                    .overlay { Circle().strokeBorder(account.tint.color, lineWidth: 2) }
 
-        return HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(account.title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(account.address)
+                        .font(Style.rowDetail)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    if account.needsAttention {
+                        Label("Needs signing in again", systemImage: "exclamationmark.triangle.fill")
+                            .font(Style.caption)
+                            .foregroundStyle(Color.warning)
+                    }
+                }
+            }
+            .padding(.vertical, 6)
+        }
+        .contextMenu {
+            Button(role: .destructive) { removing = account } label: {
+                Label("Sign out of this mailbox", systemImage: "rectangle.portrait.and.arrow.right")
+            }
+        }
+    }
+
+    /// One mailbox you can move to. Never the active one -- that is drawn
+    /// above, and a row you cannot switch to among rows that exist to be
+    /// switched to is a row that has to explain itself.
+    private func row(_ account: MailAccount) -> some View {
+        HStack(spacing: 12) {
             Button {
-                guard !isActive else { return }
                 Task { await mail.activate(account) }
             } label: {
                 HStack(spacing: 12) {
@@ -93,7 +145,7 @@ struct MailboxListView: View {
 
                     Spacer(minLength: 0)
 
-                    trailing(account, isActive: isActive)
+                    trailing(account)
                 }
                 .contentShape(Rectangle())
             }
@@ -124,12 +176,10 @@ struct MailboxListView: View {
             .tint(.gray)
         }
         .contextMenu {
-            if !isActive {
-                Button {
-                    Task { await mail.activate(account) }
-                } label: {
-                    Label("Switch to this mailbox", systemImage: "arrow.left.arrow.right")
-                }
+            Button {
+                Task { await mail.activate(account) }
+            } label: {
+                Label("Switch to this mailbox", systemImage: "arrow.left.arrow.right")
             }
 
             Button { opening = account.id } label: {
@@ -145,17 +195,14 @@ struct MailboxListView: View {
     }
 
     @ViewBuilder
-    private func trailing(_ account: MailAccount, isActive: Bool) -> some View {
+    private func trailing(_ account: MailAccount) -> some View {
+        // No tick for the active one any more -- it is not in this list.
         if account.needsAttention {
             // Amber, and never silence. An expired grant used to present as
             // an inbox that simply stopped filling.
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.footnote)
                 .foregroundStyle(Color.warning)
-        } else if isActive {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.footnote)
-                .foregroundStyle(Color.ok)
         } else if account.isPaused {
             Text("Paused")
                 .font(Style.rowDetail)

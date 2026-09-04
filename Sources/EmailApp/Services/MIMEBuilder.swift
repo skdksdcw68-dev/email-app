@@ -59,6 +59,14 @@ enum MIMEBuilder {
     }
 
     /// The complete message, base64url encoded and ready for `raw`.
+    ///
+    /// 🔴 **Gmail's API format, and nothing else's.** The `raw` field of a
+    /// Gmail send takes the whole message base64url'd; SMTP and IMAP APPEND
+    /// take the message itself. Handing this to either of those posts one long
+    /// base64 blob as the body -- which is exactly what happened, and what
+    /// arrived at the other end looking like a token rather than an email.
+    ///
+    /// For anything that is not the Gmail API, use `message(_:)`.
     static func raw(_ envelope: Envelope, boundary: String = UUID().uuidString) -> String {
         base64url(message(envelope, boundary: boundary))
     }
@@ -88,6 +96,17 @@ enum MIMEBuilder {
             lines.append("Bcc: \(bcc)")
         }
         lines.append("Subject: \(encodedHeader(envelope.subject))")
+
+        // Both required by RFC 5322, and both were missing.
+        //
+        // Gmail's API fills them in for its own sends, which is why nothing
+        // noticed. Send the same message over SMTP and it arrives with no Date
+        // and no Message-ID -- and a message with neither is close to the
+        // definition of spam as far as a receiving filter is concerned. It is
+        // not the only reason mail from a new domain lands in the junk folder,
+        // but it is the only one this app was causing.
+        lines.append("Date: \(rfc5322Date())")
+        lines.append("Message-ID: \(messageID(from: envelope.from))")
 
         if let inReplyTo = envelope.inReplyTo, !inReplyTo.isEmpty {
             lines.append("In-Reply-To: \(inReplyTo)")
@@ -170,6 +189,32 @@ enum MIMEBuilder {
             "Content-Transfer-Encoding: base64",
             "",
         ]
+    }
+
+    /// `Tue, 15 Nov 1994 12:45:26 +0100`, in English whatever the phone is
+    /// set to. A date header in another locale is not a date header.
+    static func rfc5322Date(_ date: Date = .now) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEE, d MMM yyyy HH:mm:ss Z"
+        return formatter.string(from: date)
+    }
+
+    /// `<uuid@sender-domain>`.
+    ///
+    /// The domain has to be one the sender is actually at -- a Message-ID
+    /// pointing somewhere else is itself a spam signal -- so it is taken from
+    /// the From address rather than invented.
+    static func messageID(from sender: String) -> String {
+        let domain: String
+        if let at = sender.lastIndex(of: "@") {
+            domain = sender[sender.index(after: at)...]
+                .prefix { $0 != ">" && $0 != " " }
+                .lowercased()
+        } else {
+            domain = "localhost"
+        }
+        return "<\(UUID().uuidString.lowercased())@\(domain)>"
     }
 
     // MARK: - Encoding
