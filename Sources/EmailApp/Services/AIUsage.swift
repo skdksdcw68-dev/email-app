@@ -2,16 +2,22 @@ import Foundation
 
 /// How much of the AI the app has actually used this month.
 ///
-/// Maily runs on the person's own key, so the bill is theirs and the only
-/// place it is visible is a website they have to go and look at. That is a
-/// bad way to find out you have run out -- which is exactly how it goes
-/// wrong: everything stops working at once and nothing in the app says why.
+/// ⚠️ **This file used to open by saying Maily runs on the person's own key.
+/// It never did.** The key lives in the project's Supabase secrets, so every
+/// call any user has ever made was spent on the operator's account -- and the
+/// belief that it was not is what let the app ship with no metering, no
+/// attribution, and a public anon key that would answer to anybody.
 ///
 /// So the app counts what it asks for, on the device, by what it was for.
-/// Not tokens: nobody can act on a token count, and the app cannot see the
-/// bill anyway. What it can say is "you asked 40 questions and read 1,600
-/// emails this month", which is the sentence that explains the number on the
-/// website.
+/// Not tokens: a token count is not a sentence anybody can act on. What it can
+/// say is "you asked 40 questions and read 1,600 emails this month".
+///
+/// 🔴 These counts are now the *fallback*, not the truth. The authoritative
+/// figure is `ai_usage` on the server, priced from the provider's own token
+/// counts (migration 0007) -- because a number the client keeps is a number a
+/// client can be made to lie about, and because this one resets every month
+/// and remembers nothing. Keep this for offline and for the shape of the
+/// answer; take the money figure from the server.
 ///
 /// Nothing here leaves the phone.
 enum AIUsage {

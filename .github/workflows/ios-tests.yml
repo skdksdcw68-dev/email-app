@@ -3,10 +3,35 @@ name: iOS Tests
 # Every push and PR. No signing, no secrets, no Apple credentials -- this is
 # purely "does it compile and do the tests pass", which is the fast feedback
 # loop when there is no Mac to build on locally.
+#
+# It is also the only feedback loop, which makes what it costs worth caring
+# about: macOS runners bill at **ten times** the Linux rate, so a single
+# thirteen minute job is charged as a hundred and thirty minutes. A day of
+# ordinary work will exhaust a month's free allowance, and when it does every
+# run fails instantly with `startup_failure` and no job -- which looks nothing
+# like a billing problem and exactly like a broken workflow.
 on:
   push:
+    # Nothing here builds an app. A migration, an Edge Function or a README
+    # cannot break a Swift compile, and putting them on a macOS runner is
+    # minutes spent to learn nothing.
+    paths-ignore:
+      - 'supabase/**'
+      - '**.md'
+      - '.gitignore'
+      - '.gitattributes'
   pull_request:
+    paths-ignore:
+      - 'supabase/**'
+      - '**.md'
   workflow_dispatch: {}
+
+# Two pushes a minute apart used to mean two full builds, and the first one's
+# answer was worthless the moment the second landed. Now the older run is
+# cancelled. Fixing a typo straight after a push stops costing double.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:

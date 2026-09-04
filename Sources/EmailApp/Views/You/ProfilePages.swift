@@ -297,16 +297,24 @@ struct LanguageView: View {
     }
 }
 
-/// The plan. There is no subscription, and pretending otherwise would be a
-/// sales page for a product that does not exist.
+/// The plan.
+///
+/// ⚠️ Still a placeholder, but no longer a *false* one. It used to say "You
+/// pay your own AI costs directly, and nothing goes through Maily", which was
+/// the same untruth as the old Usage footer: nobody's key is on their phone,
+/// and every call is billed to the operator.
+///
+/// Saying "free while Maily is in testing" is both accurate today and the
+/// honest thing to have said all along. The real screen -- allowance, credits,
+/// upgrade -- lands with StoreKit.
 struct PlanView: View {
     var body: some View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Free")
+                    Text("Free while Maily is in testing")
                         .font(.title3.weight(.bold))
-                    Text("Every feature is on. You pay your own AI costs directly, and nothing goes through Maily.")
+                    Text("Every feature is on and the AI is on us. Paid plans arrive before Maily leaves testing, and you will be told what they are well before anything changes.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -316,13 +324,13 @@ struct PlanView: View {
             }
 
             Section {
-                Label("Roughly a third of a cent per email classified", systemImage: "creditcard")
                 Label("Bulk mail is sorted by rules on this phone, at no cost", systemImage: "bolt.slash")
-                Label("Results are cached, so nothing is paid for twice", systemImage: "arrow.clockwise")
+                Label("Results are cached, so nothing is answered twice", systemImage: "arrow.clockwise")
+                Label("Reading uses the cheap model; questions and drafts do not", systemImage: "creditcard")
             } header: {
-                Text("What it costs")
+                Text("What Maily does to keep it cheap")
             } footer: {
-                Text("Estimates from real runs, not a quote. Your provider's dashboard is the real number.")
+                Text("What you have used is on the Usage screen.")
             }
         }
         .navigationTitle("Plan")

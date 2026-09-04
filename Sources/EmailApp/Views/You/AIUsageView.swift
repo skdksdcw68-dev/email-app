@@ -87,18 +87,31 @@ struct AIUsageView: View {
             }
 
             Section {
-                Link(destination: URL(string: "https://platform.openai.com/usage")!) {
-                    Label("See the actual bill", systemImage: "arrow.up.right.square")
-                        .font(.subheadline)
-                }
                 Button("Start this month over", role: .destructive) {
                     isConfirmingReset = true
                 }
             } footer: {
-                Text("Maily runs on your own API key, so what you spend is between you and OpenAI. These counts never leave your phone.")
+                // 🔴 What used to be here was false, and it had been false for
+                // as long as the app has been deployed:
+                //
+                //   "Maily runs on your own API key, so what you spend is
+                //    between you and OpenAI."
+                //
+                // Nobody's key is on their phone. The key lives in the
+                // project's Supabase secrets, so every one of these calls has
+                // been spent on the operator's account. Saying otherwise was
+                // not a rounding error in the copy -- it told people the one
+                // thing that would stop them worrying about a number that was
+                // actually somebody else's bill.
+                //
+                // The link to platform.openai.com went with it. Once these
+                // calls are paid for through the App Store, a button pointing
+                // at an outside billing page inside a paid feature is exactly
+                // what guideline 3.1.1 is about.
+                Text("These counts are kept on this phone. Reading is what runs on every message that arrives; questions and drafts are the expensive kind.")
             }
         }
-        .navigationTitle("AI usage")
+        .navigationTitle("Usage")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
         .alert("Start the count over?", isPresented: $isConfirmingReset) {

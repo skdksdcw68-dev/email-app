@@ -13,6 +13,7 @@ struct AutoReplyView: View {
 
     @State private var isSettingUp = false
     @State private var isConfirmingOff = false
+    @State private var isConfirmingOn = false
     @State private var isConfirmingForget = false
     @State private var isConfirmingSend = false
 
@@ -44,6 +45,18 @@ struct AutoReplyView: View {
             Button("Turn off") { autoReply.setOn(false) }
         } message: {
             Text("Your setup is saved. You can turn it back on any time without answering anything again.")
+        }
+        // Arming it is the moment somebody agrees a machine may answer their
+        // mail while they are not looking. Worth one sentence, every time --
+        // and the switch falls back on its own if they say no, because
+        // nothing was changed until this button was pressed.
+        .alert("Let Maily answer for you?", isPresented: $isConfirmingOn) {
+            Button("Cancel", role: .cancel) {}
+            Button("Turn on") { autoReply.setOn(true) }
+        } message: {
+            Text(config.mode == .send
+                 ? "Maily will write and send replies to the kinds of mail you approved, without showing you first."
+                 : "Maily will write replies to the kinds of mail you approved and leave them waiting for you to send.")
         }
         .alert("Let Maily send on its own?", isPresented: $isConfirmingSend) {
             Button("Cancel", role: .cancel) {}
@@ -110,10 +123,27 @@ struct AutoReplyView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(config.isOn ? "Turn off" : "Turn on") {
-                    if config.isOn { isConfirmingOff = true } else { autoReply.setOn(true) }
-                }
-                .font(.subheadline.weight(.medium))
+
+                // A switch, because this is a switch.
+                //
+                // It was a `Button` reading "Turn off" -- which states the
+                // action rather than the state, so the word on screen is
+                // always the opposite of how things are. Every other on/off in
+                // the app is a `Toggle`, and the one place it matters most
+                // that somebody can tell at a glance was the exception.
+                //
+                // Turning it *on* still asks first. That confirmation is not
+                // ceremony: it is the moment somebody agrees that a machine
+                // may answer their mail without them, and the toggle springs
+                // back if they decline.
+                Toggle("", isOn: Binding(
+                    get: { config.isOn },
+                    set: { wantsOn in
+                        if wantsOn { isConfirmingOn = true } else { isConfirmingOff = true }
+                    }
+                ))
+                .labelsHidden()
+                .accessibilityLabel("Auto-Reply")
             }
             .padding(.vertical, 2)
         } footer: {
