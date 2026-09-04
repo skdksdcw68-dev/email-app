@@ -168,11 +168,27 @@ workflows:
       # `--create` matters: there may be no App Store profile for this bundle
       # id yet, and without it the command finds nothing and stops rather than
       # making one.
+      #
+      # 🔴 `--certificate-key` matters more, and its absence failed with
+      # "Cannot save Signing Certificates without certificate private key".
+      #
+      # A distribution certificate is only half of a signing identity. The
+      # other half -- the private key -- stays on whichever machine generated
+      # the CSR and is never downloadable from Apple afterwards. The four
+      # certificates already on this account were made elsewhere, so fetching
+      # them gets a certificate nothing can sign with.
+      #
+      # Given a key, `--create` makes a CSR from it and Apple issues a
+      # certificate matching it, so both halves exist on the builder. The key
+      # is a fresh RSA 2048 held as a secure variable; the existing
+      # certificates are untouched, because revoking somebody's signing
+      # identity to save making a new one is not a trade worth taking.
       - name: Set up code signing
         script: |
           set -euo pipefail
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
+            --certificate-key "@env:CERTIFICATE_PRIVATE_KEY" \
             --create
           keychain initialize
           # The certificate has to be in the keychain as well as the profile
