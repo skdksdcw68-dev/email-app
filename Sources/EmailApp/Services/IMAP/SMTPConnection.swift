@@ -37,10 +37,10 @@ actor SMTPConnection {
     /// source for the attachment limit.
     private(set) var maxSize: Int?
 
-    init(host: String, port: Int, security: TransportSecurity) {
+    init(host: String, port: Int, security: TransportSecurity, timeout: TimeInterval = 30) {
         self.host = host
         self.security = security
-        self.stream = MailStream(host: host, port: port)
+        self.stream = MailStream(host: host, port: port, timeout: timeout)
     }
 
     // MARK: - The session

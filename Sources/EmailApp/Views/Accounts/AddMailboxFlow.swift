@@ -36,6 +36,12 @@ struct AddMailboxFlow: View {
     @State private var imapPassword = ""
     @State private var server = IMAPConfig(imapHost: "", smtpHost: "", username: "")
     @State private var isTesting = false
+    /// What the IMAP server said about itself, kept between the two checks.
+    @State private var verified: IMAPProbe.Success?
+    @State private var usesSeparateSMTPPassword = false
+    @State private var smtpPassword = ""
+    /// Sending failed. Not fatal -- receiving already works.
+    @State private var sendingProblem: String?
 
     // MARK: - The step graph
 
@@ -43,11 +49,15 @@ struct AddMailboxFlow: View {
         case provider
         case googleConsent
         case imapSignIn
-        case imapServer
+        case imapIncoming
+        case imapOutgoing
         case naming
         case importScope
         case importing
         case done
+
+        /// Steps that own the whole screen rather than sitting above a form.
+        var isFullHeight: Bool { self == .importing || self == .done }
     }
 
     private var steps: [Step] {
@@ -57,7 +67,7 @@ struct AddMailboxFlow: View {
             // apart with a colour either.
             case .naming: !firstRun
             case .googleConsent: provider != .imap
-            case .imapSignIn, .imapServer: provider == .imap
+            case .imapSignIn, .imapIncoming, .imapOutgoing: provider == .imap
             default: true
             }
         }
@@ -79,20 +89,35 @@ struct AddMailboxFlow: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 0) {
-                if step != .provider && step != .done {
+                if !step.isFullHeight && step != .provider {
                     ProgressView(value: progress)
                         .tint(Color.accentColor)
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, Style.gutter)
                         .padding(.bottom, 10)
                 }
 
-                ScrollView {
+                // Two layouts, because there are two kinds of step here.
+                //
+                // A form is a column that starts at the top and grows down,
+                // and a heading above it belongs at the top left. A screen
+                // whose whole job is one ring, or one line saying it worked,
+                // is not that -- and putting it in the form layout left the
+                // ring high on the screen with a third of the phone empty
+                // underneath, and the title jammed against the sheet's own
+                // rounded corner with nothing above it.
+                if step.isFullHeight {
                     content
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 8)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.horizontal, Style.gutter)
+                } else {
+                    ScrollView {
+                        content
+                            .padding(.horizontal, Style.gutter)
+                            .padding(.bottom, Style.tight)
+                    }
+                    .scrollIndicators(.hidden)
+                    .scrollDismissesKeyboard(.interactively)
                 }
-                .scrollIndicators(.hidden)
-                .scrollDismissesKeyboard(.interactively)
 
                 if let button = buttonTitle {
                     Button(action: advance) {
@@ -139,6 +164,19 @@ struct AddMailboxFlow: View {
             } message: {
                 Text(failure ?? "")
             }
+            // Sending failing is not the same as the mailbox failing, and it
+            // should not throw away a connection that already works. Reading
+            // mail is most of what this app is for; the outgoing settings can
+            // be fixed later from the mailbox's own page.
+            .alert("Sending didn't work", isPresented: .constant(sendingProblem != nil)) {
+                Button("Add it anyway") {
+                    sendingProblem = nil
+                    Task { await adoptVerifiedMailbox() }
+                }
+                Button("Fix the settings", role: .cancel) { sendingProblem = nil }
+            } message: {
+                Text((sendingProblem ?? "") + "\n\nReceiving already works. You can add the mailbox now and sort sending out later, but you will not be able to send from it until you do.")
+            }
         }
         // Nothing here closes on a swipe -- a half-answered flow should not
         // vanish because a finger moved. The X is the way out, and during
@@ -153,8 +191,9 @@ struct AddMailboxFlow: View {
         switch step {
         case .provider:   providerStep
         case .googleConsent: consentStep
-        case .imapSignIn: imapSignInStep
-        case .imapServer: imapServerStep
+        case .imapSignIn:   imapSignInStep
+        case .imapIncoming: imapIncomingStep
+        case .imapOutgoing: imapOutgoingStep
         case .naming:     namingStep
         case .importScope: scopeStep
         case .importing:  importingStep
@@ -252,23 +291,16 @@ struct AddMailboxFlow: View {
     /// prefilled from the domain, so for most people it is still one tap; for
     /// everybody else it is the four things their host's help page lists,
     /// under the same names their host uses.
-    private var imapServerStep: some View {
+    private var imapIncomingStep: some View {
         AutoReplyStep(
             "Incoming server settings",
-            "Your email provider lists these as IMAP settings."
+            "Your provider lists these as IMAP settings."
         ) {
             VStack(alignment: .leading, spacing: 20) {
                 FieldBlock(label: "Username", hint: "Usually your full email address", text: $server.username)
                     .textInputAutocapitalization(.never)
 
-                VStack(alignment: .leading, spacing: Style.tight) {
-                    Text("Password").font(Style.rowTitleStrong)
-                    SecureField("", text: $imapPassword)
-                        .textContentType(.password)
-                        .padding(.horizontal, 14)
-                        .frame(height: 46)
-                        .cardBackground()
-                }
+                passwordField("Password", text: $imapPassword)
 
                 FieldBlock(label: "IMAP server", hint: "imap.yourcompany.com", text: $server.imapHost)
                     .textInputAutocapitalization(.never)
@@ -277,10 +309,27 @@ struct AddMailboxFlow: View {
 
                 securityPicker("Security type", security: $server.imapSecurity, port: $server.imapPort)
 
-                Divider().padding(.vertical, 4)
+                connecting(to: server.imapHost)
+                keychainNote
+            }
+        }
+    }
 
-                Text("Outgoing server settings")
-                    .font(Style.rowTitleStrong)
+    /// Reached only once the incoming settings are known to work.
+    ///
+    /// Two pages, checked one at a time, because they are two different
+    /// servers and can want two different answers -- plenty of hosts issue a
+    /// separate password for sending. One long form checked at the end can
+    /// only say "something is wrong" and leave you to work out which half.
+    private var imapOutgoingStep: some View {
+        AutoReplyStep(
+            "Outgoing server settings",
+            "Your provider lists these as SMTP settings."
+        ) {
+            VStack(alignment: .leading, spacing: 20) {
+                Label("Receiving works", systemImage: "checkmark.circle.fill")
+                    .font(Style.rowDetail)
+                    .foregroundStyle(Color.ok)
 
                 FieldBlock(label: "SMTP server", hint: "smtp.yourcompany.com", text: $server.smtpHost)
                     .textInputAutocapitalization(.never)
@@ -289,22 +338,47 @@ struct AddMailboxFlow: View {
 
                 securityPicker("Security type", security: $server.smtpSecurity, port: $server.smtpPort)
 
-                if isTesting {
-                    HStack(spacing: Style.tight) {
-                        ProgressView().controlSize(.small)
-                        Text("Connecting to \(server.imapHost)…")
-                            .font(Style.rowDetail)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+                Toggle("Sending needs a different password", isOn: $usesSeparateSMTPPassword)
+                    .font(Style.rowTitle)
+
+                if usesSeparateSMTPPassword {
+                    passwordField("Sending password", text: $smtpPassword)
                 }
 
-                Text("Your password is kept in this phone's Keychain and used only to reach your mail server. It is not sent anywhere else.")
-                    .font(Style.rowDetail)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                connecting(to: server.smtpHost)
             }
         }
+    }
+
+    private func passwordField(_ label: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: Style.tight) {
+            Text(label).font(Style.rowTitleStrong)
+            SecureField("", text: text)
+                .textContentType(.password)
+                .padding(.horizontal, 14)
+                .frame(height: 46)
+                .cardBackground()
+        }
+    }
+
+    @ViewBuilder
+    private func connecting(to host: String) -> some View {
+        if isTesting {
+            HStack(spacing: Style.tight) {
+                ProgressView().controlSize(.small)
+                Text("Connecting to \(host)…")
+                    .font(Style.rowDetail)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var keychainNote: some View {
+        Text("Your password is kept in this phone's Keychain and used only to reach your mail server. It is not sent anywhere else.")
+            .font(Style.rowDetail)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func portField(_ label: String, port: Binding<Int>) -> some View {
@@ -397,20 +471,42 @@ struct AddMailboxFlow: View {
         }
     }
 
+    /// No heading of its own.
+    ///
+    /// `ImportingMailView` already says what is happening, and says it in the
+    /// middle of the screen where the ring is. "Bringing your mail over" above
+    /// "Looking through your mailbox" was the same sentence twice, one of them
+    /// pinned to the top left, and it pushed the ring up out of the middle.
     private var importingStep: some View {
-        AutoReplyStep("Bringing your mail over", nil) {
-            ImportingMailView(progress: mail.importProgress, canLeave: !firstRun)
-                .frame(minHeight: 320)
-        }
+        ImportingMailView(progress: mail.importProgress, canLeave: !firstRun)
     }
 
     private var doneStep: some View {
-        AutoReplyStep(
-            mail.account.map { "\($0.address) is ready" } ?? "Ready",
-            "You can switch between mailboxes from the inbox, or from You."
-        ) {
-            EmptyView()
+        VStack(spacing: 0) {
+            Spacer()
+
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 64))
+                .foregroundStyle(Color.ok)
+                .padding(.bottom, 24)
+
+            Text(mail.account.map { "\($0.address) is ready" } ?? "Ready")
+                .font(.title2.bold())
+                .multilineTextAlignment(.center)
+                // The address is the long part and it must not be cut in half
+                // by the edge of the phone.
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("You can switch between mailboxes from the inbox, or from You.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, Style.tight)
+
+            Spacer()
         }
+        .frame(maxWidth: .infinity)
     }
 
     private func permission(_ title: String, _ detail: String) -> some View {
@@ -444,7 +540,8 @@ struct AddMailboxFlow: View {
         case .provider:      "Continue"
         case .googleConsent: "Sign in with Google"
         case .imapSignIn:    "Next"
-        case .imapServer:    "Sign in"
+        case .imapIncoming:  "Check receiving"
+        case .imapOutgoing:  "Check sending"
         case .naming:        "Continue"
         case .importScope:   "Bring it over"
         case .importing:     nil
@@ -457,9 +554,12 @@ struct AddMailboxFlow: View {
         case .provider: provider != nil
         case .imapSignIn:
             imapAddress.contains("@")
-        case .imapServer:
+        case .imapIncoming:
             !server.imapHost.isEmpty && !server.username.isEmpty
-                && !server.smtpHost.isEmpty && !imapPassword.isEmpty && !isTesting
+                && !imapPassword.isEmpty && !isTesting
+        case .imapOutgoing:
+            !server.smtpHost.isEmpty && !isTesting
+                && (!usesSeparateSMTPPassword || !smtpPassword.isEmpty)
         default: true
         }
     }
@@ -470,11 +570,13 @@ struct AddMailboxFlow: View {
             Task { await connect() }
         case .imapSignIn:
             // Prefilled from the domain, so most people read four correct
-            // fields and press Sign in. Nothing is dialled yet.
+            // fields and press the button. Nothing is dialled yet.
             server = MailServerGuess.first(for: imapAddress).config
             withAnimation(.snappy(duration: 0.25)) { index += 1 }
-        case .imapServer:
-            Task { await signInToIMAP() }
+        case .imapIncoming:
+            Task { await checkReceiving() }
+        case .imapOutgoing:
+            Task { await checkSending() }
         case .importScope:
             Task { await runImport() }
         case .done:
@@ -503,18 +605,13 @@ struct AddMailboxFlow: View {
         withAnimation(.snappy(duration: 0.25)) { index += 1 }
     }
 
-    /// Signs in to the server that was actually typed in. One attempt.
+    /// Half one: can we read this mailbox?
     ///
-    /// It used to search: up to eight hosts in turn, thirty seconds each. It
-    /// was slow when it worked, and when it failed it could not say which
-    /// server had refused, because the app had chosen the server rather than
-    /// the person. Asking is faster and the error means something.
-    ///
-    /// The order matters and is the opposite of what is obvious: nothing is
-    /// saved until a server has actually accepted the password. An account
-    /// record written first would leave a broken mailbox in the list every
-    /// time somebody mistyped theirs.
-    private func signInToIMAP() async {
+    /// One attempt against the server that was actually typed in. It used to
+    /// search up to eight hosts in turn -- slow, and when it failed it could
+    /// not say *which* server refused, because the app had chosen it rather
+    /// than the person.
+    private func checkReceiving() async {
         isTesting = true
         defer { isTesting = false }
 
@@ -527,20 +624,50 @@ struct AddMailboxFlow: View {
 
         switch await IMAPProbe.verify(server, password: imapPassword) {
         case .ok(let success):
-            await adopt(success, address: address)
+            // Keep what the server said about itself -- the folder names in
+            // particular, which are what tell Sent from Drafts later.
+            verified = success
+            withAnimation(.snappy(duration: 0.25)) { index += 1 }
 
-        case .refused(let reason, _):
-            failure = reason
-
-        case .unreachable(let reason):
+        case .refused(let reason, _), .unreachable(let reason):
             failure = reason
         }
     }
 
+    /// Half two: can we send from it?
+    ///
+    /// Checked separately because it is a different server, and often a
+    /// different password. Failing here does not undo half one -- receiving
+    /// still works, and the mailbox is worth having either way, so this offers
+    /// to carry on rather than throwing the whole thing away.
+    private func checkSending() async {
+        isTesting = true
+        defer { isTesting = false }
+
+        let password = usesSeparateSMTPPassword ? smtpPassword : imapPassword
+
+        switch await SMTPProbe.verify(server, username: server.username, password: password) {
+        case .ok:
+            await adoptVerifiedMailbox()
+        case .failed(let reason):
+            sendingProblem = reason
+        }
+    }
+
+    /// The mailbox, once it is known to work.
+    private func adoptVerifiedMailbox() async {
+        guard let verified else { return }
+        await adopt(verified, address: MailboxID.canonical(imapAddress))
+    }
+
     /// A verified mailbox becomes an account.
     private func adopt(_ success: IMAPProbe.Success, address: String) async {
-        var config = success.config
-        config.username = success.config.username
+        // `server` rather than `success.config`: the outgoing half was edited
+        // on the second screen, after the first check captured it.
+        var config = server
+        config.imapHost = success.config.imapHost
+        config.imapPort = success.config.imapPort
+        config.imapSecurity = success.config.imapSecurity
 
         let connected = MailAccount(
             provider: .imap,
@@ -550,12 +677,17 @@ struct AddMailboxFlow: View {
             server: config
         )
 
-        // Only now, and only because a server accepted it.
+        // Only now, and only because a server accepted them.
         Keychain.storeQuietly(imapPassword, .imapPassword, for: connected.id)
-        Keychain.storeQuietly(imapPassword, .smtpPassword, for: connected.id)
+        Keychain.storeQuietly(
+            usesSeparateSMTPPassword ? smtpPassword : imapPassword,
+            .smtpPassword,
+            for: connected.id
+        )
 
         // Not kept in view state a moment longer than it has to be.
         imapPassword = ""
+        smtpPassword = ""
 
         await mail.adopt(connected)
         withAnimation(.snappy(duration: 0.25)) { index += 1 }
