@@ -115,12 +115,11 @@ workflows:
       groups:
         - appstore
 
-      ios_signing:
-        distribution_type: app_store
-        # Not reverse-DNS, which is unusual, but it is what is registered on
-        # the Developer Portal and what project.yml sets. It must match, or
-        # the profile fetched here will not match the binary built.
-        bundle_identifier: emailapptest
+      # ⚠️ No `ios_signing:` block. That is Codemagic's automatic signing and
+      # it only runs when a named App Store Connect *integration* exists --
+      # the very thing being avoided here. With the variables alone it did
+      # nothing, and the build failed at "No matching profiles found" having
+      # never fetched any. The signing step below does it explicitly instead.
 
       vars:
         BUNDLE_ID: emailapptest
@@ -159,8 +158,28 @@ workflows:
           echo "Building $NEXT"
           agvtool new-version -all "$NEXT"
 
+      # What `ios_signing:` would have done, done by hand.
+      #
+      # `fetch-signing-files` reads APP_STORE_CONNECT_ISSUER_ID,
+      # APP_STORE_CONNECT_KEY_IDENTIFIER and APP_STORE_CONNECT_PRIVATE_KEY
+      # from the environment on its own -- which is why those exact names were
+      # chosen when they were uploaded.
+      #
+      # `--create` matters: there may be no App Store profile for this bundle
+      # id yet, and without it the command finds nothing and stops rather than
+      # making one.
       - name: Set up code signing
-        script: keychain initialize && xcode-project use-profiles
+        script: |
+          set -euo pipefail
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain initialize
+          # The certificate has to be in the keychain as well as the profile
+          # on disk, or the profile references an identity nothing can sign
+          # with.
+          keychain add-certificates
+          xcode-project use-profiles
 
       - name: Build the archive
         script: |
