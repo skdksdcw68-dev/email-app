@@ -630,13 +630,17 @@ final class MailStore {
         if !force, let last = lastVerifiedAt,
            Date.now.timeIntervalSince(last) < Self.verifyInterval { return }
 
+        let stamp = epoch
         guard let token = try? await accessToken() else { return }
         guard let ids = await Self.retrying({
             try await GmailService.allMessageIDs(
                 matching: GmailService.importWindow, accessToken: token
             )
         }) else { return }
-        guard !ids.isEmpty else { return }
+        // Counting the whole window is four round trips. Comparing one
+        // mailbox's ids against another's held mail would report thousands
+        // missing and then fetch them all into the wrong account.
+        guard isCurrent(stamp), !ids.isEmpty else { return }
 
         let held = Set(messages.compactMap(\.remoteID))
         let missing = ids.filter { !held.contains($0) }
@@ -914,8 +918,11 @@ final class MailStore {
     func loadArchive() async {
         guard messages.isEmpty else { return }
         guard let mailbox = account?.id else { return }
+        let stamp = epoch
         let stored = await MessageArchive.load(mailbox: mailbox)
-        guard !stored.isEmpty, messages.isEmpty else { return }
+        // Decoding a few thousand messages takes long enough to switch
+        // mailboxes underneath it, and this one writes the whole array.
+        guard isCurrent(stamp), !stored.isEmpty, messages.isEmpty else { return }
         let read = locallyRead
         let replied = locallyReplied
         write { list in
@@ -979,7 +986,12 @@ final class MailStore {
         summarizing.insert(id)
         defer { summarizing.remove(id) }
 
+        let stamp = epoch
         guard let classification = try? await AIService.classify(message) else { return }
+        // The summary belongs to the message it was asked about, and that
+        // message belongs to a mailbox. Applying it after a switch would put
+        // it on whatever now sits at that id.
+        guard isCurrent(stamp) else { return }
         apply(classification, to: id)
         if let remoteID = message.remoteID {
             ClassificationCache.store(classification, for: remoteID)
@@ -1276,7 +1288,14 @@ final class MailStore {
     /// First tier, then the second where the first asked for it. False when
     /// the service did not answer.
     private func classifyAndExtract(_ message: Message) async -> Bool {
+        let stamp = epoch
         guard let classification = try? await AIService.classify(message) else { return false }
+        // Fifteen of these are in flight at once and each writes a tag and a
+        // summary onto a message. A batch that lands after a switch would
+        // write the previous mailbox's classifications into this one's mail
+        // and then save the mixture, with nothing afterwards able to tell
+        // which came from where.
+        guard isCurrent(stamp) else { return false }
         apply(classification, to: message.id)
         guard let remoteID = message.remoteID else { return true }
         ClassificationCache.store(classification, for: remoteID)
@@ -1296,7 +1315,11 @@ final class MailStore {
     /// not answer.
     private func extractFacts(from message: Message) async -> Bool {
         guard let remoteID = message.remoteID, let account else { return false }
+        let stamp = epoch
         guard let extraction = try? await AIService.extract(message) else { return false }
+        // `facts` is rebound to the new mailbox's file on a switch, so a late
+        // extraction would write one mailbox's commitments into another's.
+        guard isCurrent(stamp) else { return false }
         let found = extraction.facts(for: message, myAddress: account.address)
         facts.record(found, from: remoteID)
         if !found.isEmpty {
@@ -1625,6 +1648,7 @@ final class MailStore {
     ) async throws {
         guard let account else { throw SendError.notConnected }
         try checkSize(of: attachments)
+        let stamp = epoch
 
         let token = try await accessToken()
         let envelope = MIMEBuilder.Envelope(
@@ -1658,6 +1682,13 @@ final class MailStore {
         local.remoteID = sent.id
         local.threadID = sent.threadID
         local.hasAttachment = !attachments.isEmpty
+
+        // The message went from the mailbox that is still in front of the
+        // person, so it goes in that mailbox's Sent. If they switched while
+        // it was uploading, it is Gmail's copy that is authoritative and the
+        // next sync of *that* account will bring it down where it belongs --
+        // appending it here would file it under the wrong address.
+        guard isCurrent(stamp) else { return }
         write { $0.append(local) }
     }
 
@@ -1689,6 +1720,7 @@ final class MailStore {
     ) async throws {
         guard let account else { throw SendError.notConnected }
         try checkSize(of: attachments)
+        let stamp = epoch
 
         let token = try await accessToken()
         let envelope = MIMEBuilder.Envelope(
@@ -1712,6 +1744,7 @@ final class MailStore {
                 envelope: envelope,
                 threadID: existing.threadID ?? original?.threadID
             )
+            guard isCurrent(stamp) else { return }
             update(existing.id) {
                 $0.subject = subject.isEmpty ? "(No Subject)" : subject
                 $0.recipients = [Contact(name: address, address: address)]
@@ -1744,6 +1777,11 @@ final class MailStore {
         local.threadID = handle.thread
         local.draftID = handle.draft
         local.htmlBody = html
+
+        // Same rule as a send: the draft is on Gmail either way, and the
+        // mailbox it belongs to will bring it down. Appending it here after
+        // a switch would file it under the wrong address.
+        guard isCurrent(stamp) else { return }
         write { $0.append(local) }
     }
 
