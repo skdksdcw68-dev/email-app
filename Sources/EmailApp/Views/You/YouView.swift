@@ -20,16 +20,20 @@ struct YouView: View {
     @Environment(AutoReplyStore.self) private var autoReply
     @Environment(AutoReplyQueue.self) private var autoReplyQueue
 
-    @State private var isEditingProfile = false
     @State private var isAddingMailbox = false
     @State private var appearance = AppSettings.appearance
+    /// The mailbox a swipe is offering to sign out of.
+    @State private var signingOut: MailAccount?
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     header
-                    Button("Edit profile") { isEditingProfile = true }
+                    // A page, not a sheet. It is where the picture is set and
+                    // where the account itself is signed out of, and neither
+                    // of those is a thing you dismiss with a swipe.
+                    NavigationLink("Edit profile") { EditProfileView() }
                         .font(.subheadline)
                 }
 
@@ -72,8 +76,20 @@ struct YouView: View {
                 }
             }
             .navigationTitle("You")
-            .sheet(isPresented: $isEditingProfile) { EditProfileView().closesOnlyOnPurpose() }
             .sheet(isPresented: $isAddingMailbox) { AddMailboxFlow() }
+            .alert(item: $signingOut) { account in
+                Alert(
+                    title: Text("Sign out of \(account.address)?"),
+                    message: Text("Its mail, read state, snoozes and drafts go from this phone, and Maily's access to it ends. Nothing on \(account.provider.inSentence) is touched."),
+                    primaryButton: .destructive(Text("Sign out")) {
+                        // Never the active one -- this list only holds the
+                        // others -- so `forget` is always the right call and
+                        // `disconnect` never is.
+                        mail.registry.forget(account.id)
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
         }
     }
 
@@ -87,7 +103,7 @@ struct YouView: View {
     /// centred captions.
     private var header: some View {
         HStack(spacing: 14) {
-            SenderAvatar(
+            ProfileAvatar(
                 contact: Contact(
                     name: user.account?.displayName ?? "You",
                     address: user.account?.email ?? ""
@@ -134,17 +150,19 @@ struct YouView: View {
                     .font(Style.rowTitle)
                     .foregroundStyle(.secondary)
             }
-
-            // No "Current" row.
+            // No "Current" row: this section is the mailboxes you can move
+            // *to*, not a list of every mailbox with one of them ticked.
             //
-            // The top of this page is already the account you are in -- the
-            // face, the name and the address, at full size. Repeating it here
-            // as a smaller row with a blue "Current" label was the same
-            // mailbox twice on one screen, and it made this section read as a
-            // list of accounts when what it is is a list of *other* accounts.
+            // A row you cannot tap, sitting among rows that exist to be
+            // tapped, has to explain itself -- and it was doing that with a
+            // blue "Current" label, which is a caption apologising for a
+            // control. Which mailbox is active is said by the avatar in the
+            // inbox toolbar and by the card at the top of Manage accounts.
             //
-            // Telegram's Settings does the same thing: you at the top, the
-            // ones you can move to underneath.
+            // (The header above is the *Maily* account -- the Apple identity
+            // everything is saved under. That is a different thing from the
+            // mailbox, which is why removing this row loses nothing that was
+            // already on screen.)
             otherMailboxes
 
             // Two rows, and finally two destinations. They pushed the same
@@ -178,35 +196,54 @@ struct YouView: View {
         }
     }
 
-    /// The mailboxes that are not in front of you, as faces.
+    /// The mailboxes that are not in front of you, one per row.
+    ///
+    /// They were a horizontal strip of faces, which is a shape for *many* of
+    /// something you scan -- a story tray, a reaction bar. Two or three
+    /// mailboxes is not that. It also had nowhere to put an address, so two
+    /// accounts at the same company showed as two identical names, and the
+    /// only thing you could do to one was tap it.
+    ///
+    /// Rows, like Telegram's account list. There is room for the address, and
+    /// room for a swipe.
+    @ViewBuilder
     private var otherMailboxes: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 14) {
-                ForEach(mail.registry.accounts.filter { $0.id != mail.account?.id }) { account in
-                    Button {
-                        Task { await mail.activate(account) }
-                    } label: {
-                        VStack(spacing: 5) {
-                            SenderAvatar(contact: account.contact, size: 42)
-                                .overlay { Circle().strokeBorder(account.tint.color, lineWidth: 2) }
-                                .overlay(alignment: .topTrailing) {
-                                    if account.needsAttention {
-                                        Image(systemName: "exclamationmark.circle.fill")
-                                            .font(.caption2)
-                                            .foregroundStyle(.orange)
-                                    }
-                                }
-                            Text(account.title)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        .frame(width: 62)
+        ForEach(mail.registry.accounts.filter { $0.id != mail.account?.id }) { account in
+            Button {
+                Task { await mail.activate(account) }
+            } label: {
+                HStack(spacing: 12) {
+                    SenderAvatar(contact: account.contact, size: 38)
+                        .overlay { Circle().strokeBorder(account.tint.color, lineWidth: 2) }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(account.title)
+                            .font(Style.rowTitle)
+                            .foregroundStyle(.primary)
+                        Text(account.address)
+                            .font(Style.rowDetail)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
-                    .buttonStyle(.plain)
+
+                    Spacer(minLength: 0)
+
+                    if account.needsAttention {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(Color.warning)
+                    }
+                }
+                .padding(.vertical, 2)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive) { signingOut = account } label: {
+                    Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                 }
             }
-            .padding(.vertical, 4)
         }
     }
 
