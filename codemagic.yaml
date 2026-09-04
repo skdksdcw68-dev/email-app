@@ -184,20 +184,25 @@ workflows:
       # certificates are untouched, because revoking somebody's signing
       # identity to save making a new one is not a trade worth taking.
       #
-      # `--certificate-type IOS_DISTRIBUTION` because the default, Apple
-      # Distribution, was full: Apple allows two of each and both existed, so
-      # creating one came back 409 "You already have a current Distribution
-      # certificate". iOS Distribution had a slot. Both types sign an App
-      # Store build, so the one with room is the one to use -- and it meant
-      # nothing had to be revoked on an account that also carries three other
-      # apps, where a certificate is account-wide rather than per-app.
+      # There is no `--certificate-type` flag here, and the type still
+      # mattered: Apple allows two Apple Distribution certificates and two iOS
+      # Distribution, and both Apple Distribution slots were taken -- so
+      # `--create` came back 409 "You already have a current Distribution
+      # certificate".
+      #
+      # The iOS Distribution certificate this needs was therefore created
+      # ahead of time, from this same private key, straight against Apple's
+      # API. `fetch-signing-files` now finds it by matching the key rather
+      # than trying to make another. Both types sign an App Store build, so
+      # using the one with a free slot meant nothing had to be revoked on an
+      # account that also carries drobe, remi and content-app -- where a
+      # certificate is account-wide rather than per-app.
       - name: Set up code signing
         script: |
           set -euo pipefail
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --certificate-key "@env:CERTIFICATE_PRIVATE_KEY" \
-            --certificate-type IOS_DISTRIBUTION \
             --create
           keychain initialize
           # The certificate has to be in the keychain as well as the profile
