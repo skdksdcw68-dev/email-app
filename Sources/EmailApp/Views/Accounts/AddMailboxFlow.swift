@@ -37,7 +37,7 @@ struct AddMailboxFlow: View {
     @State private var server = IMAPConfig(imapHost: "", smtpHost: "", username: "")
     @State private var showsServerFields = false
     @State private var isTesting = false
-    @State private var tryingHost: String?
+    @State private var probe: IMAPProbe.Progress?
     @State private var serverNote: String?
 
     // MARK: - The step graph
@@ -253,15 +253,26 @@ struct AddMailboxFlow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if isTesting, let tryingHost {
-                    // Named rather than a bare spinner. Trying several hosts
-                    // takes a moment and silence reads as a hang.
-                    HStack(spacing: Style.tight) {
-                        ProgressView().controlSize(.small)
-                        Text("Trying \(tryingHost)…")
-                            .font(Style.rowDetail)
-                            .foregroundStyle(.secondary)
+                if isTesting {
+                    searchProgress
+                } else {
+                    // Always offered, never buried behind a failure.
+                    //
+                    // Gmail's own app asks for the IMAP server, the port and
+                    // the security type before it will try anything. Asking is
+                    // worse for the many and essential for the few, so the app
+                    // guesses first and keeps this here for anybody who
+                    // already knows -- rather than making them fail once to
+                    // earn the form.
+                    Button("Enter server settings myself") {
+                        server = MailServerGuess.first(for: imapAddress).config
+                        withAnimation(.snappy(duration: 0.25)) {
+                            showsServerFields = true
+                            index += 1
+                        }
                     }
+                    .font(Style.rowDetail)
+                    .disabled(!imapAddress.contains("@"))
                 }
 
                 Text("Your password is kept in this phone's Keychain and used only to reach your mail server. It is not sent anywhere else.")
@@ -270,6 +281,36 @@ struct AddMailboxFlow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// What the search is doing, rather than a spinner that says nothing.
+    ///
+    /// A bare spinner on a job that can take half a minute reads as a hang,
+    /// and somebody who thinks it has hung closes it. A bar that visibly moves
+    /// and a host that visibly changes say the same thing the spinner was
+    /// trying to: it is working, and it is nearly there.
+    private var searchProgress: some View {
+        VStack(alignment: .leading, spacing: Style.tight) {
+            ProgressView(value: probe?.fraction ?? 0)
+                .tint(Color.accentColor)
+
+            HStack(spacing: Style.tight) {
+                Text(probe.map { "Checking \($0.host)" } ?? "Checking your mailbox")
+                    .font(Style.rowDetail)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                if let probe {
+                    Text("\(probe.attempt) of \(probe.total)")
+                        .font(Style.caption)
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                }
+            }
+        }
+        .animation(.snappy(duration: 0.3), value: probe?.attempt)
     }
 
     /// Only reached when the guessing failed.
@@ -300,14 +341,7 @@ struct AddMailboxFlow: View {
                     }
                 }
 
-                if isTesting, let tryingHost {
-                    HStack(spacing: Style.tight) {
-                        ProgressView().controlSize(.small)
-                        Text("Trying \(tryingHost)…")
-                            .font(Style.rowDetail)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                if isTesting { searchProgress }
             }
         }
     }
@@ -476,7 +510,7 @@ struct AddMailboxFlow: View {
     /// time somebody mistyped their password.
     private func signInToIMAP(using known: IMAPConfig?) async {
         isTesting = true
-        defer { isTesting = false; tryingHost = nil }
+        defer { isTesting = false; probe = nil }
 
         let address = MailboxID.canonical(imapAddress)
 
@@ -487,11 +521,11 @@ struct AddMailboxFlow: View {
 
         let outcome: IMAPProbe.Outcome
         if let known {
-            tryingHost = known.imapHost
+            probe = IMAPProbe.Progress(host: known.imapHost, attempt: 1, total: 1)
             outcome = await IMAPProbe.verify(known, password: imapPassword)
         } else {
-            outcome = await IMAPProbe.discover(address: address, password: imapPassword) { host in
-                Task { @MainActor in tryingHost = host }
+            outcome = await IMAPProbe.discover(address: address, password: imapPassword) { step in
+                Task { @MainActor in probe = step }
             }
         }
 
@@ -499,10 +533,18 @@ struct AddMailboxFlow: View {
         case .ok(let success):
             await adopt(success, address: address)
 
-        case .refused(let reason):
-            // The host answered, so the settings are right and the credentials
-            // are not. Sending them to the server form would be misleading.
-            failure = reason
+        case .refused(_, let host):
+            // A server answered and said no, which means one of two things
+            // that look identical from here: the password is wrong, or this is
+            // a real server that this mailbox is not on. Only the person can
+            // tell, so the app names the door it knocked on instead of
+            // deciding for them -- and the manual form is one tap away either
+            // way.
+            failure = """
+            \(host) answered, but did not accept that username and password.
+
+            If that is not your mail server, tap "Enter server settings myself" and put the right one in.
+            """
 
         case .unreachable(let reason):
             // Nothing answered anywhere. This is the case the manual form is

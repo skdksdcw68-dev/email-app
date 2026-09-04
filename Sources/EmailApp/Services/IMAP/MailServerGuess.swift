@@ -88,6 +88,11 @@ enum MailServerGuess {
     /// Only reachable by trying, which is what the test button is for -- the
     /// domain gives no clue which of these it is on.
     static let commonHosts: [(label: String, imap: String, smtp: String, smtpPort: Int)] = [
+        // Titan before Hostinger's own, deliberately. Hostinger sells both and
+        // resells Titan on most of its plans, so a Hostinger domain is more
+        // often here than on `imap.hostinger.com` -- which is a real server
+        // that answers, and refuses, and looks exactly like a wrong password.
+        ("Titan", "imap.titan.email", "smtp.titan.email", 465),
         ("Namecheap", "mail.privateemail.com", "mail.privateemail.com", 465),
         ("Hostinger", "imap.hostinger.com", "smtp.hostinger.com", 465),
         ("GoDaddy", "imap.secureserver.net", "smtpout.secureserver.net", 465),

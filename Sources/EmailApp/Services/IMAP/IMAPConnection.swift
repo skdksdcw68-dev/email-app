@@ -72,8 +72,8 @@ actor IMAPConnection {
     private var tag = 0
     private(set) var capabilities: Set<String> = []
 
-    init(host: String, port: Int, security: TransportSecurity) {
-        self.stream = MailStream(host: host, port: port)
+    init(host: String, port: Int, security: TransportSecurity, timeout: TimeInterval = 30) {
+        self.stream = MailStream(host: host, port: port, timeout: timeout)
         self.security = security
     }
 
