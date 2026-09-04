@@ -174,7 +174,12 @@ final class MIMEBuilderTests: XCTestCase {
 
     func testRawDecodesBackToTheMessage() {
         let env = envelope(subject: "Café ☕", plain: "Hi 😊")
-        let raw = MIMEBuilder.raw(env, boundary: "B")
+        // Both halves pinned to the same id and instant. Left to themselves
+        // each call mints a fresh Message-ID and stamps the current second,
+        // which is right for real sends and makes them incomparable here.
+        let id = "<fixed@example.com>"
+        let sentAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let raw = MIMEBuilder.raw(env, boundary: "B", messageID: id, date: sentAt)
 
         // Undo base64url, restoring padding.
         var standard = raw
@@ -184,7 +189,43 @@ final class MIMEBuilderTests: XCTestCase {
 
         let data = Data(base64Encoded: standard)
         let decoded = data.flatMap { String(data: $0, encoding: .utf8) }
-        XCTAssertEqual(decoded, MIMEBuilder.message(env, boundary: "B"))
+        XCTAssertEqual(
+            decoded,
+            MIMEBuilder.message(env, boundary: "B", messageID: id, date: sentAt)
+        )
+    }
+
+    // MARK: - Headers a message must have
+
+    func testEveryMessageCarriesADateAndAMessageID() {
+        // 🔴 Both were missing. Gmail's API fills them in for its own sends,
+        // so nothing noticed until the same message went over SMTP -- and a
+        // message with neither is most of the way to a spam filter's
+        // definition of spam before it has said anything.
+        let message = MIMEBuilder.message(envelope())
+        XCTAssertTrue(message.contains("\r\nDate: "))
+        XCTAssertTrue(message.contains("\r\nMessage-ID: <"))
+    }
+
+    func testTheMessageIDUsesTheSendersOwnDomain() {
+        // One pointing somewhere the sender is not is itself a spam signal.
+        let id = MIMEBuilder.messageID(from: "Abel <team@drobefashion.com>")
+        XCTAssertTrue(id.hasSuffix("@drobefashion.com>"))
+        XCTAssertTrue(id.hasPrefix("<"))
+    }
+
+    func testTwoMessagesGetDifferentIDs() {
+        XCTAssertNotEqual(
+            MIMEBuilder.messageID(from: "a@b.com"),
+            MIMEBuilder.messageID(from: "a@b.com")
+        )
+    }
+
+    func testTheDateIsInEnglishWhateverThePhoneIsSet() {
+        // A Date header in another locale is not a Date header.
+        let stamp = MIMEBuilder.rfc5322Date(Date(timeIntervalSince1970: 1_700_000_000))
+        XCTAssertTrue(stamp.contains("Nov"))
+        XCTAssertTrue(stamp.hasPrefix("Tue,"))
     }
 
     // MARK: - Address formatting

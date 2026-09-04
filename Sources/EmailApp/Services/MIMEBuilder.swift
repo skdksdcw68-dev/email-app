@@ -67,8 +67,13 @@ enum MIMEBuilder {
     /// arrived at the other end looking like a token rather than an email.
     ///
     /// For anything that is not the Gmail API, use `message(_:)`.
-    static func raw(_ envelope: Envelope, boundary: String = UUID().uuidString) -> String {
-        base64url(message(envelope, boundary: boundary))
+    static func raw(
+        _ envelope: Envelope,
+        boundary: String = UUID().uuidString,
+        messageID: String? = nil,
+        date: Date = .now
+    ) -> String {
+        base64url(message(envelope, boundary: boundary, messageID: messageID, date: date))
     }
 
     /// The message itself, before encoding. Exposed for tests.
@@ -77,10 +82,16 @@ enum MIMEBuilder {
     /// HTML, where the text has to be an alternative pair nested inside the
     /// mixed part. Two boundaries, because a part cannot use its parent's:
     /// the parser would end the outer part at the first inner delimiter.
+    /// - Parameters:
+    ///   - messageID: pinned by tests, generated for real sends. Every call
+    ///     otherwise mints a new one, which is correct -- two sends are two
+    ///     messages -- and makes the output non-deterministic.
     static func message(
         _ envelope: Envelope,
         boundary: String = UUID().uuidString,
-        alternativeBoundary: String = UUID().uuidString
+        alternativeBoundary: String = UUID().uuidString,
+        messageID: String? = nil,
+        date: Date = .now
     ) -> String {
         var lines: [String] = [
             "From: \(envelope.from)",
@@ -105,8 +116,8 @@ enum MIMEBuilder {
         // definition of spam as far as a receiving filter is concerned. It is
         // not the only reason mail from a new domain lands in the junk folder,
         // but it is the only one this app was causing.
-        lines.append("Date: \(rfc5322Date())")
-        lines.append("Message-ID: \(messageID(from: envelope.from))")
+        lines.append("Date: \(rfc5322Date(date))")
+        lines.append("Message-ID: \(messageID ?? Self.messageID(from: envelope.from))")
 
         if let inReplyTo = envelope.inReplyTo, !inReplyTo.isEmpty {
             lines.append("In-Reply-To: \(inReplyTo)")
