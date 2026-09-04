@@ -97,17 +97,31 @@ workflows:
     instance_type: mac_mini_m2
     max_build_duration: 45
 
-    integrations:
-      app_store_connect: AppStoreConnect
-
     environment:
       xcode: latest
+
+      # The App Store Connect key, as three secure variables rather than a
+      # named integration.
+      #
+      # The integration is the documented route and needs somebody in the
+      # Codemagic UI. These are the exact variable names the bundled
+      # `app-store-connect` CLI reads on its own, so the signing step below
+      # finds them without being told -- and they could be uploaded through
+      # the API, which meant this did not have to wait on anybody.
+      #
+      # The key itself is the one already on the machine from the GitHub
+      # Actions setup. A second key would have worked as well; not needing one
+      # is better.
+      groups:
+        - appstore
+
       ios_signing:
         distribution_type: app_store
         # Not reverse-DNS, which is unusual, but it is what is registered on
         # the Developer Portal and what project.yml sets. It must match, or
         # the profile fetched here will not match the binary built.
         bundle_identifier: emailapptest
+
       vars:
         BUNDLE_ID: emailapptest
         # Where this provider's build numbers start.
@@ -161,7 +175,12 @@ workflows:
 
     publishing:
       app_store_connect:
-        auth: integration
+        # The same three variables the signing step used. `auth: integration`
+        # would look for the named integration that deliberately does not
+        # exist here.
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         # TestFlight only. Nothing here submits for App Store review, and it
         # should stay that way until there is a release worth reviewing.
         submit_to_testflight: true
