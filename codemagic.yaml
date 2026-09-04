@@ -29,16 +29,15 @@ workflows:
     environment:
       xcode: latest
 
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: main
-          include: true
-      # A migration or a README cannot break a Swift compile. Same reasoning
-      # as the paths-ignore on the GitHub workflow: build minutes are finite
-      # and this learns nothing from them.
-      cancel_previous_builds: true
+    # 🔴 No automatic trigger. Started by hand, or through the API.
+    #
+    # It ran on every push to main, which sounds right and is not: the free
+    # tier is 500 macOS minutes a month and a build here is eight to ten of
+    # them. A working session is twenty commits, and twenty commits was two
+    # hundred minutes -- nearly half the month -- to be told the same thing
+    # twenty times.
+    #
+    # Build when there is a question worth answering, not on every save.
 
     scripts:
       - name: Install XcodeGen

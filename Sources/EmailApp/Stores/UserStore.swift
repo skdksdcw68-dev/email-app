@@ -70,6 +70,7 @@ final class UserStore {
 
         answers[question.id] = current
         persistAnswers()
+        SettingsSync.notify(.onboarding)
     }
 
     /// Every question requires at least one answer -- the whole point is to give
@@ -88,6 +89,7 @@ final class UserStore {
         updated.displayName = trimmed
         account = updated
         persistAccount()
+        SettingsSync.notify(.onboarding)
     }
 
     /// What they do, in their own words. Cleared rather than stored empty, so
@@ -98,11 +100,13 @@ final class UserStore {
         updated.occupation = trimmed.isEmpty ? nil : String(trimmed.prefix(80))
         account = updated
         persistAccount()
+        SettingsSync.notify(.onboarding)
     }
 
     func setTone(_ optionID: String) {
         answers[OnboardingQuestion.tone.id] = [optionID]
         persistAnswers()
+        SettingsSync.notify(.onboarding)
     }
 
     /// The `tone` answer, phrased as an instruction the drafting model can act
@@ -203,6 +207,7 @@ final class UserStore {
             externalID: userID
         )
         persistAccount()
+        SettingsSync.notify(.onboarding)
         next()
     }
 
@@ -223,6 +228,10 @@ final class UserStore {
         // The signup snapshot goes too. Keeping it would mean the next person
         // to sign in on this phone could reset to a stranger's answers.
         defaults.removeObject(forKey: Key.originalAnswers)
+        // 🔴 Cancel, never flush. A debounced push firing after this would
+        // send the emptied answers up and wipe the account on every other
+        // device. Signing out is not an edit.
+        SettingsSync.shared.cancelPending()
         defaults.set(false, forKey: Key.completed)
         phase = .welcome
     }
@@ -268,6 +277,19 @@ final class UserStore {
         guard let original = signupAnswers else { return }
         answers = original
         persistAnswers()
+        SettingsSync.notify(.onboarding)
+    }
+
+    /// Takes the answers another device saved.
+    ///
+    /// Whole-document rather than merged: these are eight questions with one
+    /// current answer each, not a growing set, and "the newest device wins"
+    /// is what somebody means by changing an answer.
+    func replaceAnswers(_ incoming: [String: Set<String>]) {
+        guard !incoming.isEmpty else { return }
+        answers = incoming
+        persistAnswers()
+        SettingsSync.notify(.onboarding)
     }
 
     // MARK: - Persistence

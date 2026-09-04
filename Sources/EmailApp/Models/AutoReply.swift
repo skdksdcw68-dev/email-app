@@ -69,6 +69,30 @@ struct AutoReplyConfig: Codable, Equatable {
     var watchingSince: Date?
     var updatedAt = Date.now
 
+    /// What may be copied to another device.
+    ///
+    /// 🔴 **An explicit allow-list, not "everything minus a few fields", and
+    /// the difference is the whole safety of it.** A field added to this type
+    /// later must be *not synced* by default. Failing that way round means a
+    /// forgotten field is missing on the other phone; failing the other way
+    /// round means a forgotten field arms an agent.
+    ///
+    /// Which is exactly the risk. `isOn`, `mode` and `watchingSince` were
+    /// deliberately moved out of here into `AutoReplyActivation`, in the
+    /// mailbox's own suite, so that connecting a work address could not arm an
+    /// agent on it. Syncing them would resurrect that failure through the back
+    /// door: a second device with a different mailbox connected would inherit
+    /// an armed agent on an address nobody consented to.
+    ///
+    /// `AutoReplySyncTests` asserts the encoded payload contains none of them.
+    var syncable: AutoReplyConfig {
+        var copy = self
+        copy.isOn = false
+        copy.mode = .draft
+        copy.watchingSince = nil
+        return copy
+    }
+
     /// How many kinds of mail it is actually authorised to handle, for the
     /// line on the You tab.
     var handledCount: Int { allowed.count }

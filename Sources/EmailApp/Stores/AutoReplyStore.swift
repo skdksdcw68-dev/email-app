@@ -60,6 +60,30 @@ final class AutoReplyStore {
     /// have watched it write a few. Reading it off the incoming config would
     /// mean an edit -- or a setup flow with a stale copy -- could quietly
     /// turn sending on or off behind them.
+    /// Takes a setup another device saved.
+    ///
+    /// 🔴 Whatever arrives, this mailbox's arming is whatever it already was.
+    /// The incoming config is forced back to this device's own
+    /// `AutoReplyActivation` before it is stored, so a second phone with a
+    /// different mailbox connected cannot inherit an armed agent on an address
+    /// nobody consented to. `syncable` already strips those three fields on
+    /// the way out; this is the other half, because a payload written by an
+    /// older build might still carry them.
+    func adoptSynced(_ incoming: AutoReplyConfig) {
+        guard incoming.isSetUp else { return }
+        // Nothing to learn from a copy older than what is here.
+        guard incoming.updatedAt > config.updatedAt else { return }
+
+        let activation = AutoReplyActivation.current
+        var value = incoming
+        value.isOn = activation.isOn
+        value.mode = activation.mode
+        value.watchingSince = activation.watchingSince
+
+        config = value
+        persist()
+    }
+
     func complete(_ config: AutoReplyConfig) {
         var activation = AutoReplyActivation.current
         activation.isOn = true
@@ -295,6 +319,12 @@ final class AutoReplyStore {
     fileprivate func persistNow() { persist() }
 
     private func persist() {
+        // Every write to the setup, one place. `adoptSynced` is the exception
+        // handled by `SettingsSync` itself, which suppresses notifications
+        // while it is applying what came down -- otherwise taking a config
+        // from another device would immediately send it back.
+        SettingsSync.notify(.autoreply)
+
         do {
             try FileManager.default.createDirectory(
                 at: fileURL.deletingLastPathComponent(),

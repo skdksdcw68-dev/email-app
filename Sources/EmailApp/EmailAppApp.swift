@@ -106,8 +106,18 @@ struct EmailAppApp: App {
                         await chats.pull()
                         await memory.pull()
                         await searches.pull()
+                        // Everything else the person taught it: the tone
+                        // drafts are written in, who matters, the Auto-Reply
+                        // setup. A new phone used to start blank on all of it.
+                        await SettingsSync.shared.pull()
                     }
                     Analytics.record(.appOpened, ["mailbox": .bool(mail.isConnected)])
+
+                    // Reachable from static stores that hold no references, so
+                    // it is handed what it needs here rather than threaded
+                    // through every call site. Same reasoning as the delegate
+                    // below.
+                    SettingsSync.shared.attach(user: user, autoReply: autoReply)
 
                     // The delegate is built by UIKit and cannot be handed
                     // dependencies, so it is given them here.
@@ -131,7 +141,12 @@ struct EmailAppApp: App {
                     // Classifications are written a batch at a time rather
                     // than a message at a time, so leaving mid-pass would
                     // otherwise lose the last few and pay for them again.
-                    if phase != .active { ClassificationCache.flush() }
+                    if phase != .active {
+                        ClassificationCache.flush()
+                        // A debounced settings push still waiting when the
+                        // process is suspended is a change nobody saved.
+                        Task { await SettingsSync.shared.flush() }
+                    }
                     guard phase == .active else { return }
                     Task {
                         await mail.catchUp()

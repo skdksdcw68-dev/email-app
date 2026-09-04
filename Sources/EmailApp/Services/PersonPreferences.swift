@@ -87,6 +87,7 @@ enum PersonPreferences {
             all.remove(key)
         }
         important = all
+        SettingsSync.notify(.people)
     }
 
     // MARK: - Muted
@@ -116,6 +117,7 @@ enum PersonPreferences {
             all.remove(key)
         }
         muted = all
+        SettingsSync.notify(.people)
     }
 
     // MARK: - Category
@@ -191,6 +193,33 @@ enum PersonPreferences {
         if isImportant(address) { return 15 }
         if isMuted(address) { return -25 }
         return 0
+    }
+
+    /// Adds what another device has marked, without removing anything.
+    ///
+    /// Union rather than replace: there is no case where a phone *means* to
+    /// unmark somebody by not mentioning them -- it has only not heard about
+    /// them yet. See the note in `SettingsSync.apply`, including what this
+    /// costs: un-starring does not propagate until there are tombstones.
+    static func merge(important incoming: Set<String>) {
+        // Through `setImportant` rather than writing the set directly, so the
+        // rule that somebody cannot be both important and muted is enforced
+        // here too. Writing the arrays by hand would have been three lines
+        // shorter and would have let a sync produce a state the app itself
+        // cannot.
+        for address in incoming where !important.contains(address.lowercased()) {
+            setImportant(true, for: address)
+        }
+    }
+
+    static func merge(muted incoming: Set<String>) {
+        for address in incoming where !muted.contains(address.lowercased()) {
+            // Something marked important here wins over something muted
+            // elsewhere: the stronger signal is the one somebody chose most
+            // recently on the device they are holding.
+            guard !important.contains(address.lowercased()) else { continue }
+            setMuted(true, for: address)
+        }
     }
 
     static func clearAll() {

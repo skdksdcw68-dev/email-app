@@ -44,7 +44,7 @@ enum AppSettings {
             UserDefaults.standard.string(forKey: "settings.appearance")
                 .flatMap(Appearance.init(rawValue:)) ?? .system
         }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "settings.appearance") }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "settings.appearance"); SettingsSync.notify(.app) }
     }
 
     // MARK: - AI
@@ -54,13 +54,13 @@ enum AppSettings {
     /// anywhere and nothing is charged.
     static var tagsIncomingMail: Bool {
         get { UserDefaults.standard.object(forKey: "settings.aiTagging") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "settings.aiTagging") }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.aiTagging"); SettingsSync.notify(.app) }
     }
 
     /// Whether opening a message asks for a summary of it.
     static var writesSummaries: Bool {
         get { UserDefaults.standard.object(forKey: "settings.aiSummaries") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "settings.aiSummaries") }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.aiSummaries"); SettingsSync.notify(.app) }
     }
 
     // MARK: - Notifications
@@ -73,7 +73,7 @@ enum AppSettings {
     /// A banner when new mail arrives.
     static var notifiesNewMail: Bool {
         get { UserDefaults.standard.object(forKey: "settings.notify.mail") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "settings.notify.mail") }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.notify.mail"); SettingsSync.notify(.app) }
     }
 
     /// A banner when Auto-Reply has sent something for you.
@@ -83,13 +83,13 @@ enum AppSettings {
     /// the one thing in this app they must always be told about.
     static var notifiesAutoReply: Bool {
         get { UserDefaults.standard.object(forKey: "settings.notify.autoReply") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "settings.notify.autoReply") }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.notify.autoReply"); SettingsSync.notify(.app) }
     }
 
     /// Only mail Maily judged urgent or needing a reply.
     static var notifiesOnlyImportant: Bool {
         get { UserDefaults.standard.object(forKey: "settings.notify.importantOnly") as? Bool ?? false }
-        set { UserDefaults.standard.set(newValue, forKey: "settings.notify.importantOnly") }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.notify.importantOnly"); SettingsSync.notify(.app) }
     }
 
     /// Whether Maily keeps what it is told about the person.
@@ -101,13 +101,13 @@ enum AppSettings {
     /// Forget everything button.
     static var remembersThings: Bool {
         get { UserDefaults.standard.object(forKey: "settings.memory") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "settings.memory") }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.memory"); SettingsSync.notify(.app) }
     }
 
     /// Extra guidance handed to the model whenever it writes for the user.
     static var customInstructions: String {
         get { UserDefaults.standard.string(forKey: "settings.customInstructions") ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: "settings.customInstructions") }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.customInstructions"); SettingsSync.notify(.app) }
     }
 
     /// Whether the "AI search costs more" notice has been shown. It is worth
@@ -124,7 +124,7 @@ enum AppSettings {
     /// device. Off keeps them on this phone, where they used to live.
     static var syncsChats: Bool {
         get { UserDefaults.standard.object(forKey: "settings.syncsChats") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "settings.syncsChats") }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.syncsChats"); SettingsSync.notify(.app) }
     }
 
     /// Whether the app reports how it is used: which features get opened,
@@ -132,7 +132,7 @@ enum AppSettings {
     /// no email and nothing typed into the assistant is in it.
     static var sharesUsageData: Bool {
         get { UserDefaults.standard.object(forKey: "settings.usageData") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "settings.usageData") }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.usageData"); SettingsSync.notify(.app) }
     }
 }
 
