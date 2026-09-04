@@ -1,0 +1,164 @@
+# Building Maily somewhere that will actually give us a Mac.
+#
+# GitHub Actions stopped handing out runners -- any runner, Linux included --
+# after a payment authorisation failed on the account. That is not something a
+# workflow file can route around, and it left no way to compile Swift at all:
+# this project is developed on Windows and CI is the only compiler it has.
+#
+# So the same two jobs, on somebody else's machines. Nothing about the GitHub
+# account, the repository or App Store Connect changes.
+#
+# ⚠️ Codemagic's repository scan will say this repo "doesn't seem to contain a
+# mobile application", and it is right by its own lights: there is no
+# .xcodeproj committed. It is generated from project.yml by XcodeGen so that a
+# project file never has to be edited by hand on a machine with no Xcode. Pick
+# "Set type manually" -> iOS. Once this file exists it takes over anyway.
+
+workflows:
+
+  # ------------------------------------------------------------------ tests
+  #
+  # The fast one, and the important one: does it compile, do the tests pass.
+  # No signing, no secrets, no Apple credentials -- so it can run on every
+  # push without anything being configured first.
+  ios-test:
+    name: iOS Tests
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+
+    environment:
+      xcode: latest
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+      # A migration or a README cannot break a Swift compile. Same reasoning
+      # as the paths-ignore on the GitHub workflow: build minutes are finite
+      # and this learns nothing from them.
+      cancel_previous_builds: true
+
+    scripts:
+      - name: Install XcodeGen
+        script: brew install xcodegen
+
+      - name: Generate the Xcode project
+        script: xcodegen generate
+
+      # Simulator names change with every Xcode release, so the newest
+      # available iPhone is picked at runtime rather than pinned to a name
+      # that will rot.
+      - name: Run unit tests
+        script: |
+          set -euo pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          runtimes = json.load(sys.stdin)['devices']
+          best = None
+          for runtime, devices in sorted(runtimes.items()):
+              if 'iOS' not in runtime:
+                  continue
+              for device in devices:
+                  if device['name'].startswith('iPhone'):
+                      best = device['name']
+          print(best)
+          ")
+          echo "Testing on: $DEVICE"
+          # Per-test timeouts. Without them a test that blocks -- one that
+          # reaches a real OAuth flow with no UI to present from, say -- hangs
+          # the whole build until the cap instead of failing in a minute with
+          # the offending test named.
+          xcodebuild test \
+            -project EmailApp.xcodeproj \
+            -scheme EmailApp \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 60 \
+            -maximum-test-execution-time-allowance 180 \
+            CODE_SIGNING_ALLOWED=NO
+
+  # ------------------------------------------------------------- testflight
+  #
+  # Manual only, on purpose -- an upload is not something that should fire on
+  # every push.
+  #
+  # 🔑 Signing here is Codemagic's, not ours, and that is the whole reason
+  # this is worth the move. The GitHub workflow needed eight secrets, four of
+  # them a certificate and a provisioning profile base64'd by hand and pasted
+  # in. This needs **one**: an App Store Connect API key, added once in the
+  # Codemagic UI. It fetches and renews the signing files itself.
+  #
+  # Set it up under Teams -> Integrations -> App Store Connect (or the app's
+  # own settings), name the key exactly `AppStoreConnect`, and the two
+  # references below find it.
+  ios-testflight:
+    name: iOS TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+
+    integrations:
+      app_store_connect: AppStoreConnect
+
+    environment:
+      xcode: latest
+      ios_signing:
+        distribution_type: app_store
+        # Not reverse-DNS, which is unusual, but it is what is registered on
+        # the Developer Portal and what project.yml sets. It must match, or
+        # the profile fetched here will not match the binary built.
+        bundle_identifier: emailapptest
+      vars:
+        BUNDLE_ID: emailapptest
+        # Where this provider's build numbers start.
+        #
+        # App Store Connect refuses a build number it has already seen, and it
+        # has seen everything the GitHub runs uploaded. Codemagic's own
+        # counter starts at 1, which would collide immediately -- so it is
+        # offset past anything that came before. Raise this, never lower it.
+        BUILD_NUMBER_OFFSET: 500
+
+    scripts:
+      - name: Install XcodeGen
+        script: brew install xcodegen
+
+      - name: Generate the Xcode project
+        script: xcodegen generate
+
+      # The build number has to climb, and it has to keep climbing across a
+      # change of CI provider. `PROJECT_BUILD_NUMBER` is Codemagic's own
+      # counter and starts at 1 here, so it is pushed past everything the
+      # GitHub runs already uploaded.
+      #
+      # Deliberately arithmetic rather than a lookup: asking App Store Connect
+      # for the latest build would be exact, but it needs the app's numeric
+      # Apple ID, and a wrong or missing one fails open to 1 -- which uploads,
+      # gets rejected, and looks like a signing problem.
+      - name: Take the next build number
+        script: |
+          set -euo pipefail
+          NEXT=$(( ${PROJECT_BUILD_NUMBER:-1} + BUILD_NUMBER_OFFSET ))
+          echo "Building $NEXT"
+          agvtool new-version -all "$NEXT"
+
+      - name: Set up code signing
+        script: keychain initialize && xcode-project use-profiles
+
+      - name: Build the archive
+        script: |
+          set -euo pipefail
+          xcode-project build-ipa \
+            --project EmailApp.xcodeproj \
+            --scheme EmailApp
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        # TestFlight only. Nothing here submits for App Store review, and it
+        # should stay that way until there is a release worth reviewing.
+        submit_to_testflight: true
