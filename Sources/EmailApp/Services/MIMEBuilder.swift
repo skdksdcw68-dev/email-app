@@ -41,6 +41,7 @@ enum MIMEBuilder {
         var from: String
         var to: String
         var cc: String?
+        var bcc: String?
         var subject: String
         /// Always present. A message with only an HTML part is a spam signal
         /// and unreadable in plain-text clients.
@@ -79,6 +80,12 @@ enum MIMEBuilder {
         ]
         if let cc = envelope.cc, !cc.isEmpty {
             lines.append("Cc: \(cc)")
+        }
+        // Written like any other header. What makes it blind is that the
+        // sending server strips it before delivery, not that it is absent
+        // from the message handed over.
+        if let bcc = envelope.bcc, !bcc.isEmpty {
+            lines.append("Bcc: \(bcc)")
         }
         lines.append("Subject: \(encodedHeader(envelope.subject))")
 

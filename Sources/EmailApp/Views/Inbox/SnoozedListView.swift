@@ -49,6 +49,8 @@ struct SnoozedListView: View {
         .listStyle(.plain)
         .navigationTitle("Snoozed")
         .navigationBarTitleDisplayMode(.inline)
+        // Every other pushed screen hides it; this one was missed.
+        .hidesTabBar()
         .overlay {
             if rows.isEmpty {
                 ContentUnavailableView(

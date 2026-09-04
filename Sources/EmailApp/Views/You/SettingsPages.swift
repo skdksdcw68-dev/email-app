@@ -467,6 +467,11 @@ struct StorageSettingsView: View {
                 }
             } header: {
                 Text("Storage")
+            } footer: {
+                // The same sentence the other Clear button carries. Without
+                // it this reads as though it deletes mail, which is why the
+                // two screens should not have disagreed about explaining it.
+                Text("Clearing removes the offline copy only. Your mail stays in Gmail and returns on the next sync.")
             }
 
             // What Gmail says is in the window against what is actually here.

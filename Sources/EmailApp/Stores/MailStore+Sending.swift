@@ -42,6 +42,7 @@ extension MailStore {
         subject: String,
         to address: String,
         cc: String? = nil,
+        bcc: String? = nil,
         body: String,
         html: String? = nil,
         attachments: [MIMEBuilder.Attached] = [],
@@ -66,7 +67,7 @@ extension MailStore {
             guard let self else { return }
             do {
                 try await send(
-                    subject: subject, to: address, cc: cc, body: body,
+                    subject: subject, to: address, cc: cc, bcc: bcc, body: body,
                     html: html, attachments: attachments, replyingTo: original
                 )
                 if let original { markReplied(original.id) }

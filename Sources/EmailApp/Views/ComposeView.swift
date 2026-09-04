@@ -18,6 +18,13 @@ struct ComposeView: View {
     /// A draft being picked back up. Its fields fill the sheet, and saving or
     /// sending replaces it rather than leaving the old copy in Drafts.
     var editing: Message? = nil
+    /// Passing a message on to somebody else, rather than answering it.
+    ///
+    /// A separate parameter from `replyingTo` because they are opposite
+    /// things and sharing one was a real bug: the Forward menu item set the
+    /// reply flag, so "Forward" opened a reply addressed to the person who
+    /// sent it, with none of their message in it.
+    var forwarding: Message? = nil
 
     @Environment(MailStore.self) private var store
     @Environment(UserStore.self) private var user
@@ -34,6 +41,7 @@ struct ComposeView: View {
 
     @State private var recipient = ""
     @State private var cc = ""
+    @State private var bcc = ""
     @State private var subject = ""
     @State private var richText = NSAttributedString(string: "")
     @State private var isSending = false
@@ -78,6 +86,7 @@ struct ComposeView: View {
 
     private var title: String {
         if editing != nil { return "Draft" }
+        if forwarding != nil { return "Forward" }
         return replyingTo == nil ? "New Message" : "Reply"
     }
 
@@ -231,6 +240,7 @@ struct ComposeView: View {
             subject: subject,
             to: recipient,
             cc: showsCcBcc && !cc.isEmpty ? cc : nil,
+            bcc: showsCcBcc && !bcc.isEmpty ? bcc : nil,
             body: messageBody,
             html: richText.hasFormatting ? richText.htmlBody() : nil,
             attachments: attached.map { $0.outgoing },
@@ -251,6 +261,7 @@ struct ComposeView: View {
                 subject: subject,
                 to: recipient,
                 cc: showsCcBcc && !cc.isEmpty ? cc : nil,
+                bcc: showsCcBcc && !bcc.isEmpty ? bcc : nil,
                 body: messageBody,
                 html: richText.hasFormatting ? richText.htmlBody() : nil,
                 attachments: attached.map { $0.outgoing },
@@ -331,24 +342,33 @@ struct ComposeView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
 
+            // Both, because the button says both. It offered "Cc/Bcc" and
+            // revealed only Cc, so the one field somebody opens this for --
+            // the one that hides the recipient list -- did not exist.
             if showsCcBcc {
                 divider
-                HStack(spacing: 10) {
-                    Text("Cc")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 26, alignment: .leading)
-
-                    TextField("name@example.com", text: $cc)
-                        .font(.subheadline)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 11)
+                addressRow("Cc", $cc)
+                divider
+                addressRow("Bcc", $bcc)
             }
         }
+    }
+
+    private func addressRow(_ label: String, _ text: Binding<String>) -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(width: 30, alignment: .leading)
+
+            TextField("name@example.com", text: text)
+                .font(.subheadline)
+                .keyboardType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
     }
 
     private var subjectRow: some View {
@@ -714,12 +734,49 @@ struct ComposeView: View {
             return
         }
 
+        // Forwarding: nobody is addressed yet, and the whole message comes
+        // with it. That last part is the point of forwarding and is what the
+        // old behaviour lost entirely.
+        if let forwarding {
+            subject = forwarding.subject.lowercased().hasPrefix("fwd:")
+                ? forwarding.subject
+                : "Fwd: \(forwarding.subject)"
+            setBody(Self.quoted(forwarding))
+            return
+        }
+
         guard let original = replyingTo else { return }
         recipient = original.sender.address
         subject = original.subject.lowercased().hasPrefix("re:")
             ? original.subject
             : "Re: \(original.subject)"
         if let initialBody { setBody(initialBody) }
+    }
+
+    /// The original, under a header saying where it came from.
+    ///
+    /// The plain-text convention every mail client uses, rather than an
+    /// attached `.eml`: it reads on any client, and Gmail's own web forward
+    /// looks the same.
+    private static func quoted(_ message: Message) -> String {
+        let from = message.sender.name.isEmpty
+            ? message.sender.address
+            : "\(message.sender.name) <\(message.sender.address)>"
+        let to = message.recipients
+            .map { $0.name.isEmpty ? $0.address : "\($0.name) <\($0.address)>" }
+            .joined(separator: ", ")
+
+        return """
+
+
+        ---------- Forwarded message ----------
+        From: \(from)
+        Date: \(message.fullDate)
+        Subject: \(message.subject)
+        To: \(to)
+
+        \(message.body)
+        """
     }
 }
 

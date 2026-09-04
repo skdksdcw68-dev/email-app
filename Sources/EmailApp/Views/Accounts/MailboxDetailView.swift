@@ -34,6 +34,7 @@ struct MailboxDetailView: View {
         }
         .navigationTitle(account?.title ?? "Mailbox")
         .navigationBarTitleDisplayMode(.inline)
+        .keyboardDismissable()
         .hidesTabBar()
         .onAppear { nickname = account?.nickname ?? "" }
         .task { archiveSize = await MessageArchive.formattedSize(mailbox: mailbox) }

@@ -8,6 +8,9 @@ struct MessageDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var isReplying = false
+    /// Passing it on, which is not the same as answering it -- and used to
+    /// be the same flag, so Forward opened a reply to the sender.
+    @State private var isForwarding = false
     @State private var htmlHeight: CGFloat = 0
 
     private var message: Message? { store.message(messageID) }
@@ -51,6 +54,11 @@ struct MessageDetailView: View {
                 ComposeView(replyingTo: message).closesOnlyOnPurpose()
             }
         }
+        .sheet(isPresented: $isForwarding) {
+            if let message {
+                ComposeView(forwarding: message).closesOnlyOnPurpose()
+            }
+        }
     }
 
     // MARK: - Chrome
@@ -75,7 +83,7 @@ struct MessageDetailView: View {
             }
 
             Button {
-                isReplying = true
+                isForwarding = true
             } label: {
                 Label("Forward", systemImage: "arrowshape.turn.up.forward")
             }
