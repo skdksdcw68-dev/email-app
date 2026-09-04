@@ -28,13 +28,35 @@ enum Backend {
     }
 
     /// Insert, or overwrite the row that already has this primary key.
-    static func upsert<T: Encodable>(_ table: String, _ rows: [T]) async throws {
+    /// `onConflict` names the columns that decide whether a row is the same
+    /// row. Without it PostgREST resolves on the primary key, which is right
+    /// until a table gains a composite one — `devices` is keyed on
+    /// (token, address) now, and merging on the token alone made a second
+    /// mailbox overwrite the first rather than join it.
+    static func upsert<T: Encodable>(
+        _ table: String,
+        _ rows: [T],
+        onConflict: String? = nil
+    ) async throws {
         guard !rows.isEmpty else { return }
         _ = try await send(
             "POST", table,
-            query: "",
+            query: onConflict.map { "on_conflict=\($0)" } ?? "",
             body: try encoder.encode(rows),
             prefer: "resolution=merge-duplicates,return=minimal"
+        )
+    }
+
+    /// One device's row for one mailbox.
+    ///
+    /// By the pair, deliberately. Deleting by token alone would unsubscribe
+    /// the phone from every mailbox to remove one, and deleting by address
+    /// alone would unsubscribe every one of this person's phones.
+    static func deleteDevice(token: String, address: String) async throws {
+        _ = try await send(
+            "DELETE", "devices",
+            query: "token=eq.\(token)&address=eq.\(address)",
+            body: nil, prefer: "return=minimal"
         )
     }
 

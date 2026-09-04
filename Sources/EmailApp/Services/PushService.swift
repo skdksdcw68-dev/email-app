@@ -44,7 +44,7 @@ final class PushService: NSObject {
     /// Gmail republishes the same notification for a while, and the app is
     /// woken for each. This is the last history id acted on, so the same
     /// arrival is not fetched three times.
-    private var lastHandled: String?
+    private var lastHandled: [MailboxID: String] = [:]
 
     // MARK: - Permission
 
@@ -72,9 +72,9 @@ final class PushService: NSObject {
     /// Watching starts even if they decline the alerts: a silent push still
     /// wakes the app and brings the mail in, which is worth having on its own.
     /// Only the banner needs permission.
-    func enable(topic: String, for account: MailAccount?) async {
+    func enable(topic: String, for accounts: [MailAccount]) async {
         await requestPermission()
-        await startWatching(topic: topic, for: account)
+        await startWatchingAll(topic: topic, accounts: accounts)
     }
 
     func refreshAuthorization() async {
@@ -86,37 +86,75 @@ final class PushService: NSObject {
 
     // MARK: - The token
 
-    /// Called from the app delegate when APNs answers.
-    func register(deviceToken data: Data, gmailAddress: String?) {
+    /// Called from the app delegate when APNs answers, and again whenever the
+    /// set of mailboxes changes.
+    ///
+    /// **A row per mailbox, not per active mailbox.** This took the active
+    /// account before, and APNs hands a token over roughly once per install
+    /// — so whichever mailbox happened to be in front at that moment was the
+    /// only one that ever got a row, and every account added afterwards
+    /// received nothing. The failure was silence, which is why it survived
+    /// this long.
+    func register(deviceToken data: Data, for accounts: [MailAccount]) {
         let hex = data.map { String(format: "%02x", $0) }.joined()
         token = hex
-        guard let gmailAddress, !gmailAddress.isEmpty else { return }
+        register(for: accounts)
+    }
+
+    /// Re-registers with the token already held. Called when a mailbox is
+    /// added, because by then APNs has long since handed its token over and
+    /// will not do it again.
+    func register(for accounts: [MailAccount]) {
+        guard let hex = token else { return }
 
         // Read on this side of the hop. Everything the upload needs is a
         // plain value, so the detached task carries values rather than
         // reaching back into an actor it is not on.
-        let address = gmailAddress.lowercased()
+        let rows = accounts.filter(\.canPush).map {
+            (address: $0.address, mailbox: $0.id.rawValue, provider: $0.provider.rawValue)
+        }
+        guard !rows.isEmpty else { return }
+
         let environment = Self.environment
         let bundle = Bundle.main.bundleIdentifier ?? ""
 
         Task.detached(priority: .background) {
             guard let userID = try? await Backend.userID() else { return }
-            let row = DeviceRow(
-                token: hex,
-                user_id: userID,
-                gmail_address: address,
-                environment: environment,
-                bundle_id: bundle,
-                updated_at: .now
-            )
-            try? await Backend.upsert("devices", [row])
+            let payload = rows.map {
+                DeviceRow(
+                    token: hex,
+                    user_id: userID,
+                    address: $0.address,
+                    provider: $0.provider,
+                    mailbox_id: $0.mailbox,
+                    environment: environment,
+                    bundle_id: bundle,
+                    updated_at: .now
+                )
+            }
+            // On the pair, not the token. Merging on the token alone is what
+            // made a second mailbox overwrite the first instead of joining it.
+            try? await Backend.upsert("devices", payload, onConflict: "token,address")
+        }
+    }
+
+    /// Drops one mailbox's row, leaving the others. Called when a mailbox is
+    /// disconnected — without it the phone keeps being woken for an account
+    /// the app no longer has.
+    func forget(_ account: MailAccount) {
+        guard let hex = token else { return }
+        let address = account.address
+        Task.detached(priority: .background) {
+            try? await Backend.deleteDevice(token: hex, address: address)
         }
     }
 
     private struct DeviceRow: Encodable {
         let token: String
         let user_id: UUID
-        let gmail_address: String
+        let address: String
+        let provider: String
+        let mailbox_id: String
         let environment: String
         let bundle_id: String
         let updated_at: Date
@@ -145,8 +183,21 @@ final class PushService: NSObject {
     func startWatching(topic: String, for account: MailAccount?) async {
         guard !topic.isEmpty, let account, account.canPush else { return }
         do {
-            let accessToken = try await TokenBroker.shared.accessToken(for: account)
-            try await GmailService.watch(topic: topic, accessToken: accessToken)
+            let backend = GmailBackend(account: account)
+            let registration = try await backend.startPush(to: .pubSub(topic: topic))
+            watching[account.id] = .now
+
+            // Gmail hands back where the mailbox stands, and the app used to
+            // throw it away. It is the right starting cursor for a mailbox
+            // that has only just been watched -- without it the first notice
+            // after connecting has nothing to compare against and announces
+            // nothing.
+            if let checkpoint = registration.checkpoint {
+                let suite = MailboxScope.defaults(for: account.id)
+                if suite.string(forKey: "mail.historyId") == nil {
+                    suite.set(checkpoint.token, forKey: "mail.historyId")
+                }
+            }
         } catch {
             // Not surfaced. Notifications quietly not starting is bad, but a
             // banner about Pub/Sub on somebody's inbox is worse, and the
@@ -155,11 +206,36 @@ final class PushService: NSObject {
         }
     }
 
-    /// True when this history id has already been dealt with.
-    func isRepeat(of historyID: String?) -> Bool {
-        guard let historyID else { return false }
-        defer { lastHandled = historyID }
-        return lastHandled == historyID
+    /// Every mailbox that can be watched, not just the one in front of you.
+    ///
+    /// Gmail's watch expires in seven days and renews by being called again,
+    /// which the app did on every launch — for the active mailbox only. So
+    /// every other account went quiet after a week, and silently, because a
+    /// failure here is deliberately not surfaced.
+    func startWatchingAll(topic: String, accounts: [MailAccount]) async {
+        for account in accounts where account.canPush {
+            await startWatching(topic: topic, for: account)
+        }
+    }
+
+    /// When each mailbox's watch was last established.
+    ///
+    /// Kept so a lapse is detectable at all. There was no record of this
+    /// before, so a watch that stopped being renewed looked exactly like a
+    /// mailbox with no new mail.
+    private(set) var watching: [MailboxID: Date] = [:]
+
+    /// True when this history id has already been dealt with **for this
+    /// mailbox**.
+    ///
+    /// One slot was wrong in both directions. Gmail history ids are
+    /// per-mailbox monotonic sequences from independent namespaces, so two
+    /// mailboxes interleaving defeated the dedup entirely — and a notice for
+    /// B whose id happened to match A's last was swallowed as a repeat.
+    func isRepeat(of historyID: String?, for mailbox: MailboxID?) -> Bool {
+        guard let historyID, let mailbox else { return false }
+        defer { lastHandled[mailbox] = historyID }
+        return lastHandled[mailbox] == historyID
     }
 }
 

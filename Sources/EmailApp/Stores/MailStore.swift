@@ -86,6 +86,10 @@ final class MailStore {
         announceActiveMailbox()
 
         await loadArchive()
+        // What a background push brought in while this mailbox was not the
+        // one being looked at. The mail is already in the archive that was
+        // just loaded; this only clears the marker saying it was unseen.
+        BackgroundCatchUp.drainPending(for: next.id)
 
         let elapsed = Date.now.timeIntervalSince(started)
         if elapsed < Self.minimumSwitch {
@@ -540,6 +544,18 @@ final class MailStore {
             // the first import would land in whatever suite was last active
             // and the chats and facts would be written to the wrong mailbox.
             announceActiveMailbox()
+
+            // A device row and a watch for the mailbox that just arrived.
+            // APNs hands its token over about once per install, long before
+            // this account existed, so nothing else would ever register it --
+            // which is why every account after the first got no notifications.
+            PushDelegate.push?.register(for: registry.accounts)
+            Task { [accounts = registry.accounts] in
+                await PushDelegate.push?.startWatchingAll(
+                    topic: PushService.topic, accounts: accounts
+                )
+            }
+
             await importRecentMail()
         } catch {
             connectionError = error.localizedDescription
@@ -1444,6 +1460,14 @@ final class MailStore {
         lastVerifiedAt = nil
         connectionError = nil
         account = nil
+
+        // Stop the phone being woken for a mailbox the app no longer has.
+        // `stopWatching` above asks Gmail to stop publishing; this drops the
+        // row that says where to send it if it publishes anyway. Neither is
+        // enough on its own -- stopWatching is best-effort and swallows its
+        // errors, so a failure there leaves Pub/Sub firing at a device row
+        // that still exists.
+        PushDelegate.push?.forget(going)
 
         // The registry deletes the record, the credentials, the suite and the
         // files, and posts the notice naming this mailbox -- which is what

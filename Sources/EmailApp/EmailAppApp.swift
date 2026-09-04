@@ -97,7 +97,7 @@ struct EmailAppApp: App {
                         // anything. Asking at cold launch, before the account
                         // is back, is a prompt about nothing.
                         if mail.isConnected {
-                            await push.enable(topic: PushService.topic, for: mail.account)
+                            await push.enable(topic: PushService.topic, for: mail.registry.accounts)
                         }
                     }
                     // Whatever this account has that this phone does not.
@@ -121,7 +121,7 @@ struct EmailAppApp: App {
                 // asked at all.
                 .onChange(of: mail.isConnected) { _, connected in
                     guard connected else { return }
-                    Task { await push.enable(topic: PushService.topic, for: mail.account) }
+                    Task { await push.enable(topic: PushService.topic, for: mail.registry.accounts) }
                 }
                 // Coming back to the app checks for new mail the cheap way:
                 // one request that usually answers "nothing", instead of
