@@ -48,8 +48,8 @@ struct SnoozeSheet: View {
             .navigationTitle("Snooze until")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Cancel") { dismiss() }
+                ToolbarItem(placement: .topBarLeading) {
+                    FlowCloseButton { dismiss() }
                 }
             }
         }

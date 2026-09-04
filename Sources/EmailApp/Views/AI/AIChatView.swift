@@ -231,7 +231,7 @@ struct AIChatView: View {
                 }
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("Done") { showsHistory = false }
+                        FlowCloseButton { showsHistory = false }
                     }
                 }
             }

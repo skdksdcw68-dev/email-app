@@ -100,6 +100,7 @@ struct AccountView: View {
         }
         .sheet(isPresented: $isShowingEmail) {
             EmailAuthView(mode: mode)
+                .closesOnlyOnPurpose()
         }
     }
 

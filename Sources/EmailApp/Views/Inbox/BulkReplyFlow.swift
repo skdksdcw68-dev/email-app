@@ -143,11 +143,11 @@ struct BulkReplyFlow: View {
             case .consent, .count:
                 FlowCloseButton { dismiss() }
             case .manualPick, .style:
-                FlowBackButton { go(.count, forward: false) }
+                FlowBackButton(showsLabel: true) { go(.count, forward: false) }
             case .review:
-                FlowBackButton { go(.style, forward: false) }
+                FlowBackButton(showsLabel: true) { go(.style, forward: false) }
             case .done:
-                FlowBackButton { dismiss() }
+                FlowBackButton(showsLabel: true) { dismiss() }
             case .generating, .sending:
                 EmptyView()
             }

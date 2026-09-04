@@ -37,7 +37,7 @@ struct EmailAuthView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(awaitingConfirmation ? "Done" : "Cancel") { dismiss() }
+                    FlowCloseButton { dismiss() }
                 }
             }
         }

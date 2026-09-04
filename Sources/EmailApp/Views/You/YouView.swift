@@ -72,7 +72,7 @@ struct YouView: View {
                 }
             }
             .navigationTitle("You")
-            .sheet(isPresented: $isEditingProfile) { EditProfileView() }
+            .sheet(isPresented: $isEditingProfile) { EditProfileView().closesOnlyOnPurpose() }
             .sheet(isPresented: $isAddingMailbox) { AddMailboxFlow() }
         }
     }

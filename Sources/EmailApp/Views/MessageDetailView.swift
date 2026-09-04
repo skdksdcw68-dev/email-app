@@ -48,7 +48,7 @@ struct MessageDetailView: View {
         }
         .sheet(isPresented: $isReplying) {
             if let message {
-                ComposeView(replyingTo: message)
+                ComposeView(replyingTo: message).closesOnlyOnPurpose()
             }
         }
     }

@@ -106,12 +106,9 @@ struct AddMailboxFlow: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if canGoBack {
-                        Button {
+                        FlowBackButton {
                             withAnimation(.snappy(duration: 0.22)) { index -= 1 }
-                        } label: {
-                            Image(systemName: "chevron.left").fontWeight(.semibold)
                         }
-                        .accessibilityLabel("Back")
                     } else if !firstRun && (step == .provider || step == .importing) {
                         // Closeable during the import, and that is the point.
                         // The work is not owned by this screen: the task
@@ -119,10 +116,7 @@ struct AddMailboxFlow: View {
                         // `ImportLedger` resumes what is left. Sitting and
                         // watching a ring for four minutes is not something
                         // to ask of anybody.
-                        Button { dismiss() } label: {
-                            Image(systemName: "xmark").fontWeight(.semibold)
-                        }
-                        .accessibilityLabel("Close")
+                        FlowCloseButton { dismiss() }
                     }
                 }
             }

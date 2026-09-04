@@ -117,10 +117,15 @@ struct ComposeView: View {
                     setBody(written)
                     markJustDrafted()
                 }
+                .closesOnlyOnPurpose()
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    // An X, not "Cancel" -- and the two paths behind it stay
+                    // exactly as they were. Wiring this straight to dismiss()
+                    // would throw a written draft away without asking, which
+                    // is the whole reason the popover exists.
+                    FlowCloseButton {
                         if hasContent { isConfirmingCancel = true } else { dismiss() }
                     }
                     // A popover anchored to Cancel, not an action sheet from

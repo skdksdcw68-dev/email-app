@@ -99,7 +99,7 @@ struct AIWriterSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    FlowCloseButton { dismiss() }
                 }
             }
             .safeAreaInset(edge: .bottom) { actionBar }

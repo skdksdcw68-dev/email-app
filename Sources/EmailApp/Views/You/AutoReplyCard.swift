@@ -56,6 +56,7 @@ struct AutoReplyCard: View {
                 tone: user.tonePreference,
                 onSend: { Task { await send() } }
             )
+            .closesOnlyOnPurpose()
         }
         // The reply and its recipient are filled in from the message it
         // answers, which the store holds. Done here rather than in the

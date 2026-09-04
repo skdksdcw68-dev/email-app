@@ -7,12 +7,13 @@ import UIKit
 /// no card, no hairline, the way Mail's category filters sit. Below them the
 /// red "needs your attention" row, then the mail.
 ///
-/// The bar is three controls in two groups: a mailbox switcher on the left,
-/// search and compose together on the right. They are plain toolbar items
-/// on purpose -- the system draws the container, so they look exactly like
-/// every other bar in the app. Search is a button, not a field: the field
-/// only exists once it is asked for, drops in from the top, and is gone
-/// again when cancelled.
+/// The bar carries only ways of *finding* things: the folder on the left,
+/// search and the mailbox switcher on the right. Writing is not one of those,
+/// so it left the bar entirely -- it is the blue button over the list now, at
+/// the bottom where a thumb already is.
+///
+/// Search is a button, not a field: the field only exists once it is asked
+/// for, drops in from the top, and is gone again when cancelled.
 struct InboxHomeView: View {
     @Environment(MailStore.self) private var mail
     @Environment(SearchHistory.self) private var searches
@@ -220,19 +221,12 @@ struct InboxHomeView: View {
             }
         }
         .toolbar {
-            // Which account, then which folder inside it, left to right in
-            // the order somebody narrows. The account only appears when there
-            // is a choice to make: a switcher offering one thing is a control
-            // that does nothing.
-            if mail.registry.hasSeveral {
-                ToolbarItem(placement: .topBarLeading) {
-                    MailboxSwitcher(
-                        isAdding: $isAddingMailbox,
-                        isManaging: $isManagingMailboxes
-                    )
-                }
-            }
-
+            // The left corner is the folder and nothing else.
+            //
+            // It briefly held the account avatar as well, and two glyphs
+            // crowded into one corner read as a toolbar rather than a place.
+            // Which account you are in is a question you ask rarely; which
+            // folder you are looking at is one you answer constantly.
             ToolbarItem(placement: .topBarLeading) {
                 // The glyph is where you are; the menu behind it is where
                 // you can go. The bare hamburger said nothing about either.
@@ -250,6 +244,11 @@ struct InboxHomeView: View {
 
             // One group, so the system draws them in one capsule -- the same
             // capsule the People tab's search and menu share.
+            //
+            // Compose used to be the second of these and is now the button
+            // floating over the list. Writing is the one thing you come here
+            // to *do* rather than to find, and a corner glyph the same size
+            // and weight as search said it was just another option.
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
                     isSearching = true
@@ -258,14 +257,26 @@ struct InboxHomeView: View {
                 }
                 .accessibilityLabel("Search")
 
-                Button {
-                    isComposing = true
-                } label: {
-                    Image(systemName: "square.and.pencil")
+                // Only with something to switch between. A switcher offering
+                // one mailbox is a control that does nothing.
+                if mail.registry.hasSeveral {
+                    MailboxSwitcher(
+                        isAdding: $isAddingMailbox,
+                        isManaging: $isManagingMailboxes
+                    )
                 }
-                .accessibilityLabel("Compose")
             }
         }
+        // Over the list, not in the layout, so it costs no row of mail. Gone
+        // while searching -- the field is the subject then, and a button
+        // covering results while somebody reads them is in the way.
+        .overlay(alignment: .bottomTrailing) {
+            if !isSearchActive && !isSearching {
+                ComposeButton { isComposing = true }
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.25), value: isSearching)
         .onChange(of: mailbox) { _, newValue in
             if let tag, mail.count(of: tag, in: newValue) == 0 { self.tag = nil }
             shownRows = Self.pageOfRows
@@ -273,8 +284,8 @@ struct InboxHomeView: View {
         // A different filter is a different list, and it should open at the
         // top of it rather than three hundred rows in.
         .onChange(of: tag) { _, _ in shownRows = Self.pageOfRows }
-        .sheet(isPresented: $isComposing) { ComposeView() }
-        .sheet(item: $editing) { ComposeView(editing: $0) }
+        .sheet(isPresented: $isComposing) { ComposeView().closesOnlyOnPurpose() }
+        .sheet(item: $editing) { ComposeView(editing: $0).closesOnlyOnPurpose() }
         .sheet(isPresented: $isAddingMailbox) { AddMailboxFlow() }
         .navigationDestination(isPresented: $isManagingMailboxes) { MailboxListView() }
     }

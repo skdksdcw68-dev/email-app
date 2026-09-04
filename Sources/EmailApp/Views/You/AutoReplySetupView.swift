@@ -129,14 +129,11 @@ struct AutoReplySetupView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 if canGoBack && !singleStep {
-                    Button {
+                    FlowBackButton {
                         withAnimation(.snappy(duration: 0.22)) { index -= 1 }
-                    } label: {
-                        Image(systemName: "chevron.left").fontWeight(.semibold)
                     }
-                    .accessibilityLabel("Back")
                 } else if step == .intro {
-                    Button("Not now") { dismiss() }
+                    FlowCloseButton { dismiss() }
                 }
             }
         }

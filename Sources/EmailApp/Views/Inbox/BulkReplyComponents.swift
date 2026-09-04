@@ -103,45 +103,9 @@ struct CheckboxToggleStyle: ToggleStyle {
     }
 }
 
-// MARK: - Flow chrome
-
-/// The X that closes the flow: a small circled mark, the way modern sheets
-/// dismiss, instead of a "Cancel" word.
-struct FlowCloseButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "xmark")
-                .font(.footnote.weight(.bold))
-                .foregroundStyle(.secondary)
-                .frame(width: 30, height: 30)
-                .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
-                .contentShape(Circle())
-        }
-        .buttonStyle(BouncyButtonStyle())
-        .accessibilityLabel("Close")
-    }
-}
-
-/// Back, for any step that has somewhere to go back to. Styled like the
-/// system's own back control so it reads as navigation, not cancellation.
-struct FlowBackButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 3) {
-                Image(systemName: "chevron.left")
-                    .font(.body.weight(.semibold))
-                Text("Back")
-            }
-            .foregroundStyle(.tint)
-        }
-        .buttonStyle(BouncyButtonStyle())
-        .accessibilityLabel("Back")
-    }
-}
+// Flow chrome -- FlowCloseButton and FlowBackButton -- moved to
+// `Views/FlowChrome.swift`. Every sheet in the app uses them now, so they
+// are not an Inbox thing.
 
 // MARK: - Working screens
 

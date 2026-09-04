@@ -66,6 +66,7 @@ struct PersonDetailView: View {
             // Replies to their newest incoming message when there is one, so
             // the thread stays intact; a fresh compose otherwise.
             ComposeView(replyingTo: conversations.first { $0.mailbox == .inbox })
+                .closesOnlyOnPurpose()
         }
     }
 
