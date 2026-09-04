@@ -120,39 +120,53 @@ async function identify(request: Request): Promise<string | null> {
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
   if (!token) return null;
 
+  // ⚠️ `SUPABASE_JWT_SECRET` is **not** one of the variables Supabase injects
+  // automatically -- only URL, anon key, service role key and DB URL are. Set
+  // it by hand:
+  //
+  //     supabase secrets set SUPABASE_JWT_SECRET=... --project-ref <ref>
   const key = await signingKey();
 
+  if (key) {
+    try {
+      return subject(await verify(token, key));
+    } catch {
+      // 🔴 Falls through to reading the token rather than refusing.
+      //
+      // A wrong or rotated secret would otherwise turn every request in the
+      // app into a 401 at once, with the only clue being that nothing works.
+      // That failure is far more likely than a forged token, because the
+      // forged one has to get past the platform first -- see below.
+      console.warn("JWT did not verify against SUPABASE_JWT_SECRET; reading unverified");
+    }
+  }
+
   try {
-    // ⚠️ `SUPABASE_JWT_SECRET` is **not** one of the variables Supabase
-    // injects automatically -- only URL, anon key, service role key and DB
-    // URL are. It has to be set by hand:
+    // Reading without checking the signature is safe **here specifically**,
+    // and only because of where this function sits: Supabase's gateway
+    // verifies the JWT before the function is ever invoked. A token this code
+    // sees has already been proved genuine by the platform.
     //
-    //     supabase secrets set SUPABASE_JWT_SECRET=... --project-ref <ref>
-    //
-    // Without it this falls back to reading the token without checking the
-    // signature. That is enough for counting -- the platform gateway has
-    // already verified the JWT before this function was invoked, and the
-    // worst a forged `sub` buys today is spend attributed to the wrong id.
-    //
-    // 🔴 It stops being enough the moment this decides who may *spend*.
-    // Before the 402 gate ships, the secret is mandatory and the fallback
-    // below should become a refusal.
-    const claims = key
-      ? await verify(token, key)
-      : (decode(token)[1] as Record<string, unknown>);
-
-    if (!key) console.warn("SUPABASE_JWT_SECRET is unset: token read, not verified");
-
-    const sub = claims.sub;
-    // Checking for the claim rather than for `role !== "anon"`: anything that
-    // is not a person has no subject, so this stays right for whatever else
-    // Supabase mints later.
-    return typeof sub === "string" && sub.length > 0 ? sub : null;
+    // 🔴 Which means: this function must never be deployed with
+    // `--no-verify-jwt`. That flag is what makes the paragraph above false,
+    // and it lives in a deploy command rather than in this repository, so
+    // nothing here can stop it. `appstore` (when it lands) is the one function
+    // that legitimately needs it, because Apple does not send a Supabase JWT.
+    return subject(decode(token)[1] as Record<string, unknown>);
   } catch {
-    // A token that does not verify is treated exactly like no token. It is
-    // not this function's job to explain why somebody's JWT is wrong.
+    // Not a JWT at all. Treated exactly like no token.
     return null;
   }
+}
+
+/// The user id in a set of claims, or null.
+///
+/// Checking for `sub` rather than for `role !== "anon"`: anything that is not
+/// a person has no subject, so this stays right for whatever else Supabase
+/// mints later. The anon key's total lack of one is what makes it refusable.
+function subject(claims: Record<string, unknown>): string | null {
+  const sub = claims.sub;
+  return typeof sub === "string" && sub.length > 0 ? sub : null;
 }
 
 // ------------------------------------------------------------------ metering
@@ -1363,6 +1377,29 @@ Deno.serve(async (request) => {
       userId: await identify(request),
       action: String(payload.action ?? "unknown"),
     };
+
+    // 🔴 No account, no answer.
+    //
+    // The plan was to count anonymous calls for a week first and only then
+    // start refusing them, so that installed builds -- which have no code to
+    // explain a 401 -- were never surprised. Making the repository public
+    // changes that arithmetic: the anon key is in the source, and a public
+    // repo is scraped continuously by bots looking for exactly this. The
+    // window where it is readable and unguarded has to be zero, not a week.
+    //
+    // The risk that ordering was protecting against is close to nil anyway:
+    // onboarding signs somebody in before a mailbox can be connected, and
+    // every AI feature is behind a connected mailbox. A caller with no `sub`
+    // is either signed out with nothing to ask about, or is not the app.
+    //
+    // Set MAILY_ALLOW_ANONYMOUS=1 to put it back, if this turns out to be
+    // wrong -- one secret, no redeploy of the app.
+    if (!ctx.userId && Deno.env.get("MAILY_ALLOW_ANONYMOUS") !== "1") {
+      return json({
+        error: "Sign in to Maily to use its AI features.",
+        code: "not_signed_in",
+      }, 401);
+    }
 
     switch (payload.action) {
       case "classify":
