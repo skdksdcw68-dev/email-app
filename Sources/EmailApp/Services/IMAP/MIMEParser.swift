@@ -310,7 +310,7 @@ enum MIMEParser {
         case "iso-8859-2":                             encoding = .isoLatin2
         case "windows-1252", "cp1252":                 encoding = .windowsCP1252
         case "windows-1251", "cp1251":                 encoding = .windowsCP1251
-        case "koi8-r":                                 encoding = .koi8r
+        case "koi8-r":                                 encoding = .init(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.KOI8_R.rawValue)))
         case "shift_jis", "shift-jis", "sjis":         encoding = .shiftJIS
         case "euc-jp":                                 encoding = .japaneseEUC
         case "iso-2022-jp":                            encoding = .iso2022JP

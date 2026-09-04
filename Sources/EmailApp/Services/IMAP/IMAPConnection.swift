@@ -35,13 +35,29 @@ actor IMAPConnection {
         }
     }
 
+    /// One untagged line, and any literals it carried.
+    ///
+    /// A literal is bytes rather than text -- a message body, an attachment --
+    /// and whether it should be folded into the line depends on the caller.
+    /// `LIST` wants a folder name spliced in as text; `FETCH` wants the
+    /// message as `Data`, because turning a 4MB attachment into a `String`
+    /// only to turn it back is a waste of the phone's memory and mangles
+    /// anything that is not text in the first place.
+    struct Line {
+        var text: String
+        var literals: [Data] = []
+    }
+
     /// What came back from one command.
     struct Reply {
         /// The `*` lines -- the actual content of most responses.
-        var untagged: [String]
+        var lines: [Line]
         /// The tagged line that ended it.
         var completion: String
         var isOK: Bool
+
+        /// The untagged lines as text, for everything that is not a fetch.
+        var untagged: [String] { lines.map(\.text) }
 
         /// The text after `OK` / `NO` / `BAD`, which is what a server puts its
         /// reason in.
@@ -70,7 +86,7 @@ actor IMAPConnection {
         // Every IMAP server opens by introducing itself. Reading it is not
         // optional -- leave it in the buffer and the first command's response
         // is one line out of step for the rest of the session.
-        let greeting = try await responseLine()
+        let greeting = try await responseLine(keepingLiterals: false).text
         guard greeting.hasPrefix("* OK") || greeting.hasPrefix("* PREAUTH") else {
             throw Failure.unexpected(greeting)
         }
@@ -185,6 +201,116 @@ actor IMAPConnection {
         return Folder(name: name, attributes: attributes, delimiter: delimiter)
     }
 
+    // MARK: - Working in a folder
+
+    /// What `SELECT` said about a folder.
+    struct Selection: Sendable, Hashable {
+        var name: String
+        /// Bumped by the server when it renumbers. A UID cached against an
+        /// old validity points at a different message, or at none -- which is
+        /// why a change here means the whole folder has to be read again.
+        var uidValidity: Int?
+        /// What the next arriving message will be numbered.
+        var uidNext: Int?
+        var count: Int = 0
+    }
+
+    private(set) var selected: Selection?
+
+    /// Opens a folder, unless it is already the one open.
+    ///
+    /// Re-selecting costs a round trip and resets the server's idea of what
+    /// has been seen, so the check is worth having on a phone connection.
+    @discardableResult
+    func select(_ folder: String) async throws -> Selection {
+        if let selected, selected.name == folder { return selected }
+
+        let reply = try await command("SELECT", arguments: [folder])
+        guard reply.isOK else {
+            throw Failure.noSuchFolder(folder)
+        }
+
+        var selection = Selection(name: folder)
+        for line in reply.untagged {
+            if let validity = Self.bracketed("UIDVALIDITY", in: line) { selection.uidValidity = validity }
+            if let next = Self.bracketed("UIDNEXT", in: line) { selection.uidNext = next }
+
+            let words = line.split(separator: " ")
+            if words.count >= 3, words[2].uppercased() == "EXISTS", let count = Int(words[1]) {
+                selection.count = count
+            }
+        }
+        selected = selection
+        return selection
+    }
+
+    /// `* OK [UIDVALIDITY 1234] ...`
+    static func bracketed(_ name: String, in line: String) -> Int? {
+        guard let start = line.range(of: "[\(name) ", options: .caseInsensitive) else { return nil }
+        let rest = line[start.upperBound...]
+        let digits = rest.prefix(while: \.isNumber)
+        return Int(digits)
+    }
+
+    /// UIDs matching a search, oldest first -- which is the order the server
+    /// gives and the order the callers reverse.
+    func searchUIDs(_ criteria: String) async throws -> [Int] {
+        let reply = try await command("UID SEARCH \(criteria)")
+        guard reply.isOK else {
+            throw Failure.rejected(command: "SEARCH", reason: reply.reason)
+        }
+        return reply.untagged
+            .filter { $0.uppercased().hasPrefix("* SEARCH") }
+            .flatMap { $0.dropFirst("* SEARCH".count).split(separator: " ") }
+            .compactMap { Int($0) }
+    }
+
+    /// Writes a whole message into a folder, which is how IMAP saves a draft
+    /// and how a sent message is filed.
+    func append(_ raw: Data, to folder: String, flags: [String]) async throws {
+        tag += 1
+        let label = "a\(String(format: "%04d", tag))"
+        let quotedFolder = Self.quoted(folder) ?? "\"\(folder)\""
+
+        try await stream.send(
+            "\(label) APPEND \(quotedFolder) (\(flags.joined(separator: " "))) {\(raw.count)}"
+        )
+
+        let go = try await responseLine(keepingLiterals: false).text
+        guard go.hasPrefix("+") else {
+            throw Failure.rejected(command: "APPEND", reason: go)
+        }
+
+        try await stream.send(raw)
+        try await stream.send("")
+
+        let reply = try await readReply(tag: label, keepingLiterals: false)
+        guard reply.isOK else {
+            throw Failure.rejected(command: "APPEND", reason: reply.reason)
+        }
+    }
+
+    /// Adds or removes flags on a message.
+    func store(uid: Int, flags: [String], adding: Bool) async throws {
+        let reply = try await command(
+            "UID STORE \(uid) \(adding ? "+" : "-")FLAGS (\(flags.joined(separator: " ")))"
+        )
+        guard reply.isOK else {
+            throw Failure.rejected(command: "STORE", reason: reply.reason)
+        }
+    }
+
+    /// Marks deleted and expunges, which is the only way IMAP removes a
+    /// message.
+    func delete(uid: Int) async throws {
+        try await store(uid: uid, flags: ["\\Deleted"], adding: true)
+        // UID EXPUNGE removes only what was named, where the server has
+        // UIDPLUS. Plain EXPUNGE removes everything already flagged deleted,
+        // which could include somebody else's session's work.
+        let command = capabilities.contains("UIDPLUS") ? "UID EXPUNGE \(uid)" : "EXPUNGE"
+        _ = try await self.command(command)
+    }
+
     // MARK: - Sending a command
 
     /// Sends a command and reads everything it produced.
@@ -193,8 +319,14 @@ actor IMAPConnection {
     /// tidiness: a password is an argument, passwords contain quotes and
     /// backslashes, and a client that interpolates them straight into the
     /// command line breaks on exactly the passwords people were told to use.
+    /// - Parameter keepingLiterals: hand literals back as `Data` instead of
+    ///   folding them into the line. What every `FETCH` wants.
     @discardableResult
-    func command(_ name: String, arguments: [String] = []) async throws -> Reply {
+    func command(
+        _ name: String,
+        arguments: [String] = [],
+        keepingLiterals: Bool = false
+    ) async throws -> Reply {
         tag += 1
         let label = "a\(String(format: "%04d", tag))"
 
@@ -214,7 +346,7 @@ actor IMAPConnection {
         try await stream.send(line)
 
         for (index, literal) in pending.enumerated() {
-            let go = try await responseLine()
+            let go = try await responseLine(keepingLiterals: false).text
             guard go.hasPrefix("+") else {
                 throw Failure.rejected(command: name, reason: go)
             }
@@ -226,49 +358,69 @@ actor IMAPConnection {
         }
         if !pending.isEmpty { try await stream.send("") }
 
-        return try await readReply(tag: label)
+        return try await readReply(tag: label, keepingLiterals: keepingLiterals)
     }
 
-    private func readReply(tag label: String) async throws -> Reply {
-        var untagged: [String] = []
+    private func readReply(tag label: String, keepingLiterals: Bool) async throws -> Reply {
+        var lines: [Line] = []
 
         while true {
-            let line = try await responseLine()
+            let line = try await responseLine(keepingLiterals: keepingLiterals)
 
-            if line.hasPrefix("\(label) ") {
-                let verdict = line
+            if line.text.hasPrefix("\(label) ") {
+                let verdict = line.text
                     .dropFirst(label.count + 1)
                     .prefix(while: { $0 != " " })
                     .uppercased()
-                return Reply(untagged: untagged, completion: line, isOK: verdict == "OK")
+                return Reply(lines: lines, completion: line.text, isOK: verdict == "OK")
             }
 
             // A `+` outside a literal exchange is a server asking for
             // something this client did not offer to give. Answering with an
             // empty line cancels it, which is better than deadlocking.
-            if line.hasPrefix("+") {
+            if line.text.hasPrefix("+") {
                 try await stream.send("")
                 continue
             }
 
-            untagged.append(line)
+            lines.append(line)
         }
     }
 
-    /// One logical response line, with any literals folded into it.
+    /// One logical response line, and its literals.
     ///
     /// `{123}` at the end of a line means the next 123 bytes are part of this
     /// response and are not a line at all -- they routinely contain CRLF,
-    /// which is the whole reason literals exist.
-    private func responseLine() async throws -> String {
-        var line = try await stream.line()
+    /// which is the whole reason literals exist. A response can carry several,
+    /// which is why they come back as an array in the order they arrived.
+    private func responseLine(keepingLiterals: Bool) async throws -> Line {
+        var line = Line(text: try await stream.line())
 
-        while let length = Self.literalLength(atEndOf: line) {
+        while let length = Self.literalLength(atEndOf: line.text) {
             let data = try await stream.bytes(length)
-            line += String(decoding: data, as: UTF8.self)
-            line += try await stream.line()
+
+            if keepingLiterals {
+                // The `{123}` marker goes, so what is left is the structure
+                // with a gap where the bytes were.
+                if let open = line.text.lastIndex(of: "{") {
+                    line.text = String(line.text[line.text.startIndex..<open])
+                }
+                line.literals.append(data)
+            } else {
+                line.text += String(decoding: data, as: UTF8.self)
+            }
+            line.text += try await stream.line()
         }
         return line
+    }
+
+    /// A raw fetch: the structure as text, the bodies as bytes.
+    func fetch(_ arguments: String) async throws -> [Line] {
+        let reply = try await command("UID FETCH \(arguments)", keepingLiterals: true)
+        guard reply.isOK else {
+            throw Failure.rejected(command: "FETCH", reason: reply.reason)
+        }
+        return reply.lines.filter { $0.text.uppercased().contains("FETCH") }
     }
 
     // MARK: - Wire formatting
