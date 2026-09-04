@@ -211,22 +211,32 @@ struct AIAutomationSettingsView: View {
 
     var body: some View {
         List {
+            // The third copy of the same two switches, removed. They live on
+            // Preferences; this points at them.
             Section {
-                Toggle("Read incoming mail", isOn: $tagging)
-                    .onChange(of: tagging) { _, value in AppSettings.tagsIncomingMail = value }
-                Toggle("Summarise when I open a message", isOn: $summaries)
-                    .onChange(of: summaries) { _, value in AppSettings.writesSummaries = value }
+                NavigationLink { AIPreferencesView() } label: {
+                    LabeledContent("Reading and summaries") {
+                        Text(tagging ? "On" : "Off")
+                    }
+                    .font(Style.rowTitle)
+                }
             } header: {
                 Text("AI permissions")
             } footer: {
-                Text("With reading off, Maily still sorts mail using rules on this device. Those cost nothing and nothing leaves your phone.")
+                Text("What Maily is allowed to do with mail as it arrives.")
             }
 
             Section {
                 Toggle("Warn me before writing in bulk", isOn: $asksBeforeBulk)
                     .onChange(of: asksBeforeBulk) { _, value in
+                        // Stored inverted, and under a raw key rather than
+                        // through AppSettings -- the flag records that consent
+                        // was *given*, and the switch asks whether to warn.
                         UserDefaults.standard.set(!value, forKey: "bulkReply.consented")
                     }
+                // Read-only because it is true and not a choice: nothing in
+                // this app sends without a person pressing send. It is here so
+                // the answer is visible, not so it can be changed.
                 LabeledContent("Sending", value: "Always ask")
             } header: {
                 Text("Approvals")

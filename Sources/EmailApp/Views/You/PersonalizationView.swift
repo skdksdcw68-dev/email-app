@@ -14,6 +14,8 @@ import SwiftUI
 struct PersonalizationView: View {
     @Environment(UserStore.self) private var user
 
+    @State private var isResetting = false
+
     var body: some View {
         List {
             Section {
@@ -56,9 +58,15 @@ struct PersonalizationView: View {
                 } header: {
                     Text(question.title)
                 } footer: {
-                    if let subtitle = question.subtitle {
-                        Text(subtitle)
-                    }
+                    // Says which kind of question it is, which the screen was
+                    // not doing. `UserStore.toggle` enforces single-select and
+                    // exclusivity, so the behaviour was always right -- but
+                    // from the outside every question looked like a checklist,
+                    // and picking a second option on a single-select silently
+                    // dropped the first.
+                    Text(question.subtitle ?? (question.selection == .multiple
+                                               ? "Pick as many as apply."
+                                               : "Pick one."))
                 }
             }
 
@@ -72,10 +80,40 @@ struct PersonalizationView: View {
             } footer: {
                 Text("The rest of what Maily knows about you lives in these two.")
             }
+
+            resetSection
         }
         .navigationTitle("Personalization")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
+        .alert("Go back to your signup answers?", isPresented: $isResetting) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
+                withAnimation(.snappy(duration: 0.2)) { user.resetToSignupAnswers() }
+            }
+        } message: {
+            Text("Everything on this screen goes back to what you chose when you first set Maily up. Your writing style and what Maily remembers are not affected.")
+        }
+    }
+
+    /// Only shown when there is a baseline to return to *and* something has
+    /// moved away from it. A reset button that would change nothing is a
+    /// button that makes people wonder what they have broken.
+    @ViewBuilder
+    private var resetSection: some View {
+        if user.hasSignupAnswers && user.hasChangedSinceSignup {
+            Section {
+                Button(role: .destructive) {
+                    isResetting = true
+                } label: {
+                    Text("Reset to my signup answers")
+                        .font(Style.rowTitle)
+                        .foregroundStyle(Color.urgent)
+                }
+            } footer: {
+                Text("You have changed some of these since you set Maily up.")
+            }
+        }
     }
 
     private func isOn(_ option: OnboardingQuestion.Option, _ question: OnboardingQuestion) -> Bool {

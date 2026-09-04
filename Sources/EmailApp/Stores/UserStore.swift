@@ -107,16 +107,20 @@ final class UserStore {
 
     /// The `tone` answer, phrased as an instruction the drafting model can act
     /// on. This is where that onboarding question finally earns its place.
-    var tonePreference: String {
-        switch selections(for: .tone).first {
-        case "professional": "formal and professional"
-        case "warm": "warm and friendly"
-        case "direct": "short and direct, no filler"
-        case "thorough": "detailed and thorough"
-        case "casual": "casual and relaxed"
-        default: "match how I already write"
-        }
+    ///
+    /// Read off `WritingTone` rather than switched on here.
+    ///
+    /// There used to be two copies of this mapping -- one here and one on
+    /// `WritingTone`, whose doc comment said "must match what
+    /// `UserStore.tonePreference` produces". Two lists that must agree, and
+    /// nothing making them. Adding a tone to the picker silently fell through
+    /// to the default here, so the screen showed it selected while the model
+    /// was told something else entirely.
+    var chosenTone: WritingTone {
+        WritingTone(rawValue: selections(for: .tone).first ?? "") ?? .matchMe
     }
+
+    var tonePreference: String { chosenTone.instruction }
 
     // MARK: - Flow
 
@@ -216,19 +220,61 @@ final class UserStore {
         answers = [:]
         defaults.removeObject(forKey: Key.account)
         defaults.removeObject(forKey: Key.answers)
+        // The signup snapshot goes too. Keeping it would mean the next person
+        // to sign in on this phone could reset to a stranger's answers.
+        defaults.removeObject(forKey: Key.originalAnswers)
         defaults.set(false, forKey: Key.completed)
         phase = .welcome
     }
 
     func finish() {
         defaults.set(true, forKey: Key.completed)
+        // What they answered at signup, kept so Personalization can offer to
+        // put it back. There is only ever one `answers` dictionary and editing
+        // it later overwrites in place, so without a snapshot taken here the
+        // original choices are gone the first time somebody taps a row to see
+        // what it does.
+        //
+        // Written once, at the end of onboarding, and never again -- a reset
+        // that restored "whatever it was last week" would not be a reset.
+        if let data = try? JSONEncoder().encode(answers) {
+            defaults.set(data, forKey: Key.originalAnswers)
+        }
         phase = .finished
+    }
+
+    // MARK: - The signup baseline
+
+    /// Whether there is anything to go back to. False for anybody who
+    /// onboarded before the snapshot existed, and the Reset button hides
+    /// rather than offering to restore nothing.
+    var hasSignupAnswers: Bool {
+        defaults.data(forKey: Key.originalAnswers) != nil
+    }
+
+    /// Whether what they have now differs from what they picked at signup.
+    var hasChangedSinceSignup: Bool {
+        guard let original = signupAnswers else { return false }
+        return original != answers
+    }
+
+    private var signupAnswers: [String: Set<String>]? {
+        guard let data = defaults.data(forKey: Key.originalAnswers) else { return nil }
+        return try? JSONDecoder().decode([String: Set<String>].self, from: data)
+    }
+
+    /// Puts the signup answers back.
+    func resetToSignupAnswers() {
+        guard let original = signupAnswers else { return }
+        answers = original
+        persistAnswers()
     }
 
     // MARK: - Persistence
 
     private enum Key {
         static let answers = "onboarding.answers"
+        static let originalAnswers = "onboarding.answers.original"
         static let account = "onboarding.account"
         static let completed = "onboarding.completed"
     }
@@ -265,14 +311,5 @@ extension UserDefaults {
 extension UserStore {
     /// The tone they chose, as the one word a settings row can carry. The
     /// full instruction is what the model reads; this is what a person does.
-    var writingToneTitle: String {
-        switch selections(for: .tone).first {
-        case "professional": "Professional"
-        case "warm": "Warm"
-        case "direct": "Direct"
-        case "thorough": "Thorough"
-        case "casual": "Casual"
-        default: "Natural"
-        }
-    }
+    var writingToneTitle: String { chosenTone.title }
 }

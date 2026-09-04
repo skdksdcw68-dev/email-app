@@ -71,19 +71,15 @@ struct AIUsageView: View {
                 }
             }
 
+            // The switches themselves live on Preferences, and only there.
+            // They were drawn here too, and on AI & Automation -- three copies
+            // of the same two settings, two of them under a different name.
             Section {
-                Toggle("Read incoming mail", isOn: Binding(
-                    get: { AppSettings.tagsIncomingMail },
-                    set: { AppSettings.tagsIncomingMail = $0 }
-                ))
-                Toggle("Summarise when I open a message", isOn: Binding(
-                    get: { AppSettings.writesSummaries },
-                    set: { AppSettings.writesSummaries = $0 }
-                ))
-            } header: {
-                Text("Turn things down")
+                NavigationLink { AIPreferencesView() } label: {
+                    Text("Turn things down").font(Style.rowTitle)
+                }
             } footer: {
-                Text("Reading is what runs on every message that arrives. With it off, Maily still sorts mail using rules on this phone, which cost nothing.")
+                Text("Reading is what runs on every message that arrives, so it is the one that adds up.")
             }
 
             Section {

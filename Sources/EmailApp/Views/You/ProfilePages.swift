@@ -228,49 +228,118 @@ struct EditProfileView: View {
 // spent finding out what the choices are.
 
 /// Writing style on its own, as the plan has it.
+///
+/// Held in `@State` and written on Save, rather than saved on every keystroke.
+/// The old version wrote `AppSettings.customInstructions` on **every character
+/// typed**, which means there was never a draft: half a sentence somebody was
+/// still thinking about was already the instruction the model would be given,
+/// and there was no way to change your mind except to delete it again.
 struct WritingStyleView: View {
     @Environment(UserStore.self) private var user
+    @Environment(\.dismiss) private var dismiss
 
-    @State private var instructions = AppSettings.customInstructions
+    @State private var tone: WritingTone = .matchMe
+    @State private var instructions = ""
+    @State private var isDiscarding = false
+    @FocusState private var isTyping: Bool
+
+    private var hasChanges: Bool {
+        tone != user.chosenTone || instructions != AppSettings.customInstructions
+    }
 
     var body: some View {
         List {
             Section {
-                ForEach(WritingTone.allCases) { tone in
+                ForEach(WritingTone.allCases) { option in
                     Button {
-                        user.setTone(tone.rawValue)
+                        tone = option
                     } label: {
-                        HStack {
-                            Text(tone.title).foregroundStyle(.primary)
-                            Spacer()
-                            if user.tonePreference == tone.instruction {
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(option.title)
+                                    .font(Style.rowTitle)
+                                    .foregroundStyle(.primary)
+                                Text(option.detail)
+                                    .font(Style.rowDetail)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
+                            if tone == option {
                                 Image(systemName: "checkmark")
                                     .font(.footnote.weight(.bold))
                                     .foregroundStyle(.tint)
+                                    .padding(.top, 2)
                             }
                         }
+                        .contentShape(Rectangle())
                     }
                 }
+            } header: {
+                Text("Tone")
             } footer: {
                 Text("How Maily sounds when it writes on your behalf.")
             }
 
             Section {
-                TextField("Keep my emails short and natural", text: $instructions, axis: .vertical)
-                    .lineLimit(3...6)
-                    .onChange(of: instructions) { _, value in
-                        AppSettings.customInstructions = value
-                    }
+                TextField(
+                    "Keep my emails short. Never use exclamation marks. Sign off with just my first name.",
+                    text: $instructions,
+                    axis: .vertical
+                )
+                .lineLimit(4...10)
+                .focused($isTyping)
             } header: {
                 Text("Custom instructions")
             } footer: {
-                Text("Anything you want Maily to remember whenever it writes for you.")
+                Text("Anything you want Maily to remember whenever it writes for you. Written in your own words — it is passed to the model as you type it.")
             }
         }
-        .keyboardDismissable()
-        .navigationTitle("Writing style")
+        .navigationTitle("Writing")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
+        // 🔴 `keyboardDismissable()` does not work on a `List`. It puts the tap
+        // gesture on a *background*, which sits behind the rows and never gets
+        // the tap -- so on this screen the keyboard covered the box somebody
+        // was typing into with no way to get rid of it.
+        //
+        // A Done button above the keyboard is the answer iOS already has, and
+        // it works regardless of what is underneath.
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { isTyping = false }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") { save() }
+                    .disabled(!hasChanges)
+            }
+        }
+        .onAppear {
+            tone = user.chosenTone
+            instructions = AppSettings.customInstructions
+        }
+        // Leaving with unsaved edits used to be impossible to do wrong,
+        // because there was nothing to save. Now there is.
+        .navigationBarBackButtonHidden(hasChanges)
+        .toolbar {
+            if hasChanges {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Back") { isDiscarding = true }
+                }
+            }
+        }
+        .alert("Save your changes?", isPresented: $isDiscarding) {
+            Button("Save") { save(); dismiss() }
+            Button("Discard", role: .destructive) { dismiss() }
+            Button("Keep editing", role: .cancel) {}
+        }
+    }
+
+    private func save() {
+        user.setTone(tone.rawValue)
+        AppSettings.customInstructions = instructions
     }
 }
 
