@@ -19,13 +19,15 @@ struct MailboxListView: View {
 
     var body: some View {
         List {
+            // Accounts and "Add account" in one card, the way Telegram and
+            // Slack do it. They are one idea -- the mailboxes you have, and
+            // making another -- and a separate row floating below the card
+            // read as a different kind of thing entirely.
             Section {
                 ForEach(registry.accounts) { account in
                     row(account)
                 }
                 addRow
-            } header: {
-                Text("Mailboxes")
             }
 
             if registry.hasSeveral {
@@ -43,6 +45,7 @@ struct MailboxListView: View {
                 }
             }
         }
+        .listStyle(.insetGrouped)
         .navigationTitle("Mailboxes")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()

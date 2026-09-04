@@ -556,6 +556,13 @@ final class MailStore {
                 importProgress = .idle
                 return
             }
+            // The same reason as in `adopt`: a second Google account added
+            // while a first is open would otherwise arrive with the first
+            // one's mail still in memory, and show it under the new address.
+            leaveCurrentMailbox()
+            // It clears this on the way out, and the screen is still showing.
+            importProgress = .connecting
+
             let connected = MailAccount(
                 provider: .gmail,
                 address: session.email,

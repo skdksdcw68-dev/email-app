@@ -61,9 +61,23 @@ extension MailStore {
     func adopt(_ connected: MailAccount) async {
         guard !isConnecting else { return }
         isConnecting = true
+        defer { isConnecting = false }
+
+        // 🔴 Put the old mailbox down first.
+        //
+        // Without this the new account is active while `messages` still holds
+        // the previous mailbox's mail, so the inbox shows one person's email
+        // under another's address. It also bumps the epoch, which is what
+        // stops a fetch already in flight for the old mailbox writing its
+        // results into this one.
+        //
+        // `leaveCurrentMailbox` says in its own comment that it is "shared
+        // with connect". It was not shared with anything -- only `activate`
+        // called it.
+        // Ordered after it, because `leaveCurrentMailbox` clears both.
+        leaveCurrentMailbox()
         connectionError = nil
         importProgress = .connecting
-        defer { isConnecting = false }
 
         account = connected
         cachedBackend = nil
