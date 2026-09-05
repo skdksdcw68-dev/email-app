@@ -13,12 +13,13 @@ import SwiftUI
 /// - **Running out is not a wait.** It is buy credits, or move up a plan.
 ///
 /// ⚠️ The spend is real -- priced on the server from OpenAI's own token
-/// counts. The *plan* is not: there is nothing to buy yet, so everybody is on
-/// Free and the buttons say so rather than opening a paywall onto nothing.
+/// counts. The plan comes from StoreKit, and the paywall is `PlansView`.
+///
 struct AIUsageView: View {
     @Environment(MailStore.self) private var mail
 
     @State private var usage = UsageStore()
+    @State private var isShowingPlans = false
 
     private var plan: Plan { .current }
     private var spent: Double { usage.spend?.thisMonth ?? 0 }
@@ -43,6 +44,7 @@ struct AIUsageView: View {
         .hidesTabBar()
         .refreshable { await usage.refresh() }
         .task { await usage.refresh() }
+        .sheet(isPresented: $isShowingPlans) { PlansView() }
     }
 
     // MARK: - This period
@@ -99,30 +101,28 @@ struct AIUsageView: View {
     private var creditsSection: some View {
         Section {
             Button {
+                isShowingPlans = true
             } label: {
                 LabeledContent {
-                    Text("Coming soon").foregroundStyle(.tertiary)
+                    Text(plan == .free ? "See plans" : "Change").foregroundStyle(.secondary)
+                } label: {
+                    Text(plan == .free ? "Upgrade" : "Your plan").font(Style.rowTitle)
+                }
+            }
+
+            Button {
+                isShowingPlans = true
+            } label: {
+                LabeledContent {
+                    Text("Top up").foregroundStyle(.secondary)
                 } label: {
                     Text("Buy credits").font(Style.rowTitle)
                 }
             }
-            .disabled(true)
-
-            Button {
-            } label: {
-                LabeledContent {
-                    Text("Coming soon").foregroundStyle(.tertiary)
-                } label: {
-                    Text("Upgrade plan").font(Style.rowTitle)
-                }
-            }
-            .disabled(true)
         } header: {
             Text("When you run out")
         } footer: {
-            // Honest about the state of it. A live-looking button onto a
-            // paywall with no products behind it is worse than a grey one.
-            Text("Credits and plans are not on sale yet. When they are, running out will mean buying more or moving up — never waiting for a reset.")
+            Text("Credit is used after your monthly allowance, and does not expire while your plan is active.")
         }
     }
 
