@@ -202,6 +202,63 @@ function readUsage(usage: Record<string, unknown> | undefined | null): Usage | n
 /// they asked for should not lose it because a bookkeeping insert timed out --
 /// the money is already spent by that point either way, and a missing row is a
 /// far smaller problem than a missing answer.
+/// What the server says this person may still spend.
+///
+/// 🔴 **Fails open, and that is a deliberate trade.** A null answer -- the
+/// database unreachable, the secrets unset, a malformed reply -- lets the
+/// request through rather than refusing it.
+///
+/// The alternative was considered and is worse. Refusing on failure means an
+/// outage in the metering path stops every paying subscriber from using the
+/// thing they pay for, and the blast radius of *that* is every customer at
+/// once. Letting a request through costs, at the very worst, a few cents of
+/// somebody else's model time until the check comes back.
+///
+/// The hard cap is the backstop that makes this safe to say: `spend_check`
+/// refuses past 5x the Pro allowance whatever the plan, so even a sustained
+/// outage cannot turn into an unbounded bill.
+async function spendCheck(userId: string | null): Promise<
+  { plan: string; allowance_usd: number; spent_usd: number; is_allowed: boolean } | null
+> {
+  if (!userId || !SUPABASE_URL || !SERVICE_ROLE) return null;
+
+  try {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/spend_check`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SERVICE_ROLE,
+        Authorization: `Bearer ${SERVICE_ROLE}`,
+      },
+      body: JSON.stringify({ for_user: userId }),
+    });
+
+    // ⚠️ PostgREST answers a failed RPC with a 4xx and a JSON body rather
+    // than throwing, so the status has to be read. `meter()` gets this wrong
+    // in the other direction and loses rows silently; here it would mean
+    // parsing an error object as a verdict.
+    if (!response.ok) {
+      console.error(`spend_check returned ${response.status}`);
+      return null;
+    }
+
+    // A `returns table` function comes back as an array of one row.
+    const rows = await response.json();
+    const row = Array.isArray(rows) ? rows[0] : rows;
+    if (!row) return null;
+
+    return {
+      plan: String(row.plan ?? "free"),
+      allowance_usd: Number(row.allowance_usd ?? 0),
+      spent_usd: Number(row.spent_usd ?? 0),
+      is_allowed: row.is_allowed !== false,
+    };
+  } catch (error) {
+    console.error("spend_check failed", error);
+    return null;
+  }
+}
+
 async function meter(ctx: Ctx, model: string, usage: Usage | null) {
   if (!usage || !ctx.userId || !SUPABASE_URL || !SERVICE_ROLE) return;
 
@@ -1399,6 +1456,34 @@ Deno.serve(async (request) => {
         error: "Sign in to Maily to use its AI features.",
         code: "not_signed_in",
       }, 401);
+    }
+
+    // 🔴 The ceiling, actually enforced.
+    //
+    // `spend_check` has existed and been correct since migration 0010, and
+    // until now nothing called it: usage was metered *after* OpenAI had
+    // already been paid, and `meter()` is documented as never refusing
+    // anything. Every allowance in the app -- the free tier's $0.30, Pro's
+    // $6, Max's $15 -- was a number in a `case` branch that no request ever
+    // consulted.
+    //
+    // Before the switch, not inside each handler: a limit that has to be
+    // remembered at twelve call sites is a limit that will be missing from
+    // the thirteenth.
+    const verdict = await spendCheck(ctx.userId);
+    if (verdict && !verdict.is_allowed) {
+      return json({
+        error: verdict.plan === "free"
+          ? "You have used this month's free AI. Upgrade to keep going."
+          : "You have used this month's allowance. Buy credits or move up a plan.",
+        code: "out_of_allowance",
+        plan: verdict.plan,
+        // A percentage, never dollars -- the amounts here are the operator's
+        // provider cost and mean nothing to the person reading them.
+        percentUsed: verdict.allowance_usd > 0
+          ? Math.min(100, Math.round((verdict.spent_usd / verdict.allowance_usd) * 100))
+          : 100,
+      }, 402);
     }
 
     switch (payload.action) {
