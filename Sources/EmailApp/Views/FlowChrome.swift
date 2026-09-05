@@ -12,43 +12,50 @@ import SwiftUI
 // that is a promise the button does not keep. An X says close, which is
 // the truth.
 
-/// The X that closes: a small circled mark, the way modern sheets dismiss.
+/// The X that closes.
+///
+/// 🔴 **Drawn by the system, not by us.** It used to be a bold glyph inside a
+/// hand-made grey circle with a spring animation on it -- a button that
+/// *looked* like a control iOS draws and behaved like one nothing else in the
+/// system does. It sat a few points off every real toolbar item, it did not
+/// take the tint, and it did not grow with Dynamic Type.
+///
+/// A plain `Button` in a toolbar gets all of that for free, and gets it right
+/// on an OS version this code has never run on.
 struct FlowCloseButton: View {
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.footnote.weight(.bold))
-                .foregroundStyle(.secondary)
-                .frame(width: 30, height: 30)
-                .background(Circle().fill(Color(uiColor: .secondarySystemFill)))
-                .contentShape(Circle())
         }
-        .buttonStyle(BouncyButtonStyle())
         .accessibilityLabel("Close")
     }
 }
 
-/// Back, for any step that has somewhere to go back to. Styled like the
-/// system's own back control so it reads as navigation, not cancellation.
+/// Back, for a step inside a flow that has somewhere to go back to.
 ///
-/// Bare chevron by default. The word "Back" is opt-in, for the one flow that
-/// fills the screen and has no navigation bar to borrow meaning from.
+/// ⚠️ **Only for flows that are not a `NavigationStack` push.** Where there is
+/// a real push, the system's own back button is the right control and this is
+/// the wrong one: the system's carries the previous screen's title, follows
+/// the platform's animation, and -- the part that cannot be reproduced --
+/// works with the edge-swipe gesture. Somebody swiping back on a hand-drawn
+/// chevron gets nothing and concludes the app is stuck.
+///
+/// So this is for the multi-step sheets, where each step is a state rather
+/// than a pushed screen and there is genuinely nothing for the system to draw.
 struct FlowBackButton: View {
     var showsLabel = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 3) {
+            if showsLabel {
+                Label("Back", systemImage: "chevron.left")
+            } else {
                 Image(systemName: "chevron.left")
-                    .font(.body.weight(.semibold))
-                if showsLabel { Text("Back") }
             }
-            .foregroundStyle(showsLabel ? Color.accentColor : Color.primary)
         }
-        .buttonStyle(BouncyButtonStyle())
         .accessibilityLabel("Back")
     }
 }

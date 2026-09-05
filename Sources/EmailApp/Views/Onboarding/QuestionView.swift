@@ -28,16 +28,28 @@ struct QuestionView: View {
             }
             .scrollIndicators(.hidden)
 
+            // 🔴 Never disabled.
+            //
+            // It was greyed out until something was picked, which is a dead
+            // end wearing the clothes of a button: no explanation, nothing to
+            // tap, and no way past a question somebody has no answer to. On
+            // the *first* screen of an app nobody has committed to yet, that
+            // is where they close it.
+            //
+            // Every one of these has a sane default -- the tone falls back to
+            // "match how I already write", the rest simply narrow what Maily
+            // assumes -- so an unanswered question costs a little quality and
+            // nothing else. Saying "Skip" is honest about that, and leaves the
+            // door open rather than locked.
             Button {
                 user.next()
             } label: {
-                Text("Continue")
+                Text(user.canContinue(from: question) ? "Continue" : "Skip")
                     .fontWeight(.semibold)
                     .frame(maxWidth: .infinity, minHeight: 30)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(user.canContinue(from: question) ? .borderedProminent : .bordered)
             .controlSize(.large)
-            .disabled(!user.canContinue(from: question))
             .padding(.horizontal, 20)
             .padding(.top, 10)
             .padding(.bottom, 8)

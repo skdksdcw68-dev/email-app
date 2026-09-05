@@ -242,8 +242,43 @@ final class UserStore {
             externalID: userID
         )
         persistAccount()
-        SettingsSync.notify(.onboarding)
-        next()
+        SettingsSync.notify(.profile)
+        // 🔴 Deliberately does not advance any more.
+        //
+        // It called `next()`, which from `.signIn` goes to `.connectInbox` --
+        // so anybody who tapped "Sign in" landed in the app having answered
+        // nothing, whether or not they had ever registered. Every question
+        // that shapes how Maily behaves was skipped, with no way back to
+        // them.
+        //
+        // Where somebody goes next depends on what the *account* already
+        // holds, and only the server knows that. `continueAfterAuth()` asks.
+    }
+
+    /// Where somebody lands once they are signed in.
+    ///
+    /// One rule rather than a branch on which button they pressed: an account
+    /// that has answered the questions goes on to connect a mailbox, one that
+    /// has not answers them first. Somebody who just finished the questions
+    /// has answers, so this sends them onward exactly as before -- and
+    /// somebody who pressed "Sign in" having never registered is sent *to* the
+    /// questions rather than past them.
+    func continueAfterAuth() async {
+        // What this account already has. Without it a genuine returning user
+        // on a new phone looks identical to a stranger -- both have an empty
+        // local `answers` -- and would be made to answer everything again.
+        await SettingsSync.shared.pull()
+
+        phase = hasAnsweredQuestions ? .connectInbox : .question(0)
+    }
+
+    /// Whether this account has been through the questions at all.
+    ///
+    /// Any answer counts. Requiring all of them would trap somebody who
+    /// abandoned onboarding halfway on an earlier install in a loop they
+    /// could not get out of.
+    var hasAnsweredQuestions: Bool {
+        answers.values.contains { !$0.isEmpty }
     }
 
     /// Convenience for Apple, which hands back `PersonNameComponents`.

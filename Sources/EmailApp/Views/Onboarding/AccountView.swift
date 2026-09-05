@@ -161,6 +161,7 @@ struct AccountView: View {
                     displayName: name ?? supabaseUser.displayNameFromMetadata,
                     provider: .apple
                 )
+                await user.continueAfterAuth()
             } catch {
                 authError = error.localizedDescription
             }
@@ -182,6 +183,7 @@ struct AccountView: View {
                     displayName: supabaseUser.displayNameFromMetadata,
                     provider: .google
                 )
+                await user.continueAfterAuth()
             } catch {
                 // The SDK throws on a user-cancelled sheet too; that is not
                 // worth a red error line.

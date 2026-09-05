@@ -126,7 +126,13 @@ struct EmailAuthView: View {
             displayName: supabaseUser.displayNameFromMetadata,
             provider: .email
         )
-        dismiss()
+        // Routed before the sheet closes, not after: `continueAfterAuth`
+        // decides which screen is underneath, and dismissing first would show
+        // the wrong one for as long as the check takes.
+        Task {
+            await user.continueAfterAuth()
+            dismiss()
+        }
     }
 }
 
