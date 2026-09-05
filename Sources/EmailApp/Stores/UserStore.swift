@@ -103,7 +103,27 @@ final class UserStore {
         SettingsSync.notify(.onboarding)
     }
 
+    /// Sets the tone for the mailbox in front of you.
+    ///
+    /// ⚠️ Writes the *mailbox* override, not the onboarding answer. Changing
+    /// the voice of a work address should not quietly rewrite what somebody
+    /// said about themselves at signup -- that answer is the fallback for
+    /// every mailbox that has not been given one of its own, so overwriting it
+    /// would change every one of them at once.
+    ///
+    /// The onboarding answer is still editable, in Personalization, where it
+    /// is labelled as the answer it is.
     func setTone(_ optionID: String) {
+        AppSettings.mailboxTone = optionID
+    }
+
+    /// Puts this mailbox back on the signup answer.
+    func clearMailboxTone() {
+        AppSettings.mailboxTone = nil
+    }
+
+    /// The onboarding tone answer itself, edited from Personalization.
+    func setSignupTone(_ optionID: String) {
         answers[OnboardingQuestion.tone.id] = [optionID]
         persistAnswers()
         SettingsSync.notify(.onboarding)
@@ -120,9 +140,24 @@ final class UserStore {
     /// nothing making them. Adding a tone to the picker silently fell through
     /// to the default here, so the screen showed it selected while the model
     /// was told something else entirely.
+    /// The tone the *active mailbox* writes in.
+    ///
+    /// Two layers, and the order is the point. A mailbox that has been given
+    /// its own tone uses it; one that has not falls back to the answer given
+    /// at signup. So a newly connected address starts in the voice somebody
+    /// already chose, rather than in a default nobody picked -- and changing
+    /// it there changes only that address.
     var chosenTone: WritingTone {
-        WritingTone(rawValue: selections(for: .tone).first ?? "") ?? .matchMe
+        if let perMailbox = AppSettings.mailboxTone,
+           let tone = WritingTone(rawValue: perMailbox) {
+            return tone
+        }
+        return WritingTone(rawValue: selections(for: .tone).first ?? "") ?? .matchMe
     }
+
+    /// Whether this mailbox has been given a voice of its own, as opposed to
+    /// inheriting the signup answer. The Writing screen says which it is.
+    var hasMailboxTone: Bool { AppSettings.mailboxTone != nil }
 
     var tonePreference: String { chosenTone.instruction }
 

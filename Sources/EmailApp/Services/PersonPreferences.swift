@@ -7,6 +7,15 @@ import Foundation
 /// opaque model of your habits, just corrections that stick and visibly change
 /// priority. Mark someone important and their mail scores higher. Mute them
 /// and it never reads as urgent. Recategorise them and it stays that way.
+///
+/// **Per mailbox**, and that is a decision rather than an accident. The same
+/// human is a different relationship at each address: an accountant who
+/// matters enormously in a work inbox is nobody in a personal one, and a
+/// newsletter muted at home may be the one thing worth reading at work.
+/// Account-wide stars would make one of those two mailboxes wrong.
+///
+/// 🔴 Which means every cache below has to be dropped when the mailbox
+/// changes -- see `resetCache()` and its call in `MailboxScope.activate`.
 enum PersonPreferences {
     private static let importantKey = "people.important"
     private static let mutedKey = "people.muted"
@@ -63,12 +72,12 @@ enum PersonPreferences {
     static var important: Set<String> {
         get {
             cached(importantCache) {
-                Set(UserDefaults.standard.stringArray(forKey: importantKey) ?? [])
+                Set(MailboxScope.defaults.stringArray(forKey: importantKey) ?? [])
             }
         }
         set {
             importantCache.withLock { held in held = newValue }
-            UserDefaults.standard.set(Array(newValue), forKey: importantKey)
+            MailboxScope.defaults.set(Array(newValue), forKey: importantKey)
         }
     }
 
@@ -95,12 +104,12 @@ enum PersonPreferences {
     static var muted: Set<String> {
         get {
             cached(mutedCache) {
-                Set(UserDefaults.standard.stringArray(forKey: mutedKey) ?? [])
+                Set(MailboxScope.defaults.stringArray(forKey: mutedKey) ?? [])
             }
         }
         set {
             mutedCache.withLock { held in held = newValue }
-            UserDefaults.standard.set(Array(newValue), forKey: mutedKey)
+            MailboxScope.defaults.set(Array(newValue), forKey: mutedKey)
         }
     }
 
@@ -125,12 +134,12 @@ enum PersonPreferences {
     private static var overrides: [String: String] {
         get {
             cached(overridesCache) {
-                UserDefaults.standard.dictionary(forKey: categoryKey) as? [String: String] ?? [:]
+                MailboxScope.defaults.dictionary(forKey: categoryKey) as? [String: String] ?? [:]
             }
         }
         set {
             overridesCache.withLock { held in held = newValue }
-            UserDefaults.standard.set(newValue, forKey: categoryKey)
+            MailboxScope.defaults.set(newValue, forKey: categoryKey)
         }
     }
 
@@ -159,12 +168,12 @@ enum PersonPreferences {
     private static var relationships: [String: String] {
         get {
             cached(relationshipsCache) {
-                UserDefaults.standard.dictionary(forKey: relationshipKey) as? [String: String] ?? [:]
+                MailboxScope.defaults.dictionary(forKey: relationshipKey) as? [String: String] ?? [:]
             }
         }
         set {
             relationshipsCache.withLock { held in held = newValue }
-            UserDefaults.standard.set(newValue, forKey: relationshipKey)
+            MailboxScope.defaults.set(newValue, forKey: relationshipKey)
         }
     }
 
@@ -193,6 +202,19 @@ enum PersonPreferences {
         if isImportant(address) { return 15 }
         if isMuted(address) { return -25 }
         return 0
+    }
+
+    /// Drops every in-memory copy, so the next read comes from whichever
+    /// mailbox is now active.
+    ///
+    /// Called by `MailboxScope.activate`, alongside the other scoped caches.
+    /// Nothing else should call it: these fill on read, so clearing them at
+    /// any other moment only costs a re-read.
+    static func resetCache() {
+        importantCache.withLock { $0 = nil }
+        mutedCache.withLock { $0 = nil }
+        overridesCache.withLock { $0 = nil }
+        relationshipsCache.withLock { $0 = nil }
     }
 
     /// Adds what another device has marked, without removing anything.
@@ -227,9 +249,9 @@ enum PersonPreferences {
         mutedCache.withLock { held in held = [] }
         overridesCache.withLock { held in held = [:] }
         relationshipsCache.withLock { held in held = [:] }
-        UserDefaults.standard.removeObject(forKey: importantKey)
-        UserDefaults.standard.removeObject(forKey: mutedKey)
-        UserDefaults.standard.removeObject(forKey: categoryKey)
-        UserDefaults.standard.removeObject(forKey: relationshipKey)
+        MailboxScope.defaults.removeObject(forKey: importantKey)
+        MailboxScope.defaults.removeObject(forKey: mutedKey)
+        MailboxScope.defaults.removeObject(forKey: categoryKey)
+        MailboxScope.defaults.removeObject(forKey: relationshipKey)
     }
 }

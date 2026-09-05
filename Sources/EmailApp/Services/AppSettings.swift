@@ -105,9 +105,31 @@ enum AppSettings {
     }
 
     /// Extra guidance handed to the model whenever it writes for the user.
+    ///
+    /// **Per mailbox.** The voice is the thing most obviously tied to who is
+    /// receiving the mail -- "sign off with just my first name" is right from
+    /// a personal address and wrong from a company one. `MailboxScope.defaults`
+    /// rather than `.standard`, so each address carries its own.
     static var customInstructions: String {
-        get { UserDefaults.standard.string(forKey: "settings.customInstructions") ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: "settings.customInstructions"); SettingsSync.notify(.app) }
+        get { MailboxScope.defaults.string(forKey: "settings.customInstructions") ?? "" }
+        set {
+            MailboxScope.defaults.set(newValue, forKey: "settings.customInstructions")
+            SettingsSync.notify(.writing)
+        }
+    }
+
+    /// The tone this mailbox writes in, as a `WritingTone` raw value.
+    ///
+    /// Nil until somebody sets one here, and the onboarding answer is what
+    /// fills the gap -- so a newly connected mailbox starts in the voice they
+    /// already chose rather than in a default nobody picked. `UserStore`
+    /// resolves the two; this is only the override.
+    static var mailboxTone: String? {
+        get { MailboxScope.defaults.string(forKey: "settings.tone") }
+        set {
+            MailboxScope.defaults.set(newValue, forKey: "settings.tone")
+            SettingsSync.notify(.writing)
+        }
     }
 
     /// Whether the "AI search costs more" notice has been shown. It is worth

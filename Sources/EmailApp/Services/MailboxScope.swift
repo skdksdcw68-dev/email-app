@@ -60,6 +60,12 @@ enum MailboxScope {
         ClassificationCache.forgetInMemory()
         FollowUpPreferences.resetCache()
         SemanticIndex.forgetEverything()
+        // 🔴 Joined this list when important and muted senders became
+        // per-mailbox. Its caches fill on read and are static, so without
+        // this the People tab would score the new mailbox's senders against
+        // the previous mailbox's stars -- silently, and looking entirely
+        // normal.
+        PersonPreferences.resetCache()
     }
 
     /// Forgets everything one mailbox stored in `UserDefaults`. One call, and

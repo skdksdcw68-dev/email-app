@@ -21,7 +21,23 @@ final class SettingsSync {
     /// never -- and because one blob means one conflict: changing a tone on
     /// the phone and starring a sender on the iPad would throw one away.
     enum Scope: String, CaseIterable {
-        case app, people, onboarding, autoreply, profile
+        case app, people, onboarding, autoreply, profile, writing
+
+        /// Whether this belongs to one address rather than to the person.
+        ///
+        /// Two do. Who matters and who is muted is a different answer at each
+        /// address -- an accountant is everything in a work inbox and nobody
+        /// in a personal one. And the voice is the thing most obviously tied
+        /// to who is receiving the mail.
+        ///
+        /// The rest are the person: their appearance, their signup answers,
+        /// their name and picture, the Auto-Reply setup they wrote once.
+        var isPerMailbox: Bool {
+            switch self {
+            case .people, .writing: true
+            case .app, .onboarding, .autoreply, .profile: false
+            }
+        }
     }
 
     /// One instance, reachable from anywhere.
@@ -125,6 +141,7 @@ final class SettingsSync {
         let row = Row(
             user_id: nil,
             scope: scope.rawValue,
+            mailbox_id: scope.isPerMailbox ? (MailboxScope.current?.rawValue ?? "") : "",
             payload: payload,
             updated_at: .now,
             device_id: Self.deviceID
@@ -145,8 +162,25 @@ final class SettingsSync {
         isApplyingRemote = true
         defer { isApplyingRemote = false }
 
+        let active = MailboxScope.current?.rawValue ?? ""
+
         for row in rows {
             guard let scope = Scope(rawValue: row.scope) else { continue }
+
+            // 🔴 A per-mailbox row is only applied to the mailbox it came
+            // from. Without this, pulling would walk every mailbox's stars and
+            // write each one over the last -- so whichever row came back last
+            // would decide what the *active* mailbox thinks, and switching
+            // mailbox would not change it back.
+            //
+            // The empty string is the account-level row, which for a
+            // per-mailbox scope is what earlier versions wrote before there
+            // was a mailbox column. Applied as a starting point, so somebody
+            // upgrading does not lose the stars they already had.
+            if scope.isPerMailbox, row.mailbox_id != active, !row.mailbox_id.isEmpty {
+                continue
+            }
+
             apply(row.payload, to: scope)
         }
     }
@@ -160,7 +194,6 @@ final class SettingsSync {
                 "appearance": .init(AppSettings.appearance.rawValue),
                 "tagsIncomingMail": .init(AppSettings.tagsIncomingMail),
                 "writesSummaries": .init(AppSettings.writesSummaries),
-                "customInstructions": .init(AppSettings.customInstructions),
                 "remembersThings": .init(AppSettings.remembersThings),
                 "notifiesNewMail": .init(AppSettings.notifiesNewMail),
                 "notifiesAutoReply": .init(AppSettings.notifiesAutoReply),
@@ -177,6 +210,16 @@ final class SettingsSync {
 
         case .onboarding:
             return ["answers": .init((user?.answers ?? [:]).mapValues(Array.init))]
+
+        case .writing:
+            // The voice this one address writes in. Nil tone means it has not
+            // been given one and inherits the signup answer, which is carried
+            // by the account-level `onboarding` scope instead.
+            var payload: [String: AnyCodable] = [
+                "customInstructions": .init(AppSettings.customInstructions),
+            ]
+            if let tone = AppSettings.mailboxTone { payload["tone"] = .init(tone) }
+            return payload
 
         case .profile:
             var payload: [String: AnyCodable] = [
@@ -215,7 +258,6 @@ final class SettingsSync {
             }
             if let value: Bool = payload["tagsIncomingMail"]?.value() { AppSettings.tagsIncomingMail = value }
             if let value: Bool = payload["writesSummaries"]?.value() { AppSettings.writesSummaries = value }
-            if let value: String = payload["customInstructions"]?.value() { AppSettings.customInstructions = value }
             if let value: Bool = payload["remembersThings"]?.value() { AppSettings.remembersThings = value }
             if let value: Bool = payload["notifiesNewMail"]?.value() { AppSettings.notifiesNewMail = value }
             if let value: Bool = payload["notifiesAutoReply"]?.value() { AppSettings.notifiesAutoReply = value }
@@ -248,6 +290,15 @@ final class SettingsSync {
             if let raw: [String: [String]] = payload["answers"]?.value() {
                 user?.replaceAnswers(raw.mapValues(Set.init))
             }
+
+        case .writing:
+            if let value: String = payload["customInstructions"]?.value() {
+                AppSettings.customInstructions = value
+            }
+            // Absent means this mailbox inherits, and that has to be applied
+            // as well: a device that had set a tone here should lose it when
+            // another device cleared it.
+            AppSettings.mailboxTone = payload["tone"]?.value()
 
         case .profile:
             if let name: String = payload["displayName"]?.value(), !name.isEmpty {
@@ -289,6 +340,10 @@ final class SettingsSync {
     private struct Row: Codable {
         var user_id: UUID?
         var scope: String
+        /// Empty for the account-level scopes. Empty rather than null because
+        /// nulls do not compare equal in a primary key, so two account-level
+        /// rows for one scope could both be inserted.
+        var mailbox_id: String
         var payload: [String: AnyCodable]
         var updated_at: Date
         var device_id: String
