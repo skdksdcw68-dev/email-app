@@ -175,6 +175,17 @@ struct MailAccount: Identifiable, Hashable, Codable, Sendable {
 
     /// What the provider calls the person.
     var displayName: String
+
+    /// Where the provider keeps their picture.
+    ///
+    /// The URL, not the bytes: this struct is JSON-encoded into
+    /// `UserDefaults` on every registry write, and an image in there is
+    /// kilobytes of base64 read and parsed on every launch whether or not
+    /// anything draws it. `AvatarStore` holds the bytes as files.
+    ///
+    /// ⚠️ Optional and expected to stay nil for IMAP, which has no such
+    /// concept -- a mail server knows a password, not a face.
+    var photoURL: URL?
     /// What the person calls the mailbox. "Work". Beats `displayName`
     /// everywhere it is shown, because two Gmail accounts have the same
     /// display name and different jobs.
@@ -198,6 +209,7 @@ struct MailAccount: Identifiable, Hashable, Codable, Sendable {
         provider: MailProvider,
         address: String,
         displayName: String,
+        photoURL: URL? = nil,
         nickname: String? = nil,
         tint: MailboxTint = .blue,
         connectedAt: Date = .now,
@@ -213,6 +225,7 @@ struct MailAccount: Identifiable, Hashable, Codable, Sendable {
         self.provider = provider
         self.address = canonical
         self.displayName = displayName
+        self.photoURL = photoURL
         self.nickname = nickname
         self.tint = tint
         self.connectedAt = connectedAt

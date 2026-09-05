@@ -472,6 +472,11 @@ final class MailStore {
         // change every cold start.
         if var existing = account, existing.address == MailboxID.canonical(session.email) {
             existing.displayName = session.displayName
+            // 🔴 Taken on every restore, and this is what gives the picture to
+            // mailboxes that were connected before the app knew to ask for it.
+            // Google also rotates the URL when somebody changes their photo,
+            // so the stored one goes stale rather than staying wrong forever.
+            existing.photoURL = session.photoURL
             existing.state = .ok
             account = existing
         } else {
@@ -483,12 +488,16 @@ final class MailStore {
                 provider: .gmail,
                 address: session.email,
                 displayName: session.displayName,
+                photoURL: session.photoURL,
                 tint: registry.nextTint,
                 connectedAt: account?.connectedAt ?? .now
             )
             if let id = account?.id { MailboxScope.activate(id) }
         }
         persistAccount()
+        if let id = account?.id {
+            AvatarStore.shared.ensure(key: id.rawValue, url: session.photoURL)
+        }
 
         // An import that was interrupted -- the app killed partway through --
         // leaves a partial mailbox that would otherwise never be completed,
@@ -580,9 +589,14 @@ final class MailStore {
                 provider: .gmail,
                 address: session.email,
                 displayName: session.displayName,
+                photoURL: session.photoURL,
                 tint: registry.nextTint,
                 connectedAt: .now
             )
+            // Started here rather than left to the first row that draws it, so
+            // the face is usually already on disk by the time the flow gets
+            // past the import screen.
+            AvatarStore.shared.ensure(key: connected.id.rawValue, url: session.photoURL)
             // The long-lived half, kept where this app can reach it. Google's
             // SDK holds exactly one session, so a second mailbox would lose
             // the first the moment it signed in -- see `TokenBroker`.

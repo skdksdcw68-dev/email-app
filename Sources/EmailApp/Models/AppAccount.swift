@@ -30,6 +30,13 @@ struct AppAccount: Identifiable, Hashable, Codable {
     /// only field guaranteed to arrive on every subsequent sign-in.
     var externalID: String? = nil
 
+    /// The picture the provider volunteered at sign-in.
+    ///
+    /// Google has one, Apple does not, and email sign-in has nothing to have
+    /// one from -- so nil is a normal answer rather than a failure. A picture
+    /// the person chose themselves beats this: see `ProfileAvatar`.
+    var photoURL: URL? = nil
+
     /// What they do, in their own words. "Freelance iOS developer", "Runs a
     /// bakery", "Second-year law student".
     ///

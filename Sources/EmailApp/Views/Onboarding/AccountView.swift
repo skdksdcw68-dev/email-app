@@ -181,7 +181,8 @@ struct AccountView: View {
                     userID: supabaseUser.id.uuidString,
                     email: supabaseUser.email,
                     displayName: supabaseUser.displayNameFromMetadata,
-                    provider: .google
+                    provider: .google,
+                    photoURL: supabaseUser.photoFromMetadata
                 )
                 await user.continueAfterAuth()
             } catch {

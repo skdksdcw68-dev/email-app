@@ -22,7 +22,7 @@ struct SwitchingOverlay: View {
                     .ignoresSafeArea()
 
                 VStack(spacing: 14) {
-                    SenderAvatar(contact: account.contact, size: 64)
+                    MailboxAvatar(account: account, size: 64)
                         .overlay { Circle().strokeBorder(account.tint.color, lineWidth: 3) }
                         .transition(.scale(scale: 0.92).combined(with: .opacity))
 
@@ -88,7 +88,7 @@ struct MailboxSwitcher: View {
             Button { isManaging = true } label: { Label("Manage accounts", systemImage: "person.2") }
         } label: {
             if let account = mail.account {
-                SenderAvatar(contact: account.contact, size: 26)
+                MailboxAvatar(account: account, size: 26)
                     .overlay { Circle().strokeBorder(account.tint.color, lineWidth: 1.5) }
             } else {
                 Image(systemName: "person.crop.circle")

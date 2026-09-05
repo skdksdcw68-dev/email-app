@@ -150,6 +150,10 @@ final class MailboxRegistry {
         Keychain.deleteAll(for: id)
         MailboxScope.purge(id)
         MailboxPaths.purge(id)
+        // Their face goes with the rest of it. Signing out is meant to leave
+        // nothing of a mailbox on the phone, and a photograph of its owner
+        // sitting in Application Support is not nothing.
+        AvatarStore.shared.forget(key: id.rawValue)
 
         if activeID == id { activeID = accounts.first?.id }
         if case .fixed(let pinned) = defaultPolicy, pinned == id {

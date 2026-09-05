@@ -132,7 +132,9 @@ struct YouView: View {
                     name: user.account?.displayName ?? "You",
                     address: user.account?.email ?? ""
                 ),
-                size: 56
+                size: 56,
+                photoURL: user.account?.photoURL,
+                photoKey: user.account.map { "app-\($0.id.uuidString)" }
             )
 
             VStack(alignment: .leading, spacing: 3) {
@@ -259,7 +261,7 @@ struct YouView: View {
                 Task { await mail.activate(account) }
             } label: {
                 HStack(spacing: 12) {
-                    SenderAvatar(contact: account.contact, size: Self.accountLeadingColumn)
+                    MailboxAvatar(account: account, size: Self.accountLeadingColumn)
                         .overlay { Circle().strokeBorder(account.tint.color, lineWidth: 2) }
 
                     VStack(alignment: .leading, spacing: 2) {

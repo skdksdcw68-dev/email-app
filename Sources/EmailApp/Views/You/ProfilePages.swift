@@ -120,7 +120,9 @@ struct EditProfileView: View {
                     name: user.account?.displayName ?? "You",
                     address: user.account?.email ?? ""
                 ),
-                size: 64
+                size: 64,
+                photoURL: user.account?.photoURL,
+                photoKey: user.account.map { "app-\($0.id.uuidString)" }
             )
 
             VStack(alignment: .leading, spacing: 6) {
@@ -165,7 +167,7 @@ struct EditProfileView: View {
             Section {
                 ForEach(mail.registry.accounts) { account in
                     HStack(spacing: 12) {
-                        SenderAvatar(contact: account.contact, size: 32)
+                        MailboxAvatar(account: account, size: 32)
                             .overlay { Circle().strokeBorder(account.tint.color, lineWidth: 1.5) }
 
                         VStack(alignment: .leading, spacing: 1) {
@@ -219,6 +221,11 @@ struct EditProfileView: View {
         memory.forgetAll()
         chats.clearAll()
         ProfilePhoto.clearAll()
+        // Both kinds of face: the one they chose, above, and every one a
+        // provider supplied. All of them, because `disconnect()` only takes
+        // the active mailbox and a picture whose account has already been
+        // deleted is the one nothing would think to remove.
+        AvatarStore.shared.forgetAll()
         user.signOut()
         Task { await AuthService.signOut() }
     }

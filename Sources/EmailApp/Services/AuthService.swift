@@ -74,12 +74,33 @@ enum AuthService {
     struct GmailSession {
         let email: String
         let displayName: String
+        /// Their actual face, as Google holds it.
+        ///
+        /// 🔴 This was here all along and was being thrown away. `profile`
+        /// carries the picture with the same `profile` scope that supplies the
+        /// name -- no Contacts scope, no extra consent, nothing to ask for.
+        /// The app was drawing a coloured letter next to a name it had taken
+        /// from the very same object.
+        ///
+        /// ⚠️ Not the same question as a *sender's* avatar. `SenderAvatar`
+        /// correctly says there is no photo to show for somebody who wrote to
+        /// you, because that would need their Contacts entry. This is the
+        /// person themselves, and they have already handed it over.
+        let photoURL: URL?
         let accessToken: String
         /// The long-lived half. Kept in the Keychain under the mailbox id, so
         /// this app can refresh a mailbox the SDK is no longer holding -- see
         /// `TokenBroker` for why that matters.
         let refreshToken: String?
     }
+
+    /// The size to ask Google for.
+    ///
+    /// Google crops and scales server-side from the `=sN-c` suffix, so asking
+    /// for what is drawn costs a fraction of the bytes. The largest circle in
+    /// the app is 64pt, which is 192px on a 3x screen; 256 covers it with room
+    /// for a bigger one later and is still a few kilobytes.
+    private static let photoPixels: UInt = 256
 
     static func connectGmail() async throws -> GmailSession {
         guard let presenter = rootViewController else { throw AuthError.noPresenter }
@@ -102,6 +123,7 @@ enum AuthService {
         return GmailSession(
             email: email,
             displayName: result.user.profile?.name ?? email,
+            photoURL: result.user.profile?.imageURL(withDimension: Self.photoPixels),
             accessToken: result.user.accessToken.tokenString,
             refreshToken: result.user.refreshToken.tokenString
         )
@@ -124,6 +146,10 @@ enum AuthService {
         return GmailSession(
             email: email,
             displayName: user.profile?.name ?? email,
+            // Carried on the silent restore too, so a mailbox connected under
+            // an older build picks its picture up on the next launch rather
+            // than needing to be signed in again.
+            photoURL: user.profile?.imageURL(withDimension: Self.photoPixels),
             accessToken: user.accessToken.tokenString,
             refreshToken: user.refreshToken.tokenString
         )
@@ -203,6 +229,16 @@ enum AuthService {
         }
     }
 
+    /// The picture the signed-in provider currently holds, if any.
+    ///
+    /// Read from the live session rather than from anything stored, so it
+    /// follows somebody changing their photo at Google. Nil for Apple and for
+    /// email sign-in, which have none to give.
+    static func currentProviderPhoto() async -> URL? {
+        guard let session = try? await SupabaseClient.shared.auth.session else { return nil }
+        return session.user.photoFromMetadata
+    }
+
     private static var rootViewController: UIViewController? {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -217,6 +253,23 @@ extension User {
     var displayNameFromMetadata: String? {
         for key in ["full_name", "name", "preferred_username"] {
             if let value = userMetadata[key]?.stringValue, !value.isEmpty { return value }
+        }
+        return nil
+    }
+
+    /// The picture the provider volunteered, if it did.
+    ///
+    /// Google writes `avatar_url` and `picture`; Apple writes neither, and
+    /// email sign-in has nothing to write. Nil is the normal answer for two
+    /// of the three providers, which is why nothing downstream may assume one
+    /// exists.
+    var photoFromMetadata: URL? {
+        for key in ["avatar_url", "picture"] {
+            if let value = userMetadata[key]?.stringValue,
+               !value.isEmpty,
+               let url = URL(string: value) {
+                return url
+            }
         }
         return nil
     }

@@ -89,7 +89,7 @@ struct MailboxListView: View {
             MailboxDetailView(mailbox: account.id)
         } label: {
             HStack(spacing: 14) {
-                SenderAvatar(contact: account.contact, size: 52)
+                MailboxAvatar(account: account, size: 52)
                     .overlay { Circle().strokeBorder(account.tint.color, lineWidth: 2) }
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -127,7 +127,7 @@ struct MailboxListView: View {
                 Task { await mail.activate(account) }
             } label: {
                 HStack(spacing: 12) {
-                    SenderAvatar(contact: account.contact, size: 38)
+                    MailboxAvatar(account: account, size: 38)
                         .overlay {
                             Circle().strokeBorder(account.tint.color, lineWidth: 2)
                         }

@@ -16,6 +16,17 @@ struct SenderAvatar: View {
     var size: CGFloat = 40
     var isMuted: Bool = false
 
+    /// Whether to fall through to the sender's *domain* logo.
+    ///
+    /// 🔴 Right for a sender, wrong for you. A message from
+    /// `billing@stripe.com` is from Stripe, and Stripe's mark is the most
+    /// useful thing to draw. Your own mailbox at your own domain is not from
+    /// your host -- and drawing your host's favicon next to your own name is
+    /// how signing in as yourself came to show you Hostinger's logo.
+    ///
+    /// A letter is the better answer there: it is at least *your* letter.
+    var allowsBrandIcon: Bool = true
+
     @State private var icon: UIImage?
 
     private static let palette: [Color] = [
@@ -65,7 +76,10 @@ struct SenderAvatar: View {
         // not inherit the view's MainActor, where a Task started from here
         // does, so the assignment below stays on the main actor.
         .onAppear {
-            guard icon == nil, let domain = BrandIcon.domain(for: contact.address) else { return }
+            guard allowsBrandIcon,
+                  icon == nil,
+                  let domain = BrandIcon.domain(for: contact.address)
+            else { return }
             Task { icon = await BrandIcon.shared.icon(for: domain) }
         }
     }

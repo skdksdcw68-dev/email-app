@@ -232,16 +232,27 @@ final class UserStore {
         userID: String,
         email: String?,
         displayName: String?,
-        provider: AppAccount.Provider
+        provider: AppAccount.Provider,
+        photoURL: URL? = nil
     ) {
+        // Same rule as the name and the email: a nil never overwrites
+        // something already held. Apple volunteers nothing on a second
+        // sign-in, and a picture that disappeared on the second launch would
+        // look like the app had lost it.
+        let keptID = account?.id ?? UUID()
         account = AppAccount(
+            id: keptID,
             email: email ?? account?.email ?? "Hidden by provider",
             displayName: displayName ?? account?.displayName ?? "You",
             provider: provider,
             createdAt: account?.createdAt ?? .now,
-            externalID: userID
+            externalID: userID,
+            photoURL: photoURL ?? account?.photoURL
         )
         persistAccount()
+        if let photo = account?.photoURL {
+            AvatarStore.shared.ensure(key: "app-\(keptID.uuidString)", url: photo)
+        }
         SettingsSync.notify(.profile)
         // 🔴 Deliberately does not advance any more.
         //
@@ -253,6 +264,35 @@ final class UserStore {
         //
         // Where somebody goes next depends on what the *account* already
         // holds, and only the server knows that. `continueAfterAuth()` asks.
+    }
+
+    /// Picks up the provider's picture for an account that already exists.
+    ///
+    /// 🔴 Without this the change would only reach people who sign in again.
+    /// `completeSignIn` runs once, at sign-in, and everybody already using
+    /// Maily is long past it -- so the field would stay nil on exactly the
+    /// accounts that prompted the work. Signing out to get a profile picture
+    /// is not a thing to ask of anybody.
+    ///
+    /// Cheap enough for every launch: reading the session is local, and the
+    /// download below is skipped entirely while the stored copy is fresh.
+    func refreshProviderPhoto() async {
+        guard var held = account else { return }
+        guard let photo = await AuthService.currentProviderPhoto() else {
+            // Nothing to take. Any picture already stored stays -- a provider
+            // that is briefly unreachable has not deleted anybody's face.
+            if let existing = held.photoURL {
+                AvatarStore.shared.ensure(key: "app-\(held.id.uuidString)", url: existing)
+            }
+            return
+        }
+
+        if held.photoURL != photo {
+            held.photoURL = photo
+            account = held
+            persistAccount()
+        }
+        AvatarStore.shared.ensure(key: "app-\(held.id.uuidString)", url: photo)
     }
 
     /// Where somebody lands once they are signed in.

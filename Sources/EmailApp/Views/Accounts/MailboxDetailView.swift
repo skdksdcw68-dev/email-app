@@ -51,7 +51,7 @@ struct MailboxDetailView: View {
     private func header(_ account: MailAccount) -> some View {
         Section {
             HStack(spacing: 14) {
-                SenderAvatar(contact: account.contact, size: 56)
+                MailboxAvatar(account: account, size: 56)
                     .overlay { Circle().strokeBorder(account.tint.color, lineWidth: 2) }
 
                 VStack(alignment: .leading, spacing: 3) {

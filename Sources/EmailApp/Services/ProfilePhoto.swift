@@ -149,30 +149,55 @@ enum ProfilePhoto {
 
 /// The person's own face, wherever it is drawn.
 ///
-/// Falls back to `SenderAvatar`, which already knows how to make a coloured
-/// circle with an initial in it. So this is only the picture case, and every
-/// screen that shows "you" gets the same answer.
+/// Three answers in a deliberate order, and the order is the whole design:
+///
+///   1. **A picture they chose.** Somebody who went to Edit profile and picked
+///      a photo meant it, and nothing may quietly replace it.
+///   2. **The one their provider holds.** Signing in with Google hands this
+///      over with the same `profile` scope that supplies the name -- it was
+///      always there and was being thrown away, so the header drew a coloured
+///      letter beside a name taken from the very same object.
+///   3. **A coloured letter**, via `SenderAvatar`, which already knows how.
+///
+/// Apple and email sign-in have no picture to give, so step 2 is genuinely
+/// absent for most people and step 3 is not a failure state.
 struct ProfileAvatar: View {
     let contact: Contact
     var size: CGFloat = 56
+    /// The provider's picture, and a stable key to file it under. Nil for a
+    /// screen that has no account to hand, which then behaves exactly as
+    /// before.
+    var photoURL: URL? = nil
+    var photoKey: String? = nil
 
     // Loaded in `onAppear` rather than as a default value: a property
     // initialiser is not main-actor isolated, and `ProfilePhoto` is.
     @State private var image: UIImage?
 
+    private var store: AvatarStore { .shared }
+
     var body: some View {
+        // Observed, so the header redraws when the download lands.
+        let _ = store.generation
+        let provided = photoKey.flatMap { store.image(for: $0) }
+
         Group {
-            if let image {
-                Image(uiImage: image)
+            if let chosen = image ?? provided {
+                Image(uiImage: chosen)
                     .resizable()
                     .scaledToFill()
                     .frame(width: size, height: size)
                     .clipShape(Circle())
             } else {
-                SenderAvatar(contact: contact, size: size)
+                // No brand lookup: this is a person, and their own email
+                // domain's logo is not their face.
+                SenderAvatar(contact: contact, size: size, allowsBrandIcon: false)
             }
         }
-        .onAppear { image = ProfilePhoto.image }
+        .onAppear {
+            image = ProfilePhoto.image
+            if let photoKey { store.ensure(key: photoKey, url: photoURL) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: ProfilePhoto.changed)) { _ in
             image = ProfilePhoto.image
         }

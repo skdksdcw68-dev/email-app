@@ -124,7 +124,8 @@ struct EmailAuthView: View {
             userID: supabaseUser.id.uuidString,
             email: supabaseUser.email ?? email,
             displayName: supabaseUser.displayNameFromMetadata,
-            provider: .email
+            provider: .email,
+            photoURL: supabaseUser.photoFromMetadata
         )
         // Routed before the sheet closes, not after: `continueAfterAuth`
         // decides which screen is underneath, and dismissing first would show

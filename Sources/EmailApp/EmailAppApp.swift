@@ -103,6 +103,10 @@ struct EmailAppApp: App {
                     // Whatever this account has that this phone does not.
                     // After the mail, because nothing on screen waits on it.
                     Task {
+                        // The face at the top of You. First in this task
+                        // because it is the one thing here that is visible
+                        // immediately, and it is usually already on disk.
+                        await user.refreshProviderPhoto()
                         await chats.pull()
                         await memory.pull()
                         await searches.pull()
