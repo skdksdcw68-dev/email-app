@@ -106,7 +106,9 @@ final class LogoDirectory {
 
     /// Namespaced so a brand's picture and a person's cannot collide in the
     /// image cache.
-    static func key(for domain: String) -> String { "brand-\(domain)" }
+    /// `nonisolated` because it is a pure string and has no business dragging
+    /// the main actor into a caller that only wants a cache key.
+    nonisolated static func key(for domain: String) -> String { "brand-\(domain)" }
 
     private static func resolve(_ domains: [String]) async -> [String: URL] {
         guard !domains.isEmpty else { return [:] }
