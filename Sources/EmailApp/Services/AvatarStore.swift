@@ -94,11 +94,15 @@ final class AvatarStore {
             return
         }
 
-        // A miss already looked at this launch. Without this a provider that
-        // is down turns every scroll into a retry storm.
-        if checked.contains(key), memory[key] == nil, Self.file(for: key) == nil {
-            return
-        }
+        // 🔴 One attempt per key per launch, whatever the outcome.
+        //
+        // This guard used to apply only to a *miss*, which left the stale-copy
+        // case unbounded: a week-old picture and a provider that cannot be
+        // reached meant a fresh download attempt every time the row scrolled
+        // back on. `inFlight` does not help -- those attempts are sequential,
+        // not concurrent. The stale copy is still drawn meanwhile, because
+        // `image(for:)` does not care how old a file is.
+        if checked.contains(key) { return }
 
         inFlight.insert(key)
         Task { [weak self] in

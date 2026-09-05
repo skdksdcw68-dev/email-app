@@ -689,4 +689,38 @@ enum GmailService {
 // and about what bulk senders do to preview text, neither of which is
 // Gmail's -- and `Message.preview` was reaching into a provider service to
 // format a string.
+
+    /// The account holder's own picture, asked of Google directly.
+    ///
+    /// 🔴 Needed because the SDK can only answer for *one* account.
+    /// `AuthService.restoreGmail()` returns whichever Google session
+    /// `GIDSignIn` currently holds, so a second connected Gmail mailbox would
+    /// never get its picture -- it would sit in the accounts list wearing a
+    /// letter next to one wearing a face, which reads as a bug rather than as
+    /// a mailbox that has no photo.
+    ///
+    /// ⚠️ Uses the mailbox's *own* token through the broker, which is the only
+    /// thing that makes it per-mailbox. `openid`, `profile` and `email` are
+    /// part of the same grant the refresh token came from -- `GIDSignIn`
+    /// requests them alongside the mail scopes in `scopes` above -- so no
+    /// extra consent is involved. A workspace that has locked profile photos
+    /// down answers without a `picture`, and nil is the right result.
+    static func profilePhoto(accessToken: String) async -> URL? {
+        guard let url = URL(string: "https://www.googleapis.com/oauth2/v3/userinfo") else {
+            return nil
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let picture = json["picture"] as? String
+        else { return nil }
+
+        // Google hands back `=s96-c`. Ask for the size actually drawn instead,
+        // which it crops and scales server-side.
+        return URL(string: picture.replacingOccurrences(of: "=s96-c", with: "=s256-c"))
+    }
 }

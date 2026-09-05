@@ -549,6 +549,30 @@ final class MailStore {
     /// instead is the *same* mailbox twice, which without a check looks like
     /// it worked and changes nothing: the id derives from the address, so it
     /// lands on the record that is already there.
+    /// Fetches a picture for every Google mailbox that has none yet.
+    ///
+    /// The active one is covered by `restore()`, which has the SDK session to
+    /// hand. This is for the others: `GIDSignIn` holds exactly one session, so
+    /// without this a second Gmail account keeps a coloured letter forever
+    /// while the first wears a photograph -- and two accounts drawn to
+    /// different rules in the same list reads as a bug.
+    ///
+    /// Only ever fills gaps. A mailbox that already has a URL is left alone;
+    /// keeping those fresh is `restore()`'s job for the one it can, and a
+    /// week's staleness on the others is not worth a call per launch.
+    func refreshMailboxPhotos() async {
+        for account in registry.accounts
+        where account.provider == .gmail && account.photoURL == nil {
+            guard let token = try? await TokenBroker.shared.accessToken(for: account),
+                  let photo = await GmailService.profilePhoto(accessToken: token)
+            else { continue }
+
+            registry.update(account.id) { $0.photoURL = photo }
+            if self.account?.id == account.id { self.account?.photoURL = photo }
+            AvatarStore.shared.ensure(key: account.id.rawValue, url: photo)
+        }
+    }
+
     /// Signs in to Google and adopts the mailbox.
     ///
     /// 🔴 `importNow` exists because of a bug that made a question pointless.

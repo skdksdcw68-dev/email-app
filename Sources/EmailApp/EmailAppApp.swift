@@ -107,6 +107,9 @@ struct EmailAppApp: App {
                         // because it is the one thing here that is visible
                         // immediately, and it is usually already on disk.
                         await user.refreshProviderPhoto()
+                        // And the mailboxes the Google SDK cannot answer for,
+                        // which is all of them except the active one.
+                        await mail.refreshMailboxPhotos()
                         await chats.pull()
                         await memory.pull()
                         await searches.pull()

@@ -293,7 +293,10 @@ struct ComposeView: View {
     private var fromRow: some View {
         HStack(spacing: 10) {
             if let account = store.account {
-                SenderAvatar(contact: Contact(name: account.displayName, address: account.address), size: 26)
+                // The mailbox this goes out as, so it wears the same face here
+                // as everywhere else -- and not, as it did, the favicon of
+                // whichever host the address happens to be on.
+                MailboxAvatar(account: account, size: 26)
                 Text(account.displayName)
                     .font(.subheadline.weight(.medium))
                 Text("·")
