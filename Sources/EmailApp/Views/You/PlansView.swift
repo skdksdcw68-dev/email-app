@@ -259,10 +259,16 @@ struct PlansView: View {
               let monthly = store.product(plan.monthlyProductID)
         else { return nil }
 
-        let twelve = monthly.price * 12
+        // `Product.price` is a `Decimal`, which is the right type for money
+        // and the wrong one for arithmetic with untyped literals -- `* 12`
+        // inferred `Float16` and would not compile. Explicit both ways, and
+        // converted to `Double` only for the final rounding.
+        let twelve = monthly.price * Decimal(12)
         guard twelve > 0, yearly.price < twelve else { return nil }
 
-        let percent = Int((((twelve - yearly.price) / twelve) * 100).rounded())
+        let saved = (twelve - yearly.price) / twelve
+        let percent = Int((NSDecimalNumber(decimal: saved).doubleValue * 100).rounded())
+        guard percent > 0 else { return nil }
         return "Save \(percent)% versus monthly"
     }
 }
