@@ -72,6 +72,7 @@ final class Store {
         do {
             products = try await Product.products(for: Self.identifiers)
             await refreshActivePlan()
+            await syncEntitlements()
         } catch {
             // Usually means the products are not approved yet, or the device
             // has no App Store account. Neither is something the person can
@@ -234,6 +235,27 @@ final class Store {
     func offersTrial(for id: String?) -> Bool {
         guard let id else { return false }
         return trialEligibleIDs.contains(id)
+    }
+
+    /// Re-presents what this Apple ID holds, so an entitlement cannot be
+    /// stranded on the device.
+    ///
+    /// 🔴 The case this exists for: Maily works signed out, so somebody can
+    /// reach the paywall and buy with no Supabase account. The purchase then
+    /// carries no `appAccountToken` and there is no bearer to fall back on, so
+    /// the server has nothing to write it against -- and nothing would ever
+    /// send it again. They would have paid, and be on Free, until they
+    /// happened to find Restore.
+    ///
+    /// Replay is free by design: the receipt is Apple's, the write is an
+    /// upsert of the same state, and consumables are gated on a transaction
+    /// id that has already been recorded.
+    private func syncEntitlements() async {
+        guard await Backend.isSignedIn else { return }
+        for await result in Transaction.currentEntitlements {
+            guard case .verified = result else { continue }
+            await tell(signed: result.jwsRepresentation)
+        }
     }
 
     /// What StoreKit says is active right now, mapped onto a plan.
