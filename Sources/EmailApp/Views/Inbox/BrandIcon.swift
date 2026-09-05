@@ -232,7 +232,10 @@ actor BrandIcon {
     /// by the resolver, and the separators are inconsistent in the wild --
     /// `v=BIMI1;l=...` and `v=BIMI1; l=...` both occur among the domains
     /// checked. So: unquote, then split on `;`, then trim.
-    private static func logoURL(in record: String) -> URL? {
+    /// Internal rather than private so `BrandIconTests` can hold it to the
+    /// real record formats seen in the wild -- with and without spaces after
+    /// the semicolons, and split across quoted strings.
+    static func logoURL(in record: String) -> URL? {
         // ⚠️ Join before unquoting. A TXT record longer than 255 bytes is
         // stored as several strings and comes back as `"...part one" "part
         // two..."`; stripping the quotes first would leave a space in the
