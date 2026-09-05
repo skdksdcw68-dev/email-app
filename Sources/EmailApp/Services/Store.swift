@@ -141,7 +141,10 @@ final class Store {
             return
         }
 
-        await tell(server: transaction)
+        // The signed JWS lives on the VerificationResult, not on the
+        // unwrapped Transaction -- the wrapper is what carries Apple's
+        // signature, which is the whole point of sending it.
+        await tell(signed: result.jwsRepresentation)
 
         // Only after the server has been told. `finish()` is the receipt
         // being torn up: an unfinished transaction is redelivered on the next
@@ -179,7 +182,7 @@ final class Store {
     /// verifies Apple's signature itself and trusts nothing the app says
     /// about what was bought. An app that could post `{"plan": "max"}` and be
     /// believed is an app that hands out Max for free.
-    private func tell(server transaction: Transaction) async {
+    private func tell(signed jws: String) async {
         var request = URLRequest(
             url: SupabaseConfig.url.appending(path: "functions/v1/appstore")
         )
@@ -188,7 +191,7 @@ final class Store {
         request.setValue("Bearer \(await Self.bearer())", forHTTPHeaderField: "Authorization")
         // `jwsRepresentation` is Apple's own signed JWS for this transaction.
         request.httpBody = try? JSONSerialization.data(
-            withJSONObject: ["signedTransaction": transaction.jwsRepresentation]
+            withJSONObject: ["signedTransaction": jws]
         )
         request.timeoutInterval = 20
 
