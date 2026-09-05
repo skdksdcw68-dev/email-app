@@ -19,22 +19,24 @@ struct AIUsageView: View {
     @Environment(MailStore.self) private var mail
 
     @State private var usage = UsageStore()
-    @State private var isConfirmingReset = false
 
     private var plan: Plan { .current }
     private var spent: Double { usage.spend?.thisMonth ?? 0 }
     private var allowance: Double { plan.monthlyAllowanceUSD }
     private var fraction: Double { allowance > 0 ? min(1, spent / allowance) : 0 }
 
-    private var counts: [(kind: AIUsage.Kind, count: Int)] { AIUsage.used }
 
     var body: some View {
+        // Three sections: where you are, what to do about it, and one way in
+        // to the detail.
+        //
+        // It had five -- the bar, the credits, a row per feature, a link to
+        // Preferences and a destructive reset button. Most of a screen about
+        // one number was other things, and the number is the point.
         List {
             periodSection
             creditsSection
-            breakdownSection
-            howItWorksSection
-            resetSection
+            detailSection
         }
         .navigationTitle("Usage")
         .navigationBarTitleDisplayMode(.inline)
@@ -129,47 +131,20 @@ struct AIUsageView: View {
         }
     }
 
-    // MARK: - What used it
+    // MARK: - The way in to the detail
 
-    @ViewBuilder
-    private var breakdownSection: some View {
-        if counts.isEmpty {
-            Section {
-                Text("Nothing yet this month.")
-                    .font(Style.rowTitle)
-                    .foregroundStyle(.secondary)
-            }
-        } else {
-            Section {
-                ForEach(counts, id: \.kind) { row in
-                    LabeledContent {
-                        Text("\(row.count)")
-                            .font(Style.rowTitle.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.kind.title).font(Style.rowTitle)
-                            Text(row.kind.detail)
-                                .font(Style.rowDetail)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-            } header: {
-                Text("What used it")
-            } footer: {
-                // These are counted on the phone and the money is counted on
-                // the server, so they can disagree -- a call made on another
-                // device is in the money and not in these.
-                Text("Counted on this phone. The amount above is counted on the server, so it includes your other devices.")
-            }
-        }
-    }
-
-    private var howItWorksSection: some View {
+    private var detailSection: some View {
         Section {
+            NavigationLink { UsageDetailView() } label: {
+                LabeledContent {
+                    Text("\(AIUsage.total)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                } label: {
+                    Text("What used it").font(Style.rowTitle)
+                }
+            }
+
             NavigationLink { AIPreferencesView() } label: {
                 Text("Turn things down").font(Style.rowTitle)
             }
@@ -178,31 +153,11 @@ struct AIUsageView: View {
         }
     }
 
-    // MARK: - Reset
-
-    private var resetSection: some View {
-        Section {
-            Button(role: .destructive) {
-                isConfirmingReset = true
-            } label: {
-                Text("Reset the counts on this phone")
-                    .font(Style.rowTitle)
-                    .foregroundStyle(Color.urgent)
-            }
-            .alert("Reset the counts?", isPresented: $isConfirmingReset) {
-                Button("Cancel", role: .cancel) {}
-                Button("Reset", role: .destructive) { AIUsage.reset() }
-            } message: {
-                Text("Clears the list above on this phone. What you have spent is recorded on the server and is not affected.")
-            }
-        }
-    }
-
     // MARK: - Formatting
 
     /// Four decimal places, because one classification costs a fraction of a
     /// cent and $0.00 reads as broken.
-    private static func money(_ amount: Double) -> String {
+    static func money(_ amount: Double) -> String {
         amount >= 1
             ? String(format: "$%.2f", amount)
             : String(format: "$%.4f", amount)
@@ -216,5 +171,72 @@ struct AIUsageView: View {
             to: calendar.dateInterval(of: .month, for: .now)?.start ?? .now
         ) else { return "" }
         return "Renews \(next.formatted(.dateTime.day().month(.abbreviated)))"
+    }
+}
+
+/// The per-feature counts, moved off the main screen.
+///
+/// They answer a real question -- *what* is spending this -- but it is the
+/// second question somebody asks, and it was taking four times the room of
+/// the first.
+struct UsageDetailView: View {
+    @State private var isConfirmingReset = false
+
+    private var counts: [(kind: AIUsage.Kind, count: Int)] { AIUsage.used }
+
+    var body: some View {
+        List {
+            if counts.isEmpty {
+                Section {
+                    Text("Nothing yet this month.")
+                        .font(Style.rowTitle)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Section {
+                    ForEach(counts, id: \.kind) { row in
+                        LabeledContent {
+                            Text("\(row.count)")
+                                .font(Style.rowTitle.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.kind.title).font(Style.rowTitle)
+                                Text(row.kind.detail)
+                                    .font(Style.rowDetail)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                } footer: {
+                    // Counted on the phone; the money is counted on the
+                    // server. They can disagree, and the reason is worth
+                    // saying: a call made on another device is in the money
+                    // and not in these.
+                    Text("Counted on this phone. The amount on the Usage screen is counted on the server, so it includes your other devices.")
+                }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    isConfirmingReset = true
+                } label: {
+                    Text("Reset these counts")
+                        .font(Style.rowTitle)
+                        .foregroundStyle(Color.urgent)
+                }
+            }
+        }
+        .navigationTitle("What used it")
+        .navigationBarTitleDisplayMode(.inline)
+        .hidesTabBar()
+        .alert("Reset the counts?", isPresented: $isConfirmingReset) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) { AIUsage.reset() }
+        } message: {
+            Text("Clears this list on this phone. What you have spent is recorded on the server and is not affected.")
+        }
     }
 }

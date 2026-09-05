@@ -454,42 +454,96 @@ struct AutoReplySetupView: View {
     private var boundariesStep: some View {
         AutoReplyStep("What should always come back to you?",
                    "These beat everything else. Even where a message looks answerable, anything here stops and waits.") {
-            VStack(spacing: 9) {
+            // Switches, because every line here is independently on or off.
+            //
+            // They were cards with a circle on the right, which is the shape
+            // of a *choice between* things -- and eleven of them meant eleven
+            // tall cards to scroll for what is really a list of switches.
+            VStack(spacing: 0) {
                 ForEach(AutoReplyConfig.Boundary.allCases) { boundary in
-                    OptionRowCard(
-                        label: boundary.title,
-                        symbol: nil,
-                        isSelected: config.mustAsk.contains(boundary),
-                        note: boundary.isRecommended ? "Recommended" : nil
-                    ) {
-                        if config.mustAsk.contains(boundary) {
-                            config.mustAsk.remove(boundary)
-                        } else {
-                            config.mustAsk.insert(boundary)
+                    Toggle(isOn: Binding(
+                        get: { config.mustAsk.contains(boundary) },
+                        set: { isOn in
+                            if isOn { config.mustAsk.insert(boundary) }
+                            else { config.mustAsk.remove(boundary) }
+                            invalidateUnderstanding()
                         }
-                        invalidateUnderstanding()
+                    )) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(boundary.title)
+                                .font(Style.rowTitle)
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if boundary.isRecommended {
+                                Text("Recommended")
+                                    .font(Style.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 9)
+
+                    if boundary != AutoReplyConfig.Boundary.allCases.last {
+                        Divider()
                     }
                 }
             }
+            .padding(.horizontal, Style.rowGutter)
+            .cardBackground()
         }
     }
 
     private var unsureStep: some View {
         AutoReplyStep("When Maily isn't sure, what should it do?",
                    "This is what happens whenever a message is near the line rather than clearly inside it.") {
-            VStack(spacing: 9) {
+            // ⚠️ Rows in a card like the boundaries screen, but a checkmark
+            // rather than a switch -- deliberately, and it is the one place
+            // "make it toggles" does not apply.
+            //
+            // Exactly one of these is true at a time. Four switches would mean
+            // turning one on silently turns another off, which no switch
+            // anywhere else does, and nothing would stop all four being off --
+            // leaving no answer to a question that must have one.
+            //
+            // So it reads the same as the switches above it and behaves like
+            // the choice it is.
+            VStack(spacing: 0) {
                 ForEach(AutoReplyConfig.Escalation.allCases) { option in
-                    OptionRowCard(
-                        label: option.title,
-                        detail: option.detail,
-                        symbol: nil,
-                        isSelected: config.whenUnsure == option
-                    ) {
+                    Button {
                         config.whenUnsure = option
                         invalidateUnderstanding()
+                    } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(option.title)
+                                    .font(Style.rowTitle)
+                                    .foregroundStyle(.primary)
+                                Text(option.detail)
+                                    .font(Style.rowDetail)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 8)
+                            if config.whenUnsure == option {
+                                Image(systemName: "checkmark")
+                                    .font(.footnote.weight(.bold))
+                                    .foregroundStyle(.tint)
+                                    .padding(.top, 2)
+                            }
+                        }
+                        .padding(.vertical, 11)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    if option != AutoReplyConfig.Escalation.allCases.last {
+                        Divider()
                     }
                 }
             }
+            .padding(.horizontal, Style.rowGutter)
+            .cardBackground()
         }
     }
 
