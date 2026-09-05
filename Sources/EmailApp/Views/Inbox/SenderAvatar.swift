@@ -39,6 +39,11 @@ struct SenderAvatar: View {
     var allowsBrandIcon: Bool = true
 
     @State private var icon: UIImage?
+    /// Whether `icon` is a photograph of a person rather than a company mark.
+    /// A logo wants a white plate and an inset; a face wants to fill the
+    /// circle, and treating a Gravatar as a logo puts somebody's head in a
+    /// little box.
+    @State private var iconIsPhoto = false
 
     private static let palette: [Color] = [
         Color(uiColor: .systemBlue), Color(uiColor: .systemIndigo),
@@ -89,14 +94,9 @@ struct SenderAvatar: View {
     var body: some View {
         Group {
             if let face {
-                Image(uiImage: face)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: size, height: size)
-                    .clipShape(Circle())
-                    .opacity(isMuted ? 0.85 : 1)
+                photo(face)
             } else if let icon {
-                brandIcon(icon)
+                iconIsPhoto ? AnyView(photo(icon)) : AnyView(brandIcon(icon))
             } else {
                 letterAvatar
             }
@@ -119,16 +119,41 @@ struct SenderAvatar: View {
             if let photo = people.photo(for: contact.address) {
                 avatars.ensure(key: Self.key(for: contact.address), url: photo)
                 // A person with a photograph has no use for their employer's
-                // logo, so the brand lookup is not even started.
+                // logo, so nothing below is even started.
                 return
             }
 
-            guard allowsBrandIcon,
-                  icon == nil,
-                  let domain = BrandIcon.domain(for: contact.address)
-            else { return }
-            Task { icon = await BrandIcon.shared.icon(for: domain) }
+            guard allowsBrandIcon, icon == nil else { return }
+
+            if let domain = BrandIcon.domain(for: contact.address) {
+                Task { icon = await BrandIcon.shared.icon(for: domain) }
+            } else {
+                // No company to look up, which means a personal address --
+                // gmail, icloud, a mail server of their own. Gravatar is the
+                // one place a person publishes a picture that can be found
+                // from an address alone, and it costs no permission to ask.
+                let address = contact.address
+                Task {
+                    if let found = await BrandIcon.shared.gravatar(for: address) {
+                        iconIsPhoto = true
+                        icon = found
+                    }
+                }
+            }
         }
+    }
+
+    /// A face, filling the circle. No plate and no inset -- those are for
+    /// marks that have to survive being any shape.
+    private func photo(_ image: UIImage) -> some View {
+        // No `isMuted` fade here: the `Group` in `body` already applies it to
+        // whichever tier drew, and doing it twice compounds to 0.72 rather
+        // than the 0.85 a read message is meant to sit at.
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFill()
+            .frame(width: size, height: size)
+            .clipShape(Circle())
     }
 
     /// On a white plate, inset like an app icon. Logos come in every shape and
