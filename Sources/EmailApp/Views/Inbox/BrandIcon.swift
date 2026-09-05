@@ -151,6 +151,16 @@ actor BrandIcon {
     /// Sources in descending order of what they are worth, stopping as soon as
     /// one is good enough.
     private static func fetchBest(_ domain: String) async -> UIImage? {
+        // 🔴 BIMI first, because it is the only source that is *authoritative*
+        // rather than scraped. The company published this logo itself, against
+        // a DMARC-authenticated domain, and for a Verified Mark Certificate a
+        // trademark office checked it. It is what Gmail draws.
+        //
+        // It is also the source that rescues exactly the cases a favicon
+        // handles worst. Measured: TikTok's favicon is 32px and eBay's is 16,
+        // and both publish a proper BIMI logo.
+        if let official = await bimi(domain) { return official }
+
         let candidates = [
             // Published for the home screen, so it is designed to be looked at
             // rather than squeezed into a browser tab. 400×400 on tiktok.com.
@@ -169,6 +179,85 @@ actor BrandIcon {
             if let best, best.size.width >= goodEnoughPixels { return best }
         }
         return best
+    }
+
+    // MARK: - BIMI
+
+    /// The logo a company publishes for its own mail, if it has one.
+    ///
+    /// The lookup is a DNS TXT record at `default._bimi.<domain>`, which an
+    /// app cannot query directly -- Foundation has no DNS API. Google's
+    /// DNS-over-HTTPS resolver answers the same question over plain HTTPS,
+    /// which is a normal request to a host the app already talks to.
+    ///
+    /// The record looks like:
+    ///
+    ///     v=BIMI1; l=https://.../logo.svg; a=https://.../cert.pem
+    ///
+    /// `l` is the logo. `a` is the certificate proving the trademark, and is
+    /// deliberately **not** checked here: verifying a VMC is what decides
+    /// whether to show a blue tick, and this only decides which picture to
+    /// draw. A domain that publishes a logo under its own DMARC-authenticated
+    /// name is a good enough source for an avatar.
+    private static func bimi(_ domain: String) async -> UIImage? {
+        guard let query = URL(
+            string: "https://dns.google/resolve?name=default._bimi.\(domain)&type=TXT"
+        ) else { return nil }
+
+        var request = URLRequest(url: query)
+        request.timeoutInterval = 6
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let payload = try? JSONDecoder().decode(DNSAnswer.self, from: data),
+              let record = payload.Answer?.compactMap({ $0.data }).first(where: {
+                  $0.contains("v=BIMI1")
+              })
+        else { return nil }
+
+        guard let logo = logoURL(in: record) else { return nil }
+
+        var fetch = URLRequest(url: logo)
+        fetch.timeoutInterval = 8
+        guard let (svg, logoResponse) = try? await URLSession.shared.data(for: fetch),
+              let logoHTTP = logoResponse as? HTTPURLResponse, logoHTTP.statusCode == 200
+        else { return nil }
+
+        return await SVGRasterizer.image(from: svg)
+    }
+
+    /// Pulls `l=` out of the record.
+    ///
+    /// The value arrives quoted, sometimes split into several quoted strings
+    /// by the resolver, and the separators are inconsistent in the wild --
+    /// `v=BIMI1;l=...` and `v=BIMI1; l=...` both occur among the domains
+    /// checked. So: unquote, then split on `;`, then trim.
+    private static func logoURL(in record: String) -> URL? {
+        // ⚠️ Join before unquoting. A TXT record longer than 255 bytes is
+        // stored as several strings and comes back as `"...part one" "part
+        // two..."`; stripping the quotes first would leave a space in the
+        // middle of the URL and quietly produce a broken link. The records
+        // seen today are short enough to arrive whole, but a VMC URL is long
+        // and one more certificate authority with a longer path would do it.
+        let joined = record.replacingOccurrences(of: "\" \"", with: "")
+        let unquoted = joined.replacingOccurrences(of: "\"", with: "")
+        for field in unquoted.split(separator: ";") {
+            let trimmed = field.trimmingCharacters(in: .whitespaces)
+            guard trimmed.lowercased().hasPrefix("l=") else { continue }
+            let value = String(trimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+            // An empty `l=` is legal and means "we have no logo", which is a
+            // deliberate statement rather than a malformed record.
+            guard !value.isEmpty, let url = URL(string: value), url.scheme == "https" else {
+                return nil
+            }
+            return url
+        }
+        return nil
+    }
+
+    private struct DNSAnswer: Decodable {
+        var Answer: [Record]?
+        struct Record: Decodable { var data: String? }
     }
 
     private static func load(_ string: String) async -> UIImage? {
