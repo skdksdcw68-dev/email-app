@@ -1,4 +1,4 @@
-app_identifier("emailapptest")
+app_identifier("com.netro.maily")
 team_id(ENV["APPLE_TEAM_ID"])
 itc_team_id(ENV["APPLE_TEAM_ID"])
 

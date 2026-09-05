@@ -1,6 +1,6 @@
 default_platform(:ios)
 
-BUNDLE_ID   = "emailapptest"
+BUNDLE_ID   = "com.netro.maily"
 XCODEPROJ   = "EmailApp.xcodeproj"
 SCHEME      = "EmailApp"
 PROFILE     = "email-app AppStore"

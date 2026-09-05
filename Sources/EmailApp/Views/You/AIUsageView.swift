@@ -64,14 +64,9 @@ struct AIUsageView: View {
                     .tint(fraction >= 1 ? Color.urgent : (fraction > 0.8 ? Color.warning : Color.accentColor))
 
                 HStack(alignment: .firstTextBaseline) {
-                    // The money, plainly. Four decimal places because a
-                    // single classification costs a fraction of a cent, and
-                    // rounding it to £0.00 would make the screen look broken
-                    // for anybody who has not used it much.
-                    Text("\(Self.money(spent)) of \(Self.money(allowance))")
+                    Text(Self.remaining(fraction))
                         .font(Style.rowDetail)
                         .foregroundStyle(.secondary)
-                        .monospacedDigit()
                     Spacer(minLength: 8)
                     Text(Self.renewal)
                         .font(Style.rowDetail)
@@ -155,12 +150,22 @@ struct AIUsageView: View {
 
     // MARK: - Formatting
 
-    /// Four decimal places, because one classification costs a fraction of a
-    /// cent and $0.00 reads as broken.
-    static func money(_ amount: Double) -> String {
-        amount >= 1
-            ? String(format: "$%.2f", amount)
-            : String(format: "$%.4f", amount)
+    /// 🔴 **No money, anywhere on this screen.**
+    ///
+    /// It showed "$0.0043 of $6.00", and that is the wrong unit for a person
+    /// twice over. It is the *operator's* provider cost, not what they paid,
+    /// so it looks like a bill and is not one. And it invites the question a
+    /// percentage never does -- why one chat costs two hundred times what
+    /// sorting an email costs -- which is a fact about token pricing and not
+    /// something anybody signed up to learn.
+    ///
+    /// The dollars are still tracked exactly, on the server, to four decimal
+    /// places. They are the denominator behind this and are never drawn.
+    private static func remaining(_ fraction: Double) -> String {
+        let left = Int(((1 - fraction) * 100).rounded())
+        if left <= 0 { return "None left this month" }
+        if left >= 99 { return "Barely touched" }
+        return "\(left)% left"
     }
 
     /// The first of next month, which is when a month's allowance comes back.

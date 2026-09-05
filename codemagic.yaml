@@ -122,7 +122,7 @@ workflows:
       # never fetched any. The signing step below does it explicitly instead.
 
       vars:
-        BUNDLE_ID: emailapptest
+        BUNDLE_ID: com.netro.maily
         # Where this provider's build numbers start.
         #
         # App Store Connect refuses a build number it has already seen, and it

@@ -88,11 +88,33 @@ enum Plan: String, Codable, CaseIterable, Identifiable {
     }
 
     /// How much AI a plan may use in a month, in dollars of provider cost.
+    ///
+    /// 🔴 **Never shown to anybody.** This is the denominator behind a
+    /// percentage and nothing else -- see the note on `AIUsageView`. It is the
+    /// operator's cost, not a price, and the two are not the same number:
+    /// Apple takes its cut of the price before any of it arrives.
+    ///
+    /// Set against real measured costs. A message sorted by `gpt-5-nano` runs
+    /// about $0.00005 and a chat exchange on `gpt-5.6-luna` about $0.009, so
+    /// $6 is roughly six hundred chat exchanges in a month -- far more than a
+    /// heavy user reaches, which is the point of a ceiling nobody normally
+    /// touches.
     var monthlyAllowanceUSD: Double {
         switch self {
-        case .free: 0.50
-        case .pro:  10
-        case .max:  40
+        case .free: 0.30
+        case .pro:  6
+        case .max:  20
+        }
+    }
+
+    /// What it sells for. Shown only as Apple's own localised price string at
+    /// the point of purchase -- this is here so the tiers are written down in
+    /// one place, not to be drawn.
+    var priceTier: String {
+        switch self {
+        case .free: "—"
+        case .pro:  "14.99"
+        case .max:  "39.99"
         }
     }
 
