@@ -38,12 +38,7 @@ struct SenderAvatar: View {
     /// A letter is the better answer there: it is at least *your* letter.
     var allowsBrandIcon: Bool = true
 
-    @State private var icon: UIImage?
-    /// Whether `icon` is a photograph of a person rather than a company mark.
-    /// A logo wants a white plate and an inset; a face wants to fill the
-    /// circle, and treating a Gravatar as a logo puts somebody's head in a
-    /// little box.
-    @State private var iconIsPhoto = false
+    private var logos: LogoDirectory { .shared }
 
     private static let palette: [Color] = [
         Color(uiColor: .systemBlue), Color(uiColor: .systemIndigo),
@@ -91,12 +86,35 @@ struct SenderAvatar: View {
         "person-\(address.lowercased())"
     }
 
+    /// The company's logo, once the server has said which one and the bytes
+    /// have arrived.
+    private var logo: UIImage? {
+        let _ = logos.generation
+        let _ = avatars.generation
+        guard allowsBrandIcon,
+              let domain = BrandIcon.domain(for: contact.address),
+              logos.url(for: domain) != nil
+        else { return nil }
+        return avatars.image(for: LogoDirectory.key(for: domain))
+    }
+
+    /// A Gravatar, for a personal address with no company behind it.
+    private var gravatar: UIImage? {
+        let _ = avatars.generation
+        guard allowsBrandIcon, BrandIcon.domain(for: contact.address) == nil else { return nil }
+        return avatars.image(for: BrandIcon.gravatarKey(for: contact.address))
+    }
+
     var body: some View {
         Group {
+            // In order: the person, then their company, then whatever they
+            // published themselves, then a letter.
             if let face {
                 photo(face)
-            } else if let icon {
-                iconIsPhoto ? AnyView(photo(icon)) : AnyView(brandIcon(icon))
+            } else if let logo {
+                brandIcon(logo)
+            } else if let gravatar {
+                photo(gravatar)
             } else {
                 letterAvatar
             }
@@ -104,42 +122,44 @@ struct SenderAvatar: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .opacity(isMuted ? 0.85 : 1)
-        .animation(.easeOut(duration: 0.18), value: icon != nil)
-        // The letter shows first and the logo replaces it if one turns up.
-        // Waiting on the network before drawing anything would leave a row of
-        // holes on every cold scroll.
+        .animation(.easeOut(duration: 0.18), value: logo != nil)
+        // 🔴 Nothing is fetched here any more.
+        //
+        // This used to start a DNS lookup and up to three image requests, per
+        // row, on every appearance. All of that is one batched call to the
+        // server now: `need` says "this domain is on screen", the requests are
+        // collected for a moment, and one round trip answers the whole list.
         //
         // onAppear rather than .task: .task's closure is @Sendable and does
-        // not inherit the view's MainActor, where a Task started from here
-        // does, so the assignment below stays on the main actor.
-        .onAppear {
-            // The face first, and it is free to ask for: the contact list is
-            // already in memory, and `ensure` returns immediately once the
-            // image is on disk.
-            if let photo = people.photo(for: contact.address) {
-                avatars.ensure(key: Self.key(for: contact.address), url: photo)
-                // A person with a photograph has no use for their employer's
-                // logo, so nothing below is even started.
-                return
-            }
+        // not inherit the view's MainActor, and every store touched here is
+        // main-actor isolated.
+        .onAppear { ask() }
+    }
 
-            guard allowsBrandIcon, icon == nil else { return }
+    private func ask() {
+        // The face first. Free to check -- the contact list is already in
+        // memory -- and somebody with a photograph has no use for their
+        // employer's logo, so nothing else is started.
+        if let photo = people.photo(for: contact.address) {
+            avatars.ensure(key: Self.key(for: contact.address), url: photo)
+            return
+        }
 
-            if let domain = BrandIcon.domain(for: contact.address) {
-                Task { icon = await BrandIcon.shared.icon(for: domain) }
-            } else {
-                // No company to look up, which means a personal address --
-                // gmail, icloud, a mail server of their own. Gravatar is the
-                // one place a person publishes a picture that can be found
-                // from an address alone, and it costs no permission to ask.
-                let address = contact.address
-                Task {
-                    if let found = await BrandIcon.shared.gravatar(for: address) {
-                        iconIsPhoto = true
-                        icon = found
-                    }
-                }
+        guard allowsBrandIcon else { return }
+
+        if let domain = BrandIcon.domain(for: contact.address) {
+            // Enqueues, and the batch goes out once the list settles.
+            logos.need(domain)
+            if let url = logos.url(for: domain) {
+                avatars.ensure(key: LogoDirectory.key(for: domain), url: url)
             }
+        } else if let url = BrandIcon.gravatarURL(for: contact.address) {
+            // A personal address -- gmail, icloud, their own mail server.
+            // ⚠️ Deliberately not routed through Maily's server: that would
+            // mean sending a list of who writes to somebody to a server with
+            // no other reason to know it. The hash is made on the phone and
+            // goes straight to Gravatar.
+            avatars.ensure(key: BrandIcon.gravatarKey(for: contact.address), url: url)
         }
     }
 

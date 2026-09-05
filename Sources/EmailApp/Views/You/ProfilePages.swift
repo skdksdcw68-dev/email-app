@@ -229,6 +229,10 @@ struct EditProfileView: View {
         // And the contact list those faces were matched against. It is
         // somebody's address book; it does not outlive their account.
         PeopleDirectory.shared.forgetAll()
+        // The domain-to-logo map too. It holds no addresses -- only which
+        // companies write to this phone -- but that is still a list about
+        // somebody, and signing out means leaving nothing behind.
+        LogoDirectory.shared.forgetAll()
         user.signOut()
         Task { await AuthService.signOut() }
     }

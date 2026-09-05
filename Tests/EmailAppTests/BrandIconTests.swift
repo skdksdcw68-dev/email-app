@@ -63,48 +63,6 @@ final class BrandIconTests: XCTestCase {
         XCTAssertNil(BrandIcon.domain(for: "someone@mail.gmail.com"))
     }
 
-    // MARK: - Reading a BIMI record
-
-    /// The two spacings both occur in the wild. Checked against the live
-    /// records: eBay publishes `v=BIMI1;l=...` with no spaces, Bank of America
-    /// publishes `v=BIMI1; l=...` with them.
-    func testLogoIsReadWithAndWithoutSpaces() {
-        XCTAssertEqual(
-            BrandIcon.logoURL(in: "v=BIMI1;l=https://bimi.entrust.net/tiktok.com/logo.svg;a=https://x/c.pem"),
-            URL(string: "https://bimi.entrust.net/tiktok.com/logo.svg")
-        )
-        XCTAssertEqual(
-            BrandIcon.logoURL(in: "v=BIMI1; l=https://vmc.digicert.com/a.svg; a=https://vmc.digicert.com/a.pem"),
-            URL(string: "https://vmc.digicert.com/a.svg")
-        )
-    }
-
-    /// A TXT record over 255 bytes arrives as several quoted strings. Joining
-    /// them before unquoting is the difference between a URL and a URL with a
-    /// space in the middle of it.
-    func testSplitRecordIsJoinedBeforeUnquoting() {
-        let split = "\"v=BIMI1; l=https://vmc.digicert.com/very-long-\" \"identifier.svg; a=https://x/c.pem\""
-        XCTAssertEqual(
-            BrandIcon.logoURL(in: split),
-            URL(string: "https://vmc.digicert.com/very-long-identifier.svg")
-        )
-    }
-
-    /// An empty `l=` is legal and means "we deliberately have no logo".
-    func testEmptyLogoIsNotAURL() {
-        XCTAssertNil(BrandIcon.logoURL(in: "v=BIMI1; l=; a=https://x/c.pem"))
-    }
-
-    func testRecordWithoutALogoIsNil() {
-        XCTAssertNil(BrandIcon.logoURL(in: "v=BIMI1; a=https://x/c.pem"))
-    }
-
-    /// ⚠️ A logo has to come over TLS. Anything else is a picture an attacker
-    /// on the network chooses, drawn next to a sender's name.
-    func testInsecureLogoIsRefused() {
-        XCTAssertNil(BrandIcon.logoURL(in: "v=BIMI1; l=http://example.com/logo.svg"))
-    }
-
     // MARK: - Malformed addresses
 
     func testAddressWithoutAtSignIsSkipped() {
@@ -121,5 +79,43 @@ final class BrandIconTests: XCTestCase {
 
     func testTrailingAtSignIsSkipped() {
         XCTAssertNil(BrandIcon.domain(for: "abel@"))
+    }
+}
+
+/// Gravatar is the one picture still fetched from the phone, and the reason is
+/// privacy rather than convenience: it is keyed on the *address*, and routing
+/// it through Maily's own server would put a list of who writes to somebody on
+/// a server with no other reason to know.
+final class GravatarTests: XCTestCase {
+
+    /// 🔴 `d=404` is load-bearing. Without it Gravatar answers every miss with
+    /// a generated pattern, so every person in the inbox gets a procedural
+    /// blob instead of their own initial.
+    func testMissesAreRefusedRatherThanInvented() {
+        let url = BrandIcon.gravatarURL(for: "abel@gmail.com")
+        XCTAssertEqual(url?.query?.contains("d=404"), true)
+    }
+
+    /// The hash is of the trimmed, lowercased address -- Gravatar's own rule.
+    /// Getting it wrong means every lookup misses and nobody ever notices,
+    /// because a miss looks exactly like "they have no Gravatar".
+    func testAddressIsNormalisedBeforeHashing() {
+        XCTAssertEqual(
+            BrandIcon.gravatarURL(for: "  Abel@Gmail.COM "),
+            BrandIcon.gravatarURL(for: "abel@gmail.com")
+        )
+    }
+
+    func testSomethingThatIsNotAnAddressIsRefused() {
+        XCTAssertNil(BrandIcon.gravatarURL(for: "not-an-address"))
+    }
+
+    /// Namespaced, or a person's Gravatar and their company's logo would
+    /// overwrite each other in the image cache.
+    func testKeyIsNamespaced() {
+        XCTAssertNotEqual(
+            BrandIcon.gravatarKey(for: "a@b.com"),
+            LogoDirectory.key(for: "b.com")
+        )
     }
 }

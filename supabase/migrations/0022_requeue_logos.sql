@@ -1,0 +1,13 @@
+-- Re-resolve everything cached before the rasteriser race was fixed.
+--
+-- The `logos` function cached a "have we tried loading the SVG rasteriser yet"
+-- boolean instead of the loading promise, so every domain resolved in the same
+-- batch as the first one concluded the rasteriser had failed and fell back to
+-- a favicon. LinkedIn and PayPal both publish a BIMI logo and both got a 64px
+-- favicon instead.
+--
+-- Nothing errored -- the logos were just quietly worse -- so the rows have to
+-- be re-resolved rather than waiting for them to age out in ninety days.
+-- Dating them into the past is enough: the function treats anything older than
+-- its window as stale and looks it up again on the next request.
+update public.brand_logos set resolved_at = timestamptz '2000-01-01';
