@@ -99,24 +99,61 @@ enum Plan: String, Codable, CaseIterable, Identifiable {
     /// $6 is roughly six hundred chat exchanges in a month -- far more than a
     /// heavy user reaches, which is the point of a ceiling nobody normally
     /// touches.
+    ///
+    /// The margins these leave, after Apple's 15%:
+    ///
+    ///     Pro  $14.99 -> $12.74 net, $6 ceiling  -> 53%
+    ///     Max  $29.99 -> $25.49 net, $11 ceiling -> 57%
     var monthlyAllowanceUSD: Double {
         switch self {
         case .free: 0.30
         case .pro:  6
-        case .max:  20
+        case .max:  11
         }
     }
 
-    /// What it sells for. Shown only as Apple's own localised price string at
-    /// the point of purchase -- this is here so the tiers are written down in
-    /// one place, not to be drawn.
-    var priceTier: String {
+    /// How many mailboxes may be connected.
+    ///
+    /// The business signal, and the reason Max is not just "more of the same".
+    /// An agency or a small team runs many addresses; one person runs one or
+    /// two. Multi-mailbox already works, so this is a limit rather than a
+    /// feature -- which is the cheap kind of tier to draw.
+    var mailboxLimit: Int {
         switch self {
-        case .free: "—"
-        case .pro:  "14.99"
-        case .max:  "39.99"
+        case .free: 1
+        case .pro:  3
+        case .max:  .max
         }
     }
+
+    /// Whether chat and drafting get the better model.
+    ///
+    /// ⚠️ Costs as well as sells. `gpt-5.6-luna` is roughly twenty-five times
+    /// `gpt-5-nano` per token, so this is most of why Max's ceiling is not
+    /// simply double Pro's -- the same allowance buys fewer answers.
+    var usesPriorityModel: Bool { self == .max }
+
+    /// The App Store product this plan is bought as. Nil for free, which is
+    /// not bought.
+    var monthlyProductID: String? {
+        switch self {
+        case .free: nil
+        case .pro:  "com.netro.maily.pro.monthly"
+        case .max:  "com.netro.maily.max.monthly"
+        }
+    }
+
+    var yearlyProductID: String? {
+        switch self {
+        case .free: nil
+        case .pro:  "com.netro.maily.pro.yearly"
+        case .max:  "com.netro.maily.max.yearly"
+        }
+    }
+
+    /// Everything that can be bought, highest tier first -- which is the order
+    /// a paywall shows them in.
+    static var purchasable: [Plan] { [.max, .pro] }
 
     /// The one Maily runs on today.
     ///
