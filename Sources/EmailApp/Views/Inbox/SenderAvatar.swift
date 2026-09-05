@@ -1,13 +1,24 @@
 import SwiftUI
 import UIKit
 
-/// A sender's logo where one genuinely exists, and their initial where it
-/// does not.
+/// A sender's face where there is one, their company's logo where there is
+/// not, and their initial otherwise.
 ///
-/// Gmail's own app shows photographs here because Google already holds your
-/// Contacts and their profile pictures -- a different API and a different
-/// scope than reading mail. With mail scopes alone there is no photo to show,
-/// so a company gets its logo and a person gets a coloured letter.
+/// The three tiers are in that order for a reason: a photograph of the person
+/// beats their employer's mark, and both beat a letter.
+///
+/// ## Where the photograph comes from
+///
+/// Gmail's own app shows faces because Google already holds your Contacts and
+/// their pictures -- a different API and a different permission from reading
+/// mail. Maily now asks for that permission too, optionally, so this tier
+/// exists for anybody who granted it. See `PeopleDirectory`.
+///
+/// ⚠️ It covers people **in** your contacts, which is not most of an inbox.
+/// Newsletters and no-reply addresses are not contacts of anybody's, and
+/// Google's auto-collected "Other contacts" list carries no photos at all. So
+/// the logo and the letter are not fallbacks for a rare failure -- they remain
+/// what most rows show.
 ///
 /// The letter colour is a hash of the address, so a sender is always the same
 /// colour and two senders rarely collide.
@@ -56,9 +67,35 @@ struct SenderAvatar: View {
         return first.map { String($0).uppercased() } ?? "?"
     }
 
+    private var people: PeopleDirectory { .shared }
+    private var avatars: AvatarStore { .shared }
+
+    /// The person's own photograph, if Contacts had one and it has been
+    /// downloaded. Both stores are read here so this view redraws when either
+    /// the contact list or the image lands.
+    private var face: UIImage? {
+        let _ = people.generation
+        let _ = avatars.generation
+        guard people.photo(for: contact.address) != nil else { return nil }
+        return avatars.image(for: Self.key(for: contact.address))
+    }
+
+    /// Namespaced, so a person's face and a mailbox's cannot collide in the
+    /// avatar folder -- the same address can be both.
+    private static func key(for address: String) -> String {
+        "person-\(address.lowercased())"
+    }
+
     var body: some View {
         Group {
-            if let icon {
+            if let face {
+                Image(uiImage: face)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+                    .opacity(isMuted ? 0.85 : 1)
+            } else if let icon {
                 brandIcon(icon)
             } else {
                 letterAvatar
@@ -76,6 +113,16 @@ struct SenderAvatar: View {
         // not inherit the view's MainActor, where a Task started from here
         // does, so the assignment below stays on the main actor.
         .onAppear {
+            // The face first, and it is free to ask for: the contact list is
+            // already in memory, and `ensure` returns immediately once the
+            // image is on disk.
+            if let photo = people.photo(for: contact.address) {
+                avatars.ensure(key: Self.key(for: contact.address), url: photo)
+                // A person with a photograph has no use for their employer's
+                // logo, so the brand lookup is not even started.
+                return
+            }
+
             guard allowsBrandIcon,
                   icon == nil,
                   let domain = BrandIcon.domain(for: contact.address)

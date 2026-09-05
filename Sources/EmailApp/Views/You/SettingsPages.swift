@@ -18,6 +18,9 @@ struct AppSettingsView: View {
     @Environment(AIMemory.self) private var memory
 
     @State private var isConfirmingSignOut = false
+    /// Read once on appear rather than on every draw: it asks the Google SDK,
+    /// and a view body is not the place to.
+    @State private var hasContacts = true
 
     private var config: AutoReplyConfig { autoReply.config }
 
@@ -41,6 +44,8 @@ struct AppSettingsView: View {
             } header: {
                 Text("Account")
             }
+
+            senderPhotos
 
             // Everything Auto-Reply is configured to do. You carries whether
             // it is running and what is waiting; the shape of it is set here
@@ -128,6 +133,9 @@ struct AppSettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
+        // Defaults to true so the row does not flash into view for somebody
+        // who already granted it.
+        .onAppear { hasContacts = AuthService.hasContactsAccess }
         .alert("Sign out of this mailbox?", isPresented: $isConfirmingSignOut) {
             Button("Cancel", role: .cancel) {}
             // `disconnect`, not `user.signOut()`. The old button called the
@@ -136,6 +144,47 @@ struct AppSettingsView: View {
             Button("Sign out", role: .destructive) { mail.disconnect() }
         } message: {
             Text("Its mail, read state, snoozes and drafts go from this phone, and Maily's access to it ends. Your mail itself is untouched, and you stay signed in to Maily.")
+        }
+    }
+
+    /// Turning sender photographs on, for a grant that predates them.
+    ///
+    /// 🔴 This row is the whole reason the feature reaches anybody who is
+    /// already using Maily. Contacts is asked for at sign-in now, but a grant
+    /// made under an older build cannot contain a scope that did not exist
+    /// then -- and it must not be *required*, because requiring it would make
+    /// every existing session fail its scope check and sign the mailbox out.
+    /// So it is offered, here, once.
+    ///
+    /// Shown only when it would do something: a Google mailbox that has not
+    /// granted it yet. Once granted the row goes, rather than becoming a
+    /// permanently-on switch that does nothing.
+    @ViewBuilder
+    private var senderPhotos: some View {
+        if mail.account?.provider == .gmail, !hasContacts {
+            Section {
+                Button {
+                    Task {
+                        if await AuthService.requestContactsAccess() {
+                            hasContacts = true
+                            await mail.refreshContacts()
+                        }
+                    }
+                } label: {
+                    LabeledContent {
+                        Text("Off").foregroundStyle(.secondary)
+                    } label: {
+                        Text("Sender photos").font(Style.rowTitle)
+                    }
+                }
+            } header: {
+                Text("Mail")
+            } footer: {
+                // ⚠️ Says what it actually delivers. "See who is emailing you"
+                // would promise a face on every row, and most rows will not
+                // have one: a newsletter is nobody's contact.
+                Text("Shows a photo instead of a letter for people in your Google Contacts. Maily reads their names, addresses and pictures, and nothing else.")
+            }
         }
     }
 

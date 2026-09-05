@@ -87,6 +87,10 @@ enum AuthService {
         /// you, because that would need their Contacts entry. This is the
         /// person themselves, and they have already handed it over.
         let photoURL: URL?
+        /// Whether this grant covers Google Contacts, which is what makes a
+        /// *sender's* photograph possible. Optional by design -- see
+        /// `GmailService.contactsScope`.
+        let grantsContacts: Bool
         let accessToken: String
         /// The long-lived half. Kept in the Keychain under the mailbox id, so
         /// this app can refresh a mailbox the SDK is no longer holding -- see
@@ -111,7 +115,10 @@ enum AuthService {
         let result = try await GIDSignIn.sharedInstance.signIn(
             withPresenting: presenter,
             hint: nil,
-            additionalScopes: GmailService.scopes
+            // Contacts is asked for here so there is one consent screen rather
+            // than two -- but it is not checked for below, and declining it
+            // only costs sender photographs.
+            additionalScopes: GmailService.scopes + GmailService.optionalScopes
         )
 
         let granted = Set(result.user.grantedScopes ?? [])
@@ -124,6 +131,7 @@ enum AuthService {
             email: email,
             displayName: result.user.profile?.name ?? email,
             photoURL: result.user.profile?.imageURL(withDimension: Self.photoPixels),
+            grantsContacts: granted.contains(GmailService.contactsScope),
             accessToken: result.user.accessToken.tokenString,
             refreshToken: result.user.refreshToken.tokenString
         )
@@ -150,6 +158,7 @@ enum AuthService {
             // an older build picks its picture up on the next launch rather
             // than needing to be signed in again.
             photoURL: user.profile?.imageURL(withDimension: Self.photoPixels),
+            grantsContacts: Set(user.grantedScopes ?? []).contains(GmailService.contactsScope),
             accessToken: user.accessToken.tokenString,
             refreshToken: user.refreshToken.tokenString
         )
@@ -227,6 +236,35 @@ enum AuthService {
             case .notConnected: "No mailbox is connected."
             }
         }
+    }
+
+    /// Whether the Google session currently held covers Contacts.
+    static var hasContactsAccess: Bool {
+        guard let user = GIDSignIn.sharedInstance.currentUser else { return false }
+        return Set(user.grantedScopes ?? []).contains(GmailService.contactsScope)
+    }
+
+    /// Asks for Contacts on top of a grant that already exists.
+    ///
+    /// 🔴 Incremental, not a re-sign-in. Everybody already using Maily granted
+    /// their mail scopes under a build in which Contacts did not exist, and
+    /// their grant can never contain it -- so without this the feature would
+    /// only ever reach new accounts, and the existing ones would need to be
+    /// disconnected and added again to get a photograph.
+    ///
+    /// `addScopes` widens the grant in place: the refresh token keeps working,
+    /// the mailbox is not touched, and a refusal leaves everything exactly as
+    /// it was.
+    @discardableResult
+    static func requestContactsAccess() async -> Bool {
+        guard let presenter = rootViewController,
+              let user = GIDSignIn.sharedInstance.currentUser
+        else { return false }
+
+        guard (try? await user.addScopes([GmailService.contactsScope], presenting: presenter)) != nil
+        else { return false }
+
+        return hasContactsAccess
     }
 
     /// The picture the signed-in provider currently holds, if any.

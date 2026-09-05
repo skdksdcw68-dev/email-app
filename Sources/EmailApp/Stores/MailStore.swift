@@ -573,6 +573,25 @@ final class MailStore {
         }
     }
 
+    /// Refreshes the contact photos used for sender avatars.
+    ///
+    /// Tries each Google mailbox in turn and stops as soon as one works --
+    /// `PeopleDirectory.refresh` returns immediately once it has a day-old
+    /// answer, so the second mailbox costs nothing after the first succeeds.
+    ///
+    /// A mailbox whose grant does not include Contacts answers 403, which is
+    /// read as "no photos" and nothing else: the person sees the letters and
+    /// logos they saw before, and is never told about a permission they
+    /// declined on purpose.
+    func refreshContacts() async {
+        for account in registry.accounts where account.provider == .gmail {
+            guard let token = try? await TokenBroker.shared.accessToken(for: account) else {
+                continue
+            }
+            await PeopleDirectory.shared.refresh(accessToken: token)
+        }
+    }
+
     /// Signs in to Google and adopts the mailbox.
     ///
     /// 🔴 `importNow` exists because of a bug that made a question pointless.
@@ -621,6 +640,12 @@ final class MailStore {
             // the face is usually already on disk by the time the flow gets
             // past the import screen.
             AvatarStore.shared.ensure(key: connected.id.rawValue, url: session.photoURL)
+            // If they said yes to Contacts on the consent screen, fetch the
+            // faces now rather than at the next launch -- the inbox they are
+            // about to see for the first time is the one that most wants them.
+            if session.grantsContacts {
+                Task { await PeopleDirectory.shared.refresh(accessToken: session.accessToken) }
+            }
             // The long-lived half, kept where this app can reach it. Google's
             // SDK holds exactly one session, so a second mailbox would lose
             // the first the moment it signed in -- see `TokenBroker`.

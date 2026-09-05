@@ -110,6 +110,10 @@ struct EmailAppApp: App {
                         // And the mailboxes the Google SDK cannot answer for,
                         // which is all of them except the active one.
                         await mail.refreshMailboxPhotos()
+                        // Faces for the people who write to you, where the
+                        // Contacts permission was granted. Once a day, and
+                        // silent when it was not.
+                        await mail.refreshContacts()
                         await chats.pull()
                         await memory.pull()
                         await searches.pull()

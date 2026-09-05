@@ -13,10 +13,37 @@ import Foundation
 ///   gmail.compose    create drafts, send
 /// Not gmail.modify, and certainly not mail.google.com.
 enum GmailService {
+    /// What a mailbox cannot work without.
+    ///
+    /// 🔴 **Adding anything here signs every existing user out.**
+    /// `AuthService.restoreGmail()` refuses a session whose grant is not a
+    /// superset of this list, and `MailStore.restore()` reads that refusal as
+    /// a revoked grant: it marks the mailbox `needsReauth` and drops it. A
+    /// grant made under an older build cannot contain a scope that did not
+    /// exist then, so a new entry here is a flag day for everybody at once.
+    ///
+    /// Anything that only makes the app *better* goes in `optionalScopes`.
     static let scopes = [
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/gmail.compose",
     ]
+
+    /// Read-only access to the person's Google Contacts.
+    ///
+    /// What it buys: a real photograph beside a message, for anybody they have
+    /// in their contacts. Mail scopes carry no photo of the sender -- Gmail's
+    /// own app shows one because it has this, not because it can read mail --
+    /// so without it there is genuinely nothing to draw but a letter.
+    ///
+    /// ⚠️ **Asked for, never required.** It is requested at sign-in and can be
+    /// added later from Settings, and a refusal costs nothing: sender avatars
+    /// fall back to exactly what they show today. Requiring it would break
+    /// every account that predates it -- see the note above.
+    static let contactsScope = "https://www.googleapis.com/auth/contacts.readonly"
+
+    /// Nice to have, and asked for alongside the necessary ones so somebody
+    /// signing in reads one consent screen rather than two.
+    static let optionalScopes = [contactsScope]
 
     private static let base = "https://gmail.googleapis.com/gmail/v1/users/me"
 

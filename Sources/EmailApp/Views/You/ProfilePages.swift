@@ -226,6 +226,9 @@ struct EditProfileView: View {
         // the active mailbox and a picture whose account has already been
         // deleted is the one nothing would think to remove.
         AvatarStore.shared.forgetAll()
+        // And the contact list those faces were matched against. It is
+        // somebody's address book; it does not outlive their account.
+        PeopleDirectory.shared.forgetAll()
         user.signOut()
         Task { await AuthService.signOut() }
     }
