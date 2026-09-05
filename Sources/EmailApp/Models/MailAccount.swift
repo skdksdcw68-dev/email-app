@@ -2,7 +2,12 @@ import Foundation
 import SwiftUI
 
 /// Where a mailbox lives, and therefore how the app talks to it.
-enum MailProvider: String, Codable, CaseIterable, Sendable {
+enum MailProvider: String, Codable, CaseIterable, Sendable, Identifiable {
+    /// So a provider can drive a `sheet(item:)` directly -- the sheet is up
+    /// exactly when one has been chosen, with no second flag to fall out of
+    /// step with it.
+    var id: String { rawValue }
+
     case gmail, microsoft, imap
 
     var title: String {

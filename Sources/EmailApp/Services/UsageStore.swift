@@ -148,12 +148,17 @@ enum Plan: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// Whether chat and drafting get the better model.
-    ///
-    /// ⚠️ Costs as well as sells. `gpt-5.6-luna` is roughly twenty-five times
-    /// `gpt-5-nano` per token, so this is most of why Max's ceiling is not
-    /// simply double Pro's -- the same allowance buys fewer answers.
-    var usesPriorityModel: Bool { self == .max }
+    // 🔴 `usesPriorityModel` was here and is deleted rather than fixed.
+    //
+    // Nothing read it. The server sends every caller to `gpt-5.6-luna`
+    // whatever they pay, so the property described a difference that did not
+    // exist -- and it was on the paywall as "the faster model for chat and
+    // drafting", which made it a claim rather than a stub. A flag nobody
+    // checks reads as a feature that is switched on somewhere else, which is
+    // how it ended up being sold.
+    //
+    // If Max should get a better writer, that is a model with its own seeded
+    // price row, and the paywall line comes back with it.
 
     /// The App Store product this plan is bought as. Nil for free, which is
     /// not bought.

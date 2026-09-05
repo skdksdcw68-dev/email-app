@@ -335,9 +335,21 @@ struct PlansView: View {
                 "Auto-Reply",
             ]
         case .max:
+            // 🔴 "The faster model for chat and drafting" used to be here and
+            // is gone, because it was not true. `ai/index.ts` sends every
+            // caller to `gpt-5.6-luna` -- free accounts included -- so Max was
+            // being sold something everybody already had.
+            //
+            // The two ways to fix that are to make it true or to stop saying
+            // it, and making it true here means giving Pro subscribers a
+            // *worse* writer than they have today. That model was chosen by
+            // reading what the candidates actually wrote: the others invented
+            // a day rate nobody gave them and read a meeting time back to the
+            // person who set it. Degrading paying subscribers' drafting in
+            // order to sell a higher tier is not a trade worth making, so the
+            // sentence goes instead.
             return [
                 "Unlimited mailboxes",
-                "The faster model for chat and drafting",
                 usageClaim(for: plan),
                 "Everything in Pro",
             ]

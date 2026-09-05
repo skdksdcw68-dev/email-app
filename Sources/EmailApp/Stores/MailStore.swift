@@ -540,7 +540,20 @@ final class MailStore {
     /// instead is the *same* mailbox twice, which without a check looks like
     /// it worked and changes nothing: the id derives from the address, so it
     /// lands on the record that is already there.
-    func connect() async {
+    /// Signs in to Google and adopts the mailbox.
+    ///
+    /// 🔴 `importNow` exists because of a bug that made a question pointless.
+    ///
+    /// This used to end by importing, unconditionally. In `AddMailboxFlow`
+    /// that happens during the *consent* step -- two screens before anybody is
+    /// asked how far back to go -- so the import ran with the default three
+    /// months, finished, and marked the ledger complete. The scope screen then
+    /// set the window to Everything and asked for an import that returned
+    /// straight away, because the ledger said there was nothing left to do.
+    /// Choosing "Everything" silently did nothing, and looked like it worked.
+    ///
+    /// The flow now says when to import, which is after it has asked.
+    func connect(importNow: Bool = true) async {
         guard !isConnecting else { return }
         isConnecting = true
         connectionError = nil
@@ -596,7 +609,7 @@ final class MailStore {
                 )
             }
 
-            await importRecentMail()
+            if importNow { await importRecentMail() }
         } catch {
             connectionError = error.localizedDescription
             account = nil

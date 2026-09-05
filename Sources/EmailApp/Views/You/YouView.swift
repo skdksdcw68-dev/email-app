@@ -20,7 +20,11 @@ struct YouView: View {
     @Environment(AutoReplyStore.self) private var autoReply
     @Environment(AutoReplyQueue.self) private var autoReplyQueue
 
-    @State private var isAddingMailbox = false
+    /// Which provider was picked on the way in. Nil while nothing is being
+    /// added -- and it drives the sheet directly, so the sheet cannot be up
+    /// without one.
+    @State private var adding: MailProvider?
+    @State private var isChoosingProvider = false
     @State private var appearance = AppSettings.appearance
     /// The mailbox a swipe is offering to sign out of.
     @State private var signingOut: MailAccount?
@@ -80,7 +84,23 @@ struct YouView: View {
                 }
             }
             .navigationTitle("You")
-            .sheet(isPresented: $isAddingMailbox) { AddMailboxFlow() }
+            // 🔴 Native, and asked here rather than on the first screen of the
+            // sheet. Abel asked for Google and IMAP to be on the You page
+            // itself: two named things to choose between is a decision, while
+            // "Add account" followed by a screen asking which kind is the same
+            // decision with a step in front of it.
+            .confirmationDialog(
+                "Add account", isPresented: $isChoosingProvider, titleVisibility: .visible
+            ) {
+                Button("Google") { adding = .gmail }
+                Button("Other email (IMAP)") { adding = .imap }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Gmail signs in with Google. Anything else — Hostinger, Zoho, your own domain — connects over IMAP.")
+            }
+            .sheet(item: $adding) { provider in
+                AddMailboxFlow(provider: provider)
+            }
             .alert(item: $signingOut) { account in
                 Alert(
                     title: Text("Sign out of \(account.address)?"),
@@ -173,7 +193,7 @@ struct YouView: View {
             // page as each other for months, which is why adding an account
             // appeared to do nothing.
             Button {
-                isAddingMailbox = true
+                isChoosingProvider = true
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "plus")

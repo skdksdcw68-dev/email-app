@@ -22,6 +22,29 @@ struct AddMailboxFlow: View {
     /// Called when a mailbox was actually connected.
     var onFinish: (() -> Void)? = nil
 
+    /// Chosen before the sheet opened, so the flow starts on the sign-in step
+    /// rather than asking again.
+    ///
+    /// Abel asked for Google and IMAP to be offered on the You page itself.
+    /// Tapping "Google" there and then being shown a screen whose only job is
+    /// to ask which provider -- with Google already the answer -- is a screen
+    /// that exists to be dismissed.
+    private let preselected: MailProvider?
+
+    init(
+        firstRun: Bool = false,
+        provider: MailProvider? = nil,
+        onFinish: (() -> Void)? = nil
+    ) {
+        self.firstRun = firstRun
+        self.preselected = provider
+        self.onFinish = onFinish
+        // Seeded in `init` rather than `onAppear`: `steps` is computed from
+        // `provider`, so a frame with it still nil would build the wrong step
+        // list and flash the Google screen at somebody who chose IMAP.
+        _provider = State(initialValue: provider)
+    }
+
     @State private var index = 0
     /// What the plan allows, from the server. See `limitReached`.
     @State private var usage = UsageStore()
@@ -66,6 +89,8 @@ struct AddMailboxFlow: View {
     private var steps: [Step] {
         Step.allCases.filter { step in
             switch step {
+            // Already answered on the way in.
+            case .provider: preselected == nil
             // Nothing to name when there is only one, and nothing to tell
             // apart with a colour either.
             case .naming: !firstRun
@@ -671,7 +696,10 @@ struct AddMailboxFlow: View {
     /// and quietly changes nothing, because the id derives from the address
     /// and lands on the record that already exists.
     private func connect() async {
-        await mail.connect()
+        // Signed in, not imported. The scope question has not been asked yet,
+        // and importing before it is asked is what made the answer useless --
+        // see `MailStore.connect(importNow:)`.
+        await mail.connect(importNow: false)
 
         if let error = mail.connectionError {
             failure = error
@@ -771,6 +799,12 @@ struct AddMailboxFlow: View {
     }
 
     private func runImport() async {
+        // ⚠️ Any ledger from before this moment counted a different window.
+        // `importRecentMail` reuses a saved ledger that is complete, so
+        // without this the answer just given could be overruled by a count
+        // taken before it was asked for.
+        ImportLedger.clear()
+
         if let id = mail.account?.id {
             mail.registry.update(id) {
                 $0.importWindow = window
