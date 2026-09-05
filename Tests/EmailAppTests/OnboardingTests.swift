@@ -181,14 +181,37 @@ final class OnboardingTests: XCTestCase {
 
     // MARK: - Account and persistence
 
-    func testCompletingSignInMovesToConnectInbox() {
+    func testCompletingSignInStoresTheAccountWithoutAdvancing() {
+        // 🔴 It used to advance to .connectInbox on its own, and that was the
+        // hole: from .signIn it did the same thing, so anybody who tapped
+        // "Sign in" having never registered went straight past every question
+        // into the app. Where somebody goes next depends on what the account
+        // already holds, which only the server knows.
         let store = makeStore(startAt: .createAccount)
         store.completeSignIn(userID: "u1", email: "a@b.com", displayName: "Abel", provider: .google)
 
         XCTAssertNotNil(store.account)
         XCTAssertEqual(store.account?.provider, .google)
         XCTAssertEqual(store.account?.externalID, "u1")
-        XCTAssertEqual(store.phase, .connectInbox)
+        XCTAssertEqual(store.phase, .createAccount)
+    }
+
+    func testAnAccountWithNoAnswersHasNotOnboarded() {
+        // The property the routing turns on. A stranger who signs in has
+        // nothing stored against them and must answer the questions.
+        let store = makeStore(startAt: .signIn)
+        XCTAssertFalse(store.hasAnsweredQuestions)
+    }
+
+    func testAnyAnswerCountsAsHavingOnboarded() {
+        // Any, not all: requiring the full set would trap somebody who
+        // abandoned onboarding halfway on an earlier install in a loop they
+        // could not finish differently.
+        let store = makeStore(startAt: .question(0))
+        let question = OnboardingQuestion.role
+        store.toggle(question.options[0], in: question)
+
+        XCTAssertTrue(store.hasAnsweredQuestions)
     }
 
     func testAnswersSurviveARelaunch() {
@@ -231,7 +254,9 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(store.account?.externalID, "001234.abc")
         XCTAssertEqual(store.account?.email, "abel@example.com")
         XCTAssertEqual(store.account?.provider, .apple)
-        XCTAssertEqual(store.phase, .connectInbox)
+        // Storing the account no longer moves anybody. See
+        // testCompletingSignInStoresTheAccountWithoutAdvancing.
+        XCTAssertEqual(store.phase, .createAccount)
     }
 
     /// Apple sends name and email only on the first authorization; every later
