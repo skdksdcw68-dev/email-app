@@ -84,6 +84,12 @@ struct EditProfileView: View {
                 Button("Save") {
                     user.setDisplayName(name)
                     user.setOccupation(occupation)
+                    // Straight up, not on the four-second debounce. Somebody
+                    // who presses Save and closes the app a second later has
+                    // every right to expect it saved -- and the debounce is
+                    // there for a burst of stars in the People tab, not for a
+                    // button somebody deliberately pressed once.
+                    Task { await SettingsSync.shared.pushNow(.profile) }
                     dismiss()
                 }
                 .disabled(!canSave)

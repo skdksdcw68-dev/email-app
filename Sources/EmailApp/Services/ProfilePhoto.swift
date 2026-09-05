@@ -65,7 +65,33 @@ enum ProfilePhoto {
         return loaded
     }
 
+    /// The stored bytes, for the settings sync.
+    ///
+    /// Read from disk rather than re-encoded from `image`: the file is already
+    /// the scaled JPEG, and encoding it again would cost a second compression
+    /// pass and produce something slightly different every call.
+    static var data: Data? {
+        url.flatMap { try? Data(contentsOf: $0) }
+    }
+
     // MARK: - Writing
+
+    /// Takes a picture that came from another device, already encoded.
+    ///
+    /// Skips the scaling in `set` -- these bytes went through it on whichever
+    /// phone chose the picture, and rescaling a 512px JPEG only loses to it.
+    @discardableResult
+    static func adopt(_ data: Data) -> Bool {
+        guard let url, UIImage(data: data) != nil else { return false }
+        do {
+            try data.write(to: url, options: [.atomic, .completeFileProtection])
+            cache = .some(UIImage(data: data))
+            NotificationCenter.default.post(name: changed, object: nil)
+            return true
+        } catch {
+            return false
+        }
+    }
 
     /// Scales, encodes and stores. Returns false if any of that failed, so the
     /// screen can say so rather than showing the old picture and implying the

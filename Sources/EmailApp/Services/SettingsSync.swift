@@ -21,7 +21,7 @@ final class SettingsSync {
     /// never -- and because one blob means one conflict: changing a tone on
     /// the phone and starring a sender on the iPad would throw one away.
     enum Scope: String, CaseIterable {
-        case app, people, onboarding, autoreply
+        case app, people, onboarding, autoreply, profile
     }
 
     /// One instance, reachable from anywhere.
@@ -79,6 +79,18 @@ final class SettingsSync {
             guard !Task.isCancelled else { return }
             await self?.push(scope)
         }
+    }
+
+    /// Sends one scope immediately, skipping the debounce.
+    ///
+    /// For a button somebody pressed on purpose. The debounce exists because
+    /// `setImportant` fires once per tap and a dozen taps should be one
+    /// request; a Save button is the opposite case, and waiting four seconds
+    /// to honour it is how a change gets lost to the app being closed.
+    func pushNow(_ scope: Scope) async {
+        pending[scope]?.cancel()
+        pending[scope] = nil
+        await push(scope)
     }
 
     /// Sends everything queued, now.
@@ -164,10 +176,26 @@ final class SettingsSync {
             ]
 
         case .onboarding:
-            return [
-                "answers": .init((user?.answers ?? [:]).mapValues(Array.init)),
+            return ["answers": .init((user?.answers ?? [:]).mapValues(Array.init))]
+
+        case .profile:
+            var payload: [String: AnyCodable] = [
+                // 🔴 `displayName` was missing entirely. Save on Edit profile
+                // wrote it to UserDefaults and nowhere else, so a new phone
+                // showed whatever name the sign-in provider supplied and the
+                // one somebody actually chose was gone.
+                "displayName": .init(user?.account?.displayName ?? ""),
                 "occupation": .init(user?.account?.occupation ?? ""),
             ]
+            // The picture, inline. It is capped at 512px on its longest edge
+            // before it is ever written to disk, so this is tens of kilobytes
+            // rather than the megabytes a camera hands over -- small enough to
+            // sit in the row, and the reason it is in its own scope rather
+            // than travelling with the eight onboarding answers.
+            if let data = ProfilePhoto.data {
+                payload["photo"] = .init(data.base64EncodedString())
+            }
+            return payload
 
         case .autoreply:
             guard let autoReply,
@@ -220,8 +248,21 @@ final class SettingsSync {
             if let raw: [String: [String]] = payload["answers"]?.value() {
                 user?.replaceAnswers(raw.mapValues(Set.init))
             }
+
+        case .profile:
+            if let name: String = payload["displayName"]?.value(), !name.isEmpty {
+                user?.setDisplayName(name)
+            }
             if let occupation: String = payload["occupation"]?.value(), !occupation.isEmpty {
                 user?.setOccupation(occupation)
+            }
+            // Only when this phone has none. A picture already chosen here is
+            // the one in front of the person, and replacing it on a background
+            // sync would look like the app changing it on its own.
+            if ProfilePhoto.data == nil,
+               let encoded: String = payload["photo"]?.value(),
+               let data = Data(base64Encoded: encoded) {
+                ProfilePhoto.adopt(data)
             }
 
         case .autoreply:

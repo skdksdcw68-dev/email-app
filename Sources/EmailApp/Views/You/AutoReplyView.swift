@@ -362,23 +362,24 @@ struct AutoReplyInstructionsView: View {
             } else {
                 Section {
                     ForEach(instructions) { instruction in
-                        Button {
-                            autoReply.setInstruction(instruction.id, isOn: !instruction.isOn)
-                        } label: {
-                            HStack(alignment: .top, spacing: 11) {
-                                Image(systemName: instruction.isOn ? "checkmark.circle.fill" : "circle")
-                                    .font(.body)
-                                    .foregroundStyle(instruction.isOn ? Color.accentColor : Color.secondary.opacity(0.4))
-                                Text(instruction.text)
-                                    .font(.subheadline)
-                                    .foregroundStyle(instruction.isOn ? .primary : .secondary)
-                                    .strikethrough(!instruction.isOn, color: .secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .padding(.vertical, 2)
+                        // A switch, like everything else that is on or off.
+                        //
+                        // It was a circle that filled in, with the text struck
+                        // through when off -- which is the vocabulary of a
+                        // to-do list, where ticking something means it is
+                        // *done*. These are standing rules: on means Maily
+                        // follows it every time. Nothing here is ever
+                        // completed, so nothing here should look completed.
+                        Toggle(isOn: Binding(
+                            get: { instruction.isOn },
+                            set: { autoReply.setInstruction(instruction.id, isOn: $0) }
+                        )) {
+                            Text(instruction.text)
+                                .font(Style.rowTitle)
+                                .foregroundStyle(instruction.isOn ? .primary : .secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.vertical, 2)
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
                                 guard let index = instructions.firstIndex(where: { $0.id == instruction.id })

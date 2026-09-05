@@ -177,8 +177,20 @@ struct YouView: View {
                         .foregroundStyle(.white)
                         .frame(width: 26, height: 26)
                         .background(Circle().fill(Color.blue))
+                        // 🔴 The blue circle is 26 and an account avatar is
+                        // 38, so this row's text started twelve points left of
+                        // every row above it. In a list where each row is one
+                        // line of text against one round thing, that reads as
+                        // the rows being crooked rather than the icons being
+                        // different sizes.
+                        //
+                        // The circle keeps its own size -- a 38pt blue disc
+                        // would shout louder than the faces it sits under --
+                        // and is centred in a column as wide as an avatar, so
+                        // the titles line up.
+                        .frame(width: Self.accountLeadingColumn)
                     Text("Add account")
-                        .font(.subheadline)
+                        .font(Style.rowTitle)
                         .foregroundStyle(.primary)
                     Spacer(minLength: 0)
                 }
@@ -186,15 +198,25 @@ struct YouView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-
-            NavigationLink { MailboxListView() } label: {
-                Text("Manage accounts")
-                    .font(.subheadline)
-            }
         } header: {
             Text("Accounts")
         }
+
+        // Its own card, the way Telegram keeps "My Profile" out of the
+        // account list. It is not a mailbox, and the section above is only
+        // mailboxes -- so there is nothing for it to align with, and left in
+        // there it was a third different left edge in one card.
+        Section {
+            NavigationLink { MailboxListView() } label: {
+                Text("Manage accounts")
+                    .font(Style.rowTitle)
+            }
+        }
     }
+
+    /// How wide the round thing at the start of an account row is. Every row
+    /// in that section reserves this much, so the titles share one left edge.
+    private static let accountLeadingColumn: CGFloat = 38
 
     /// The mailboxes that are not in front of you, one per row.
     ///
@@ -213,7 +235,7 @@ struct YouView: View {
                 Task { await mail.activate(account) }
             } label: {
                 HStack(spacing: 12) {
-                    SenderAvatar(contact: account.contact, size: 38)
+                    SenderAvatar(contact: account.contact, size: Self.accountLeadingColumn)
                         .overlay { Circle().strokeBorder(account.tint.color, lineWidth: 2) }
 
                     VStack(alignment: .leading, spacing: 2) {
