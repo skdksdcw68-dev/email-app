@@ -3,27 +3,50 @@ import Observation
 
 /// What the AI has actually cost this person, in money.
 ///
-/// `AIUsage` counts *calls*, on the phone, because that is all the phone can
-/// know. This reads the figure the server priced from OpenAI's own token
-/// counts -- input, cached input and output at their separate rates -- which
-/// is the only number that means anything once there is a plan to spend
-/// against.
+/// 🔴 **The same answer the server enforces on, not a second opinion.**
 ///
-/// The counts stay: they are instant, they work offline, and they say which
-/// features are doing the spending. This says how much.
+/// This used to read a view that summed usage by *account*, while the ceiling
+/// is counted by *subscription*. After a subscription moves between accounts
+/// those are two different totals by design -- so the number on screen and
+/// the number a request is refused on could not agree, and the screen was the
+/// one that was wrong.
+///
+/// `my_spend()` calls the very function the edge function calls. One source,
+/// so being shown an allowance and then refused it is not possible.
 @MainActor
 @Observable
 final class UsageStore {
 
-    /// What one person has spent, as the server has it.
+    /// The verdict, exactly as `spend_check` returns it.
     struct Spend: Codable, Equatable {
-        var month_usd: Double?
-        var total_usd: Double?
-        var calls: Int?
-        var last_call_at: Date?
+        var plan: String?
+        var allowance_usd: Double?
+        var spent_usd: Double?
+        var credit_usd: Double?
+        var is_allowed: Bool?
+        /// When the allowance comes back. A calendar month, from the server's
+        /// clock -- the same boundary the ledger sums from.
+        var period_end: Date?
+        /// When Apple next charges. A different date entirely, and null on
+        /// free because nothing renews.
+        var renews_at: Date?
+        var is_in_grace: Bool?
 
-        var thisMonth: Double { month_usd ?? 0 }
-        var allTime: Double { total_usd ?? 0 }
+        var spent: Double { spent_usd ?? 0 }
+        /// Bought credit counts towards what is left, so it belongs in the
+        /// denominator. Without it, topping up moved no bar and looked like
+        /// nothing had happened.
+        var allowance: Double { (allowance_usd ?? 0) + (credit_usd ?? 0) }
+        var credit: Double { credit_usd ?? 0 }
+
+        /// Exactly what it says: dollars spent over dollars allowed. $1 of a
+        /// $10 allowance is 10%, not "about a tenth".
+        var fraction: Double {
+            guard allowance > 0 else { return 1 }
+            return min(1, spent / allowance)
+        }
+
+        var tier: Plan { Plan(rawValue: plan ?? "free") ?? .free }
     }
 
     private(set) var spend: Spend?
@@ -49,11 +72,11 @@ final class UsageStore {
         }
 
         do {
-            let rows: [Spend] = try await Backend.select(
-                "my_ai_spend", query: "select=month_usd,total_usd,calls,last_call_at"
-            )
-            // No rows means nothing has been spent yet, which is a zero rather
-            // than a failure -- the view only has a row once there is usage.
+            // An RPC rather than a table read. `spend_check(uuid)` stays
+            // revoked from `authenticated` -- a caller that could pass any id
+            // could read anybody's spend -- and `my_spend()` takes no
+            // argument, reading `auth.uid()` itself.
+            let rows: [Spend] = try await Backend.rpc("my_spend")
             spend = rows.first ?? Spend()
             checkedAt = .now
         } catch {
@@ -64,16 +87,15 @@ final class UsageStore {
 
 /// What somebody is paying for, and therefore how much they may spend.
 ///
-/// ⚠️ **Nothing here is purchasable yet.** There is no StoreKit, no product in
-/// App Store Connect, and no entitlement table -- so `current` is always
-/// `.free` and the allowance below is what the free tier gets. The screen is
-/// built against this type so that wiring a real purchase later changes one
-/// property rather than a screen.
+/// The numbers below are the operator's *cost*, not a price, and the two are
+/// never the same: Apple takes its cut of the price before any of it arrives.
+/// Nothing here is ever shown to a person -- it is the denominator behind a
+/// percentage, and see `AIUsageView` for why it stays that way.
 ///
-/// The numbers are deliberately the operator's cost, not a price. What a plan
-/// *sells* for is a decision nobody has made yet; what it may *cost* is
-/// already knowable, because every call is priced from the provider's own
-/// token counts.
+/// ⚠️ Which plan somebody is on is **not** here. It comes from the server, via
+/// `UsageStore.Spend.tier`, because a device can be wrong about it in both
+/// directions -- a lapsed subscription still reads as active in StoreKit's
+/// cache, and a restore moves an entitlement to an account that did not pay.
 enum Plan: String, Codable, CaseIterable, Identifiable {
     case free, pro, max
 
@@ -103,12 +125,12 @@ enum Plan: String, Codable, CaseIterable, Identifiable {
     /// The margins these leave, after Apple's 15%:
     ///
     ///     Pro  $14.99 -> $12.74 net, $6 ceiling  -> 53%
-    ///     Max  $29.99 -> $25.49 net, $11 ceiling -> 57%
+    ///     Max  $29.99 -> $25.49 net, $15 ceiling -> 41%
     var monthlyAllowanceUSD: Double {
         switch self {
         case .free: 0.30
         case .pro:  6
-        case .max:  11
+        case .max:  15
         }
     }
 
@@ -155,10 +177,26 @@ enum Plan: String, Codable, CaseIterable, Identifiable {
     /// a paywall shows them in.
     static var purchasable: [Plan] { [.max, .pro] }
 
-    /// The one Maily runs on today.
+    /// Where this sits against the others. Higher is more.
     ///
-    /// 🔴 Hardcoded, and it must stay obvious that it is. When entitlements
-    /// exist this reads them; until then, pretending to know somebody's plan
-    /// would mean a paywall that fires on a purchase that cannot be made.
-    static var current: Plan { .free }
+    /// Used to tell an upgrade from a downgrade, which decide differently:
+    /// an upgrade takes effect immediately with proration, a downgrade waits
+    /// for the end of the period already paid for.
+    var rank: Int {
+        switch self {
+        case .free: 0
+        case .pro:  1
+        case .max:  2
+        }
+    }
+
+    /// How many times this plan's allowance is Pro's. The paywall says "2.5x
+    /// the usage of Pro" from this rather than from a typed string, so the
+    /// claim cannot drift from the ceiling that is actually enforced.
+    var timesPro: Double {
+        let pro = Plan.pro.monthlyAllowanceUSD
+        guard pro > 0 else { return 1 }
+        return monthlyAllowanceUSD / pro
+    }
+
 }

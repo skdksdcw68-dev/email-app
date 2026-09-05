@@ -32,7 +32,12 @@ struct AppSettingsView: View {
                             value: memory.facts.isEmpty ? "Empty" : "\(memory.facts.count)") {
                     MemorySettingsView()
                 }
-                SettingsRow("Plan", value: "Free") { PlanView() }
+                // No value rather than a wrong one. It read the string
+                // literal "Free", so a paying Max subscriber was told their
+                // plan was Free in Settings while the paywall simultaneously
+                // showed Max as current. The screen behind it knows the truth
+                // and asks the server for it.
+                SettingsRow("Plan") { PlanView() }
             } header: {
                 Text("Account")
             }

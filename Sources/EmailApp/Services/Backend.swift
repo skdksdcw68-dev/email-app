@@ -27,6 +27,26 @@ enum Backend {
         return try decoder.decode([T].self, from: data)
     }
 
+    /// Calls a Postgres function.
+    ///
+    /// For the things a client may ask but must not be able to *parameterise*
+    /// -- `my_spend()` reads `auth.uid()` itself, so there is no user id to
+    /// pass and therefore no way to ask about somebody else. A table or view
+    /// could not express that; a `security definer` function can.
+    ///
+    /// A `returns table` function answers with an array of rows, which is why
+    /// this decodes a collection even when there is only ever one.
+    static func rpc<T: Decodable>(
+        _ function: String,
+        arguments: [String: String] = [:]
+    ) async throws -> [T] {
+        let body = try JSONSerialization.data(withJSONObject: arguments)
+        let (data, _) = try await send(
+            "POST", "rpc/\(function)", query: "", body: body, prefer: nil
+        )
+        return try decoder.decode([T].self, from: data)
+    }
+
     /// Insert, or overwrite the row that already has this primary key.
     /// `onConflict` names the columns that decide whether a row is the same
     /// row. Without it PostgREST resolves on the primary key, which is right

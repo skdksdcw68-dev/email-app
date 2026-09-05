@@ -21,6 +21,7 @@ struct PlansView: View {
     @State private var isYearly = true
     @State private var busy: String?
     @State private var note: String?
+    @State private var isManaging = false
 
     var body: some View {
         NavigationStack {
@@ -32,6 +33,7 @@ struct PlansView: View {
                         card(for: plan)
                     }
                     creditsRow
+                    manageRow
                     smallPrint
                 }
                 .screenGutter()
@@ -45,13 +47,14 @@ struct PlansView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Restore") {
-                        Task { await store.restore() }
+                        Task { await restore() }
                     }
                     .font(Style.rowDetail)
                 }
             }
         }
         .task { await store.load() }
+        .manageSubscriptionsSheet(isPresented: $isManaging)
         .alert("Store", isPresented: .constant(note != nil)) {
             Button("OK") { note = nil }
         } message: {
@@ -87,7 +90,14 @@ struct PlansView: View {
     private func card(for plan: Plan) -> some View {
         let id = isYearly ? plan.yearlyProductID : plan.monthlyProductID
         let product = store.product(id)
-        let isCurrent = store.activePlan == plan
+        // 🔴 The *product*, not the tier.
+        //
+        // Comparing tiers meant somebody on Pro monthly who flipped this
+        // screen to Yearly saw the Pro yearly card labelled "Your plan" with
+        // the button disabled -- for something they do not own, and with no
+        // other way in the app to switch. The upsell the whole screen is
+        // arranged around was unreachable by the people it was aimed at.
+        let isCurrent = store.ownedProductIDs.contains(id ?? "")
 
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
@@ -139,8 +149,14 @@ struct PlansView: View {
                     if busy == id {
                         ProgressView().tint(.white)
                     } else {
-                        Text(isCurrent ? "Your plan" : (isYearly ? "Start 3-day free trial" : "Choose \(plan.title)"))
-                            .fontWeight(.semibold)
+                        Text(Self.label(
+                            isCurrent: isCurrent,
+                            isYearly: isYearly,
+                            plan: plan,
+                            current: store.activePlan,
+                            offersTrial: store.offersTrial(for: id)
+                        ))
+                        .fontWeight(.semibold)
                     }
                 }
                 .frame(maxWidth: .infinity, minHeight: 28)
@@ -160,35 +176,68 @@ struct PlansView: View {
         }
     }
 
+    /// 🔴 Shown only to somebody who has a plan to spend it on.
+    ///
+    /// Drobe sells these packs to everybody, while the code that *spends*
+    /// credit sits behind its subscriber gate. So a non-subscriber can buy
+    /// credit that nothing will ever draw on, and the copy promises it does
+    /// not expire. Taking money for something unusable is the one failure
+    /// that cannot be fixed with an apology, and avoiding it here costs a
+    /// single condition.
+    @ViewBuilder
     private var creditsRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Run out early?")
-                .font(Style.rowTitleStrong)
-            Text("Top up without changing plan. Credit is used after your monthly allowance and does not expire while your plan is active.")
-                .font(Style.rowDetail)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        if store.activePlan != .free {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Run out early?")
+                    .font(Style.rowTitleStrong)
+                Text("Top up without changing plan. Credit is used after your monthly allowance and does not expire while your plan is active.")
+                    .font(Style.rowDetail)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: Style.tight) {
-                ForEach(["com.netro.maily.credits.small", "com.netro.maily.credits.large"], id: \.self) { id in
-                    if let product = store.product(id) {
-                        Button {
-                            Task { await purchase(product) }
-                        } label: {
-                            VStack(spacing: 2) {
-                                Text(product.displayName).font(Style.rowDetail)
-                                Text(product.displayPrice).font(Style.rowTitleStrong)
+                HStack(spacing: Style.tight) {
+                    ForEach(["com.netro.maily.credits.small", "com.netro.maily.credits.large"], id: \.self) { id in
+                        if let product = store.product(id) {
+                            Button {
+                                Task { await purchase(product) }
+                            } label: {
+                                VStack(spacing: 2) {
+                                    Text(product.displayName).font(Style.rowDetail)
+                                    Text(product.displayPrice).font(Style.rowTitleStrong)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 44)
                             }
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .buttonStyle(.bordered)
+                            .disabled(busy != nil)
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(busy != nil)
                     }
                 }
             }
+            .padding(Style.rowGutter)
+            .cardBackground()
         }
-        .padding(Style.rowGutter)
-        .cardBackground()
+    }
+
+    /// The way out, for somebody who already pays.
+    ///
+    /// Drobe's lesson, and an App Store one: its Restore button renders only
+    /// in the *not*-subscribed branch, while its subscribed flag survives up
+    /// to a week on a cached snapshot. The lapsed subscriber -- exactly the
+    /// person its own error message tells to tap Restore -- gets a screen
+    /// with no Restore on it. Here Restore is in the toolbar unconditionally,
+    /// and cancelling is one tap rather than a hunt through Settings.
+    @ViewBuilder
+    private var manageRow: some View {
+        if store.activePlan != .free {
+            Button {
+                isManaging = true
+            } label: {
+                Text("Manage or cancel subscription")
+                    .font(Style.rowDetail)
+                    .frame(maxWidth: .infinity, minHeight: 36)
+            }
+            .buttonStyle(.bordered)
+        }
     }
 
     private var smallPrint: some View {
@@ -230,7 +279,50 @@ struct PlansView: View {
         }
     }
 
+    /// 🔴 Says what actually happened, including when nothing did.
+    ///
+    /// Drobe's restore congratulates you on all three of "found", "found
+    /// nothing" and "could not ask" -- so somebody whose subscription is
+    /// genuinely gone is told it is active again, and goes on believing that
+    /// until the next refusal. Three outcomes, three sentences.
+    private func restore() async {
+        switch await store.restore() {
+        case .found(let plan):
+            note = "Restored. You are on \(plan.title)."
+        case .nothing:
+            note = "This Apple ID has no Maily subscription to restore. If you paid with a different Apple ID, sign in to that one in Settings and try again."
+        case .unknown(let reason):
+            note = "Could not check with the App Store: \(reason)"
+        }
+    }
+
     // MARK: - Words
+
+    /// What the button says.
+    ///
+    /// 🔴 The trial half is an App Store review risk as much as a fairness
+    /// one. Every yearly button used to promise "Start 3-day free trial"
+    /// unconditionally, without asking StoreKit whether this Apple ID is
+    /// still eligible. Somebody who has already used their trial was promised
+    /// another and charged immediately -- which is a rejection at review, and
+    /// a refund request from anyone who slips past it.
+    ///
+    /// The downgrade half matters for a different reason: moving from Max to
+    /// Pro takes effect at the end of the period somebody has already paid
+    /// for. "Choose Pro" implies it happens now, and then nothing visibly
+    /// changes for a month.
+    static func label(
+        isCurrent: Bool,
+        isYearly: Bool,
+        plan: Plan,
+        current: Plan,
+        offersTrial: Bool
+    ) -> String {
+        if isCurrent { return "Your plan" }
+        if current != .free && plan.rank > current.rank { return "Switch at renewal" }
+        if isYearly && offersTrial { return "Start free trial" }
+        return "Choose \(plan.title)"
+    }
 
     private static func features(of plan: Plan) -> [String] {
         switch plan {
@@ -246,10 +338,27 @@ struct PlansView: View {
             return [
                 "Unlimited mailboxes",
                 "The faster model for chat and drafting",
-                "Roughly twice the monthly allowance",
+                usageClaim(for: plan),
                 "Everything in Pro",
             ]
         }
+    }
+
+    /// "2.5x the usage of Pro", worked out from the two allowances the server
+    /// actually enforces on.
+    ///
+    /// 🔴 Not a typed string. It used to say "roughly twice", which was true of
+    /// an $11 ceiling and stopped being true the moment Max moved to $15 --
+    /// a paywall promising less than it gives is only luck, and the same edit
+    /// in the other direction is a claim nobody can honour. Deriving it means
+    /// the sentence cannot outlive the number.
+    private static func usageClaim(for plan: Plan) -> String {
+        let times = plan.timesPro
+        // One decimal, but no ".0" -- "2.5x" and "3x", never "3.0x".
+        let text = times == times.rounded()
+            ? String(Int(times))
+            : String(format: "%.1f", times)
+        return "\(text)x the AI usage of Pro"
     }
 
     /// Worked out from the two real prices rather than written down, so it

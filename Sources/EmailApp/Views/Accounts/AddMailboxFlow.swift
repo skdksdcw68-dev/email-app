@@ -23,6 +23,9 @@ struct AddMailboxFlow: View {
     var onFinish: (() -> Void)? = nil
 
     @State private var index = 0
+    /// What the plan allows, from the server. See `limitReached`.
+    @State private var usage = UsageStore()
+    @State private var isShowingPlans = false
     @State private var provider: MailProvider?
     @State private var nickname = ""
     @State private var tint: MailboxTint = .blue
@@ -86,8 +89,87 @@ struct AddMailboxFlow: View {
 
     // MARK: - Body
 
+    /// 🔴 The one tier claim that was sold and never enforced.
+    ///
+    /// "Up to 3 mailboxes" and "Unlimited mailboxes" are on the paywall, and
+    /// `Plan.mailboxLimit` was read by nothing at all -- a free account could
+    /// connect as many as it liked. Either enforce it or stop selling it.
+    ///
+    /// The count comes from the registry and the limit from `my_spend()`, so
+    /// this cannot be lifted by a device that thinks it is subscribed. It is
+    /// checked at the *start* of the flow: being refused after signing in to
+    /// a mailbox and waiting for an import would be worse than not offering.
+    ///
+    /// ⚠️ Never during first run. Somebody with no mailbox at all is not over
+    /// any limit, and a paywall in front of the first screen of a new install
+    /// is a rejection at review as well as a terrible welcome.
+    private var limitReached: Bool {
+        guard !firstRun else { return false }
+        let plan = usage.spend?.tier ?? .free
+        // While it is still loading there is no verdict, and the answer to
+        // "may I" is not "no" until somebody says so. The mailbox is written
+        // to the server either way, so a wrong yes here is recoverable and a
+        // wrong no loses somebody their evening.
+        guard usage.spend != nil else { return false }
+        return mail.registry.accounts.count >= plan.mailboxLimit
+    }
+
     var body: some View {
         NavigationStack {
+            if limitReached {
+                limitScreen
+            } else {
+                flow
+            }
+        }
+        // Nothing here closes on a swipe -- a half-answered flow should not
+        // vanish because a finger moved. The X is the way out, and during
+        // the import it is offered rather than withheld.
+        .interactiveDismissDisabled()
+        .task { await usage.refresh() }
+        .sheet(isPresented: $isShowingPlans) { PlansView() }
+    }
+
+    private var limitScreen: some View {
+        VStack(spacing: 14) {
+            Spacer()
+            Image(systemName: "tray.full")
+                .font(.system(size: 40))
+                .foregroundStyle(.tint)
+            Text(Self.limitTitle(for: usage.spend?.tier ?? .free))
+                .font(Style.stepTitle)
+                .multilineTextAlignment(.center)
+            Text("Your plan covers \(mail.registry.accounts.count) \(mail.registry.accounts.count == 1 ? "mailbox" : "mailboxes"). Moving up adds more.")
+                .font(Style.rowDetail)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button {
+                isShowingPlans = true
+            } label: {
+                Text("See plans")
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity, minHeight: 30)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+        .padding(.horizontal, Style.gutter)
+        .padding(.bottom, 8)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                FlowCloseButton { dismiss() }
+            }
+        }
+    }
+
+    private static func limitTitle(for plan: Plan) -> String {
+        plan == .free ? "One mailbox on Free" : "You have used every mailbox on \(plan.title)"
+    }
+
+    private var flow: some View {
             VStack(alignment: .leading, spacing: 0) {
                 if !step.isFullHeight && step != .provider {
                     ProgressView(value: progress)
@@ -177,11 +259,6 @@ struct AddMailboxFlow: View {
             } message: {
                 Text((sendingProblem ?? "") + "\n\nReceiving already works. You can add the mailbox now and sort sending out later, but you will not be able to send from it until you do.")
             }
-        }
-        // Nothing here closes on a swipe -- a half-answered flow should not
-        // vanish because a finger moved. The X is the way out, and during
-        // the import it is offered rather than withheld.
-        .interactiveDismissDisabled()
     }
 
     // MARK: - Steps

@@ -40,8 +40,12 @@ struct YouView: View {
                 accounts
 
                 Section {
-                    SettingsRow("Usage",
-                                value: AIUsage.total == 0 ? "None" : "\(AIUsage.total)") {
+                    // No value. It read `AIUsage.total` -- a count of calls
+                    // attempted on this one phone -- which is the wrong unit
+                    // for the screen behind it and the first usage number
+                    // anybody sees. Nobody can convert "92" into "how much of
+                    // my plan is left", and the row led with it.
+                    SettingsRow("Usage") {
                         AIUsageView()
                     }
                     SettingsRow("Preferences") { AIPreferencesView() }

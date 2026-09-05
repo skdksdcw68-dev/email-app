@@ -21,10 +21,17 @@ struct AIUsageView: View {
     @State private var usage = UsageStore()
     @State private var isShowingPlans = false
 
-    private var plan: Plan { .current }
-    private var spent: Double { usage.spend?.thisMonth ?? 0 }
-    private var allowance: Double { plan.monthlyAllowanceUSD }
-    private var fraction: Double { allowance > 0 ? min(1, spent / allowance) : 0 }
+    // 🔴 From the server, not from Plan.current.
+    //
+    // Plan.current was hardcoded to free, so the denominator was always the
+    // free tier's thirty cents whatever somebody paid. A Pro subscriber who
+    // had spent forty cents of their real six dollars was shown "100% used"
+    // and a red bar. Every number on this screen now comes from the same
+    // verdict the server refuses requests on, so being shown an allowance and
+    // then denied it is not possible.
+    private var plan: Plan { usage.spend?.tier ?? .free }
+    private var fraction: Double { usage.spend?.fraction ?? 0 }
+    private var hasCredit: Bool { (usage.spend?.credit ?? 0) > 0 }
 
 
     var body: some View {
@@ -70,9 +77,26 @@ struct AIUsageView: View {
                         .font(Style.rowDetail)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 8)
-                    Text(Self.renewal)
-                        .font(Style.rowDetail)
-                        .foregroundStyle(.tertiary)
+                    if let end = usage.spend?.period_end {
+                        Text("Back on \(end.formatted(.dateTime.day().month(.abbreviated)))")
+                            .font(Style.rowDetail)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                // ⚠️ Said only when it is true, and only for people it is
+                // true of. Somebody in billing retry keeps everything they
+                // pay for -- cutting them off while their bank sorts itself
+                // out is how a customer becomes an ex-customer -- but they do
+                // need to know, because in a few days it stops.
+                if usage.spend?.is_in_grace == true {
+                    Label(
+                        "Your last payment did not go through. Everything still works for now.",
+                        systemImage: "creditcard.trianglebadge.exclamationmark"
+                    )
+                    .font(Style.rowDetail)
+                    .foregroundStyle(Color.warning)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if usage.isLoading {
@@ -92,7 +116,13 @@ struct AIUsageView: View {
             // ⚠️ Said outright, because it is the part that differs from every
             // other app's usage screen and the part that costs somebody money
             // if they assume otherwise.
-            Text("There is no weekly or daily reset. What you use is used until your plan renews.")
+            //
+            // 🔴 "until your plan renews" was wrong, and expensively so. The
+            // allowance window is a calendar month; the subscription renews on
+            // its own anniversary. Somebody who subscribed on the 20th read
+            // that sentence next to "1 Oct" and had every reason to think they
+            // would be charged on the 1st.
+            Text("There is no weekly or daily reset. Your allowance comes back on the 1st of each month.")
         }
     }
 
@@ -110,36 +140,50 @@ struct AIUsageView: View {
                 }
             }
 
-            Button {
-                isShowingPlans = true
-            } label: {
-                LabeledContent {
-                    Text("Top up").foregroundStyle(.secondary)
+            // 🔴 Only offered to somebody who can actually spend it.
+            //
+            // Straight from reading Drobe, which sells credit packs to
+            // everybody while the code that spends credit sits behind the
+            // subscriber gate -- so a non-subscriber can buy something that
+            // is unspendable, and the receipt says it does not expire. Money
+            // taken for nothing is the one bug that cannot be apologised
+            // away, and it is one `if` to not have.
+            if plan != .free {
+                Button {
+                    isShowingPlans = true
                 } label: {
-                    Text("Buy credits").font(Style.rowTitle)
+                    LabeledContent {
+                        Text(hasCredit ? "Add more" : "Top up").foregroundStyle(.secondary)
+                    } label: {
+                        Text("Buy credits").font(Style.rowTitle)
+                    }
                 }
             }
         } header: {
             Text("When you run out")
         } footer: {
-            Text("Credit is used after your monthly allowance, and does not expire while your plan is active.")
+            Text(plan == .free
+                 ? "Credit can be bought on top of a paid plan. It is used after your monthly allowance."
+                 : "Credit is used after your monthly allowance, and does not expire while your plan is active.")
         }
     }
 
     // MARK: - The way in to the detail
 
+    /// 🔴 No call counts here any more.
+    ///
+    /// There was a "What used it — 92" row and a page of per-feature counts
+    /// behind it. Both were `AIUsage`, which lives in `UserDefaults` on one
+    /// device and records *before* the request is sent — so it counts calls
+    /// that failed, calls that 401'd, and none of the calls made on any other
+    /// phone.
+    ///
+    /// Two units for one idea, and the wrong one was the more prominent. A
+    /// person cannot convert "92 requests" into "how much of my plan is
+    /// left", and the exact answer to the second question was on screen
+    /// directly above it.
     private var detailSection: some View {
         Section {
-            NavigationLink { UsageDetailView() } label: {
-                LabeledContent {
-                    Text("\(AIUsage.total)")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                } label: {
-                    Text("What used it").font(Style.rowTitle)
-                }
-            }
-
             NavigationLink { AIPreferencesView() } label: {
                 Text("Turn things down").font(Style.rowTitle)
             }
@@ -166,82 +210,5 @@ struct AIUsageView: View {
         if left <= 0 { return "None left this month" }
         if left >= 99 { return "Barely touched" }
         return "\(left)% left"
-    }
-
-    /// The first of next month, which is when a month's allowance comes back.
-    private static var renewal: String {
-        let calendar = Calendar.current
-        guard let next = calendar.date(
-            byAdding: .month, value: 1,
-            to: calendar.dateInterval(of: .month, for: .now)?.start ?? .now
-        ) else { return "" }
-        return "Renews \(next.formatted(.dateTime.day().month(.abbreviated)))"
-    }
-}
-
-/// The per-feature counts, moved off the main screen.
-///
-/// They answer a real question -- *what* is spending this -- but it is the
-/// second question somebody asks, and it was taking four times the room of
-/// the first.
-struct UsageDetailView: View {
-    @State private var isConfirmingReset = false
-
-    private var counts: [(kind: AIUsage.Kind, count: Int)] { AIUsage.used }
-
-    var body: some View {
-        List {
-            if counts.isEmpty {
-                Section {
-                    Text("Nothing yet this month.")
-                        .font(Style.rowTitle)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                Section {
-                    ForEach(counts, id: \.kind) { row in
-                        LabeledContent {
-                            Text("\(row.count)")
-                                .font(Style.rowTitle.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(row.kind.title).font(Style.rowTitle)
-                                Text(row.kind.detail)
-                                    .font(Style.rowDetail)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
-                } footer: {
-                    // Counted on the phone; the money is counted on the
-                    // server. They can disagree, and the reason is worth
-                    // saying: a call made on another device is in the money
-                    // and not in these.
-                    Text("Counted on this phone. The amount on the Usage screen is counted on the server, so it includes your other devices.")
-                }
-            }
-
-            Section {
-                Button(role: .destructive) {
-                    isConfirmingReset = true
-                } label: {
-                    Text("Reset these counts")
-                        .font(Style.rowTitle)
-                        .foregroundStyle(Color.urgent)
-                }
-            }
-        }
-        .navigationTitle("What used it")
-        .navigationBarTitleDisplayMode(.inline)
-        .hidesTabBar()
-        .alert("Reset the counts?", isPresented: $isConfirmingReset) {
-            Button("Cancel", role: .cancel) {}
-            Button("Reset", role: .destructive) { AIUsage.reset() }
-        } message: {
-            Text("Clears this list on this phone. What you have spent is recorded on the server and is not affected.")
-        }
     }
 }

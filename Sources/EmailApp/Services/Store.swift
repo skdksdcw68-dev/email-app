@@ -98,7 +98,25 @@ final class Store {
 
     @discardableResult
     func buy(_ product: Product) async throws -> Outcome {
-        let result = try await product.purchase()
+        // 🔴 The purchase is stamped with who is buying it, at the moment of
+        // buying.
+        //
+        // Apple carries `appAccountToken` through every renewal and into every
+        // server notification, and it is the only way a notification arriving
+        // hours later -- with no session, no headers and no app running -- can
+        // be matched to an account. Without it the webhook has nothing but the
+        // Apple ID, which Apple never tells us, so a renewal would write an
+        // entitlement for nobody.
+        //
+        // ⚠️ It must be a UUID, and Supabase user ids already are. A purchase
+        // made signed out has none, which the webhook handles by falling back
+        // to whoever posts the receipt.
+        var options: Set<Product.PurchaseOption> = []
+        if let id = await Self.accountToken() {
+            options.insert(.appAccountToken(id))
+        }
+
+        let result = try await product.purchase(options: options)
 
         switch result {
         case .success(let verification):
@@ -119,14 +137,58 @@ final class Store {
         }
     }
 
+    /// What a restore actually resolved to.
+    enum Restored {
+        /// A subscription was found and re-sent to the server.
+        case found(Plan)
+        /// This Apple ID has nothing to restore.
+        case nothing
+        /// The App Store could not be reached. **Not** the same as nothing --
+        /// telling somebody they own nothing because a network call failed is
+        /// how a paying customer is talked into buying twice.
+        case unknown(String)
+    }
+
     /// Restores what this Apple ID already owns.
     ///
     /// Required by App Store review for any app selling a subscription, and
     /// genuinely needed: somebody reinstalling on a new phone has bought
     /// nothing new and must not be asked to buy again.
-    func restore() async {
-        try? await AppStore.sync()
+    ///
+    /// 🔴 It re-sends the receipt, and it answers honestly.
+    ///
+    /// Both halves are Drobe's lessons. Drobe's restore reports *"Purchases
+    /// restored. Your Pro subscription is active again."* on every outcome
+    /// that is not an outright ownership conflict -- including a receipt it
+    /// never verified and an answer it never received. And Maily's own
+    /// restore used to re-read the local cache and stop there: `AppStore.sync`
+    /// does not redeliver finished transactions, so the server heard nothing,
+    /// `original_transaction_id` stayed null, and spend fell back to counting
+    /// per account -- which is precisely the hole the subscription ledger was
+    /// built to close.
+    @discardableResult
+    func restore() async -> Restored {
+        do {
+            try await AppStore.sync()
+        } catch {
+            // A cancelled password prompt lands here too, which is why this
+            // is "unknown" and not "nothing".
+            return .unknown(error.localizedDescription)
+        }
+
+        // Re-send every live entitlement, not just re-read them. This is the
+        // half that makes a restore reach the server at all.
+        var restored: Plan = .free
+        for await result in Transaction.currentEntitlements {
+            guard case .verified(let transaction) = result else { continue }
+            await tell(signed: result.jwsRepresentation)
+            if let plan = Self.plan(for: transaction.productID), plan.rank > restored.rank {
+                restored = plan
+            }
+        }
+
         await refreshActivePlan()
+        return restored == .free ? .nothing : .found(restored)
     }
 
     // MARK: - What is owned
@@ -153,18 +215,60 @@ final class Store {
         await refreshActivePlan()
     }
 
+    /// Exactly which products this Apple ID currently holds.
+    ///
+    /// The paywall needs the product, not just the tier: somebody on Pro
+    /// monthly does not own Pro yearly, and telling them they do hides the
+    /// only upgrade the screen exists to offer.
+    private(set) var ownedProductIDs: Set<String> = []
+
+    /// Whether an introductory offer is still available to this Apple ID for
+    /// a product.
+    ///
+    /// ⚠️ Eligibility is per Apple ID and per *subscription group*, not per
+    /// product, and StoreKit is the only thing that knows. Assuming it -- as
+    /// the paywall did -- promises a free trial to somebody who used theirs a
+    /// year ago and then charges them on the spot.
+    private(set) var trialEligibleIDs: Set<String> = []
+
+    func offersTrial(for id: String?) -> Bool {
+        guard let id else { return false }
+        return trialEligibleIDs.contains(id)
+    }
+
     /// What StoreKit says is active right now, mapped onto a plan.
     private func refreshActivePlan() async {
         var best: Plan = .free
+        var owned: Set<String> = []
 
         for await result in Transaction.currentEntitlements {
             guard case .verified(let transaction) = result else { continue }
+            owned.insert(transaction.productID)
             guard let plan = Self.plan(for: transaction.productID) else { continue }
             // Highest tier wins, in case both somehow appear.
             if plan == .max { best = .max } else if best != .max { best = plan }
         }
 
         activePlan = best
+        ownedProductIDs = owned
+        await refreshTrialEligibility()
+    }
+
+    private func refreshTrialEligibility() async {
+        var eligible: Set<String> = []
+
+        for product in products {
+            guard let subscription = product.subscription else { continue }
+            // `isEligibleForIntroOffer` is asked of the *group*, and a product
+            // with no introductory offer configured can never be eligible
+            // however the group answers.
+            guard subscription.introductoryOffer != nil else { continue }
+            if await subscription.isEligibleForIntroOffer {
+                eligible.insert(product.id)
+            }
+        }
+
+        trialEligibleIDs = eligible
     }
 
     static func plan(for productID: String) -> Plan? {
@@ -207,5 +311,13 @@ final class Store {
             return session.accessToken
         }
         return SupabaseConfig.anonKey
+    }
+
+    /// The signed-in person's id, as the UUID Apple will carry.
+    ///
+    /// Nil when signed out, which is a real state: Maily works without an
+    /// account, so somebody can reach the paywall with no user to bind to.
+    private static func accountToken() async -> UUID? {
+        try? await Backend.userID()
     }
 }

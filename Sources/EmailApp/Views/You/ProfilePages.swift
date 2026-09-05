@@ -374,28 +374,65 @@ struct LanguageView: View {
 
 /// The plan.
 ///
-/// ⚠️ Still a placeholder, but no longer a *false* one. It used to say "You
-/// pay your own AI costs directly, and nothing goes through Maily", which was
-/// the same untruth as the old Usage footer: nobody's key is on their phone,
-/// and every call is billed to the operator.
+/// 🔴 **The plan comes from the server, and from nowhere else.**
 ///
-/// Saying "free while Maily is in testing" is both accurate today and the
-/// honest thing to have said all along. The real screen -- allowance, credits,
-/// upgrade -- lands with StoreKit.
+/// This page said "Free while Maily is in testing" and Settings said the
+/// literal string "Free" in the row that opened it -- so a Max subscriber was
+/// told twice that they were on the free plan while the paywall, three taps
+/// away, correctly showed Max as current. Two screens disagreeing about
+/// something somebody pays for is not a cosmetic bug.
+///
+/// It asks `my_spend()`, which is the same verdict a request is refused on.
+/// StoreKit is deliberately *not* consulted here: a device's cache says yes
+/// for days after a subscription lapses and says no on the phone somebody
+/// restored to five minutes ago, and both of those are wrong in the direction
+/// that costs somebody something.
 struct PlanView: View {
+    @State private var usage = UsageStore()
+    @State private var isShowingPlans = false
+
+    private var plan: Plan { usage.spend?.tier ?? .free }
+
     var body: some View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Free while Maily is in testing")
+                    Text(plan == .free ? "Free" : plan.title)
                         .font(.title3.weight(.bold))
-                    Text("Every feature is on and the AI is on us. Paid plans arrive before Maily leaves testing, and you will be told what they are well before anything changes.")
+                    Text(Self.blurb(for: plan))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let renews = usage.spend?.renews_at {
+                        // The *billing* date, which is the subscription's own
+                        // anniversary -- not the 1st, when the allowance comes
+                        // back. Two different dates, on two different screens,
+                        // each labelled for what it is.
+                        Text("Renews \(renews.formatted(.dateTime.day().month(.abbreviated).year()))")
+                            .font(.footnote)
+                            .foregroundStyle(.tertiary)
+                    }
+                    if usage.spend?.is_in_grace == true {
+                        Label("Your last payment did not go through.",
+                              systemImage: "creditcard.trianglebadge.exclamationmark")
+                            .font(.footnote)
+                            .foregroundStyle(Color.warning)
+                    }
                 }
                 .padding(.vertical, 4)
+
+                Button {
+                    isShowingPlans = true
+                } label: {
+                    Text(plan == .free ? "See plans" : "Change plan")
+                }
             } header: {
                 Text("Current plan")
+            } footer: {
+                if let failure = usage.failure {
+                    Text(failure)
+                }
             }
 
             Section {
@@ -411,5 +448,19 @@ struct PlanView: View {
         .navigationTitle("Plan")
         .navigationBarTitleDisplayMode(.inline)
         .hidesTabBar()
+        .refreshable { await usage.refresh() }
+        .task { await usage.refresh() }
+        .sheet(isPresented: $isShowingPlans) { PlansView() }
+    }
+
+    private static func blurb(for plan: Plan) -> String {
+        switch plan {
+        case .free:
+            "One mailbox, and a small amount of AI each month. A plan raises both."
+        case .pro:
+            "Up to three mailboxes, with sorting, summaries and drafting."
+        case .max:
+            "Unlimited mailboxes, the faster model, and the largest monthly allowance."
+        }
     }
 }
