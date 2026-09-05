@@ -48,7 +48,11 @@ struct QuestionView: View {
                     .fontWeight(.semibold)
                     .frame(maxWidth: .infinity, minHeight: 30)
             }
-            .buttonStyle(user.canContinue(from: question) ? .borderedProminent : .bordered)
+            .buttonStyle(.borderedProminent)
+            // Tint rather than a different style: the two button styles are
+            // different types and cannot share a ternary. Grey says "this is
+            // not the thing to do" without taking the control away.
+            .tint(user.canContinue(from: question) ? Color.accentColor : Color.secondary)
             .controlSize(.large)
             .padding(.horizontal, 20)
             .padding(.top, 10)
