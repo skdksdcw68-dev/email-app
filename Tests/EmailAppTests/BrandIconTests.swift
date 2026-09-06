@@ -112,10 +112,11 @@ final class GravatarTests: XCTestCase {
 
     /// Namespaced, or a person's Gravatar and their company's logo would
     /// overwrite each other in the image cache.
-    func testKeyIsNamespaced() {
+    func testKeyIsNamespaced() throws {
+        let logo = try XCTUnwrap(URL(string: "https://b.com/apple-touch-icon.png"))
         XCTAssertNotEqual(
             BrandIcon.gravatarKey(for: "a@b.com"),
-            LogoDirectory.key(for: "b.com")
+            LogoDirectory.key(for: "b.com", url: logo)
         )
     }
 }
