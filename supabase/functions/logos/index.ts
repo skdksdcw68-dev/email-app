@@ -39,7 +39,10 @@ const MISS_DAYS = 14;
 
 /// Below this an icon is a blurry smear in an avatar circle and a letter is
 /// the better answer.
-const MIN_PIXELS = 32;
+///
+/// 96, not 32: at 32 Bybit's 48px favicon passed and was stretched across a
+/// 132-pixel circle. Gmail shows Bybit as an amber B, and so does this now.
+const MIN_PIXELS = 96;
 /// Good enough to stop climbing the ladder.
 const GOOD_PIXELS = 120;
 
@@ -135,6 +138,10 @@ async function read(domains: string[]): Promise<Map<string, Stored>> {
 }
 
 function isStale(row: Stored): boolean {
+  // A logo found under an older, lower floor is re-resolved rather than
+  // served for its ninety days. It usually comes back a miss, which is the
+  // right answer for it now.
+  if (!row.missing && (row.width ?? 0) < MIN_PIXELS) return true;
   const age = Date.now() - new Date(row.resolved_at).getTime();
   const days = row.missing ? MISS_DAYS : FRESH_DAYS;
   return age > days * 24 * 60 * 60 * 1000;

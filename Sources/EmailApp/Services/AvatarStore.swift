@@ -78,6 +78,22 @@ final class AvatarStore {
         return image
     }
 
+    /// Whether a picture reaches its own edges -- an app icon, a BIMI mark,
+    /// a photograph -- or is a glyph floating on transparency. That decides
+    /// whether `SenderAvatar` may draw it edge to edge like a face.
+    ///
+    /// Remembered per picture: the answer reads pixels, and a `View` body
+    /// asks on every draw. Not observed, for the same reason `memory` is not.
+    @ObservationIgnored private var fills: [String: Bool] = [:]
+
+    func fillsFrame(_ key: String) -> Bool {
+        if let known = fills[key] { return known }
+        guard let image = image(for: key) else { return true }
+        let answer = image.fillsItsFrame
+        fills[key] = answer
+        return answer
+    }
+
     /// Fetches the picture if there is not a fresh one already.
     ///
     /// Safe to call from `onAppear` on every row: the guards below make the
@@ -123,6 +139,7 @@ final class AvatarStore {
     /// Drops a picture, for a mailbox being signed out of.
     func forget(key: String) {
         memory[key] = nil
+        fills[key] = nil
         checked.remove(key)
         if let file = Self.file(for: key) {
             try? FileManager.default.removeItem(at: file)
@@ -137,6 +154,7 @@ final class AvatarStore {
     /// one nothing would think to remove.
     func forgetAll() {
         memory.removeAll()
+        fills.removeAll()
         checked.removeAll()
         if let folder = Self.folder {
             try? FileManager.default.removeItem(at: folder)
@@ -178,8 +196,15 @@ final class AvatarStore {
     }
 
     private static func write(_ image: UIImage, for key: String) {
+        // 🔴 PNG when there is transparency to keep. JPEG has no alpha, so a
+        // mark floating on nothing came back from disk on the next launch as
+        // a mark on a black square -- right in memory, wrong after a relaunch,
+        // the kind of difference nobody thinks to test. The file keeps its
+        // `.jpg` name; `UIImage(data:)` reads the bytes, not the name.
         guard let path = path(for: key),
-              let data = image.jpegData(compressionQuality: 0.9)
+              let data = image.hasAlphaChannel
+                  ? image.pngData()
+                  : image.jpegData(compressionQuality: 0.9)
         else { return }
         try? data.write(to: path, options: .atomic)
     }
@@ -204,6 +229,49 @@ final class AvatarStore {
             return UIImage(data: data)
         } catch {
             return nil
+        }
+    }
+}
+
+extension UIImage {
+    /// Whether the picture carries transparency at all.
+    var hasAlphaChannel: Bool {
+        guard let alpha = cgImage?.alphaInfo else { return false }
+        switch alpha {
+        case .none, .noneSkipLast, .noneSkipFirst: return false
+        default: return true
+        }
+    }
+
+    /// Whether the picture reaches its own edges.
+    ///
+    /// The circle an avatar is cropped to touches the middle of each side and
+    /// never the corners, so it is the side midpoints that are read: an app
+    /// icon with rounded corners passes, a mark floating on transparency does
+    /// not. Drawn down to 8x8 and read back -- tiny, and done once per
+    /// picture by `AvatarStore`.
+    var fillsItsFrame: Bool {
+        guard hasAlphaChannel, let cg = cgImage else { return true }
+
+        let side = 8
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        return pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let base = buffer.baseAddress,
+                  let context = CGContext(
+                      data: base, width: side, height: side, bitsPerComponent: 8,
+                      bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
+                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                  )
+            else { return true }
+            context.interpolationQuality = .medium
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: side, height: side))
+
+            func alpha(_ x: Int, _ y: Int) -> UInt8 { buffer[(y * side + x) * 4 + 3] }
+            let sides = [
+                alpha(3, 0), alpha(4, 0), alpha(3, 7), alpha(4, 7),
+                alpha(0, 3), alpha(0, 4), alpha(7, 3), alpha(7, 4),
+            ]
+            return sides.allSatisfy { $0 >= 230 }
         }
     }
 }

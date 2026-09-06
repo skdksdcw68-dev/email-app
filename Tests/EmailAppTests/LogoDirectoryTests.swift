@@ -35,4 +35,20 @@ final class LogoDirectoryTests: XCTestCase {
         let answers = try XCTUnwrap(LogoDirectory.parse(Data("{}".utf8)))
         XCTAssertTrue(answers.isEmpty)
     }
+
+    // MARK: - The cache key follows the picture
+
+    func testABetterAnswerIsANewKey() throws {
+        // TikTok went from a favicon to its BIMI mark on the server and the
+        // phone kept drawing the favicon: same domain, same key, fresh file.
+        let favicon = try XCTUnwrap(URL(string: "https://www.google.com/s2/favicons?domain=tiktok.com"))
+        let bimi = try XCTUnwrap(URL(string: "https://example.supabase.co/functions/v1/logos/img/tiktok.com"))
+
+        let before = LogoDirectory.key(for: "tiktok.com", url: favicon)
+        let after = LogoDirectory.key(for: "tiktok.com", url: bimi)
+
+        XCTAssertNotEqual(before, after)
+        XCTAssertEqual(before, LogoDirectory.key(for: "tiktok.com", url: favicon))
+        XCTAssertTrue(before.hasPrefix("brand-tiktok.com-"))
+    }
 }

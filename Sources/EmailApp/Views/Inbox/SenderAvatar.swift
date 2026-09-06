@@ -116,11 +116,18 @@ struct SenderAvatar: View {
     private var logo: UIImage? {
         let _ = logos.generation
         let _ = avatars.generation
+        guard let key = logoKey else { return nil }
+        return avatars.image(for: key)
+    }
+
+    /// Where the company's logo lives in the image cache, if the server has
+    /// named one. Depends on the URL, so a better answer is a new key.
+    private var logoKey: String? {
         guard allowsBrandIcon,
               let domain = BrandIcon.domain(for: contact.address),
-              logos.url(for: domain) != nil
+              let url = logos.url(for: domain)
         else { return nil }
-        return avatars.image(for: LogoDirectory.key(for: domain))
+        return LogoDirectory.key(for: domain, url: url)
     }
 
     /// A Gravatar, for a personal address with no company behind it.
@@ -131,13 +138,20 @@ struct SenderAvatar: View {
     }
 
     var body: some View {
-        Group {
+        // Read once per draw -- each is a dictionary lookup -- because the
+        // tier decides both what is drawn and what animates.
+        let face = self.face
+        let logo = self.logo
+        let gravatar = self.gravatar
+        let tier = face != nil ? 3 : logo != nil ? 2 : gravatar != nil ? 1 : 0
+
+        return Group {
             // In order: the person, then their company, then whatever they
             // published themselves, then a letter.
             if let face {
                 photo(face)
-            } else if let logo {
-                brandIcon(logo)
+            } else if let logo, let key = logoKey {
+                brandIcon(logo, key: key)
             } else if let gravatar {
                 photo(gravatar)
             } else {
@@ -147,7 +161,9 @@ struct SenderAvatar: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .opacity(isMuted ? 0.85 : 1)
-        .animation(.easeOut(duration: 0.18), value: logo != nil)
+        // Fades between tiers: a logo over a letter, a face over either. It
+        // used to watch the logo alone, so a face popped in with no fade.
+        .animation(.easeOut(duration: 0.18), value: tier)
         // 🔴 Nothing is fetched here any more.
         //
         // This used to start a DNS lookup and up to three image requests, per
@@ -176,7 +192,7 @@ struct SenderAvatar: View {
             // Enqueues, and the batch goes out once the list settles.
             logos.need(domain)
             if let url = logos.url(for: domain) {
-                avatars.ensure(key: LogoDirectory.key(for: domain), url: url)
+                avatars.ensure(key: LogoDirectory.key(for: domain, url: url), url: url)
             }
         } else if let url = BrandIcon.gravatarURL(for: contact.address) {
             // A personal address -- gmail, icloud, their own mail server.
@@ -201,19 +217,29 @@ struct SenderAvatar: View {
             .clipShape(Circle())
     }
 
-    /// On a white plate, inset like an app icon. Logos come in every shape and
-    /// half of them are transparent or near-black -- drawn edge to edge on the
-    /// row background, those either vanish in dark mode or sit in the list as
-    /// a ragged square among circles.
-    private func brandIcon(_ image: UIImage) -> some View {
-        Circle()
-            .fill(.white)
-            .overlay {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(size * 0.19)
+    /// A mark drawn like a photograph -- edge to edge, cropped to the circle
+    /// -- when it fills its own frame, which an app icon or a BIMI mark does.
+    /// That is how Gmail draws a BIMI logo, and it is the difference between
+    /// "Supabase" and "a favicon of Supabase on a plate".
+    ///
+    /// A glyph on nothing -- a transparent PNG with the mark floating in it --
+    /// keeps the white plate and the inset. Drawn edge to edge it would vanish
+    /// in dark mode, or sit in the list as a ragged shape among circles.
+    private func brandIcon(_ image: UIImage, key: String) -> some View {
+        Group {
+            if avatars.fillsFrame(key) {
+                photo(image)
+            } else {
+                Circle()
+                    .fill(.white)
+                    .overlay {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .padding(size * 0.19)
+                    }
             }
+        }
     }
 
     private var letterAvatar: some View {

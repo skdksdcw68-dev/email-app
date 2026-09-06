@@ -105,15 +105,17 @@ final class LogoDirectory {
         // server had all three.
         let answers = await Self.resolve(batch) ?? [:]
 
-        var arrived = false
+        let arrived = !answers.isEmpty
         for (domain, url) in answers {
             known.insert(domain)
-            guard let url else { continue }
+            // A company that had a logo and now has none loses it here too:
+            // a nil through the subscript removes the entry, and its row goes
+            // back to a letter on the redraw below.
             urls[domain] = url
+            guard let url else { continue }
             // Start the download straight away rather than waiting for the row
             // to appear again -- it usually still is.
-            AvatarStore.shared.ensure(key: Self.key(for: domain), url: url)
-            arrived = true
+            AvatarStore.shared.ensure(key: Self.key(for: domain, url: url), url: url)
         }
 
         save()
@@ -140,10 +142,26 @@ final class LogoDirectory {
     }
 
     /// Namespaced so a brand's picture and a person's cannot collide in the
-    /// image cache.
+    /// image cache, and keyed on the *picture* as well as the company.
+    ///
+    /// 🔴 Keyed on the domain alone, the cache never noticed the server
+    /// changing its mind. TikTok stayed a 32px favicon on the phone after the
+    /// server had switched it to the BIMI mark, because `AvatarStore` saw a
+    /// fresh file under `brand-tiktok.com` and had no reason to look again.
+    /// A different URL is a different key, so a better answer is drawn the
+    /// moment it arrives; the old file is a few kilobytes of orphan.
+    ///
     /// `nonisolated` because it is a pure string and has no business dragging
     /// the main actor into a caller that only wants a cache key.
-    nonisolated static func key(for domain: String) -> String { "brand-\(domain)" }
+    nonisolated static func key(for domain: String, url: URL) -> String {
+        // djb2, not `hashValue`: that is seeded per process, and a key that
+        // changed every launch would re-download every logo every launch.
+        var hash: UInt64 = 5381
+        for byte in url.absoluteString.utf8 {
+            hash = (hash &* 33) &+ UInt64(byte)
+        }
+        return "brand-\(domain)-\(String(hash, radix: 36))"
+    }
 
     /// The server's answer, or `nil` when there was none -- a timeout, a
     /// non-200, a body that is not JSON. A domain the server answered with no
