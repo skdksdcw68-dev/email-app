@@ -17,6 +17,12 @@ import Observation
 @Observable
 final class UsageStore {
 
+    /// One, because the plan is read in two places that must agree: the
+    /// Usage screen, and `MailStore.enhanceWithAI`, which decides how much of
+    /// a mailbox the free tier sorts. Refreshed at launch, and whenever the
+    /// Usage screen is opened.
+    static let shared = UsageStore()
+
     /// The verdict, exactly as `spend_check` returns it.
     struct Spend: Codable, Equatable {
         var plan: String?

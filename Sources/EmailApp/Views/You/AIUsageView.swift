@@ -18,7 +18,7 @@ import SwiftUI
 struct AIUsageView: View {
     @Environment(MailStore.self) private var mail
 
-    @State private var usage = UsageStore()
+    private var usage: UsageStore { .shared }
     @State private var isShowingPlans = false
 
     // 🔴 From the server, not from Plan.current.

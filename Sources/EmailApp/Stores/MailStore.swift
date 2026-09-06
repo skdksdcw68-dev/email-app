@@ -1418,17 +1418,26 @@ final class MailStore {
             }
         }
 
+        // Ids rather than messages, and worked out once: the loop below reads
+        // the live array each time round so that a message just given its
+        // summary drops out of the next batch, and a filtered copy taken here
+        // would keep sending the same fifteen forever.
+        let eligible = Self.eligibleForAI(messages, tier: UsageStore.shared.spend?.tier)
+        func allowed(_ message: Message) -> Bool { eligible?.contains(message.id) ?? true }
+
         var budget = Self.enhancePassLimit
         while budget > 0 {
             let firstTier = messages
-                .filter { $0.mailbox != .sent && $0.aiSummary == nil && !$0.tags.contains(.noReplyNeeded) }
+                .filter { allowed($0) && $0.mailbox != .sent && $0.aiSummary == nil && !$0.tags.contains(.noReplyNeeded) }
                 .prefix(limit)
             // Messages the first tier already flagged whose second read never
             // ran -- the app was closed, the call failed -- and sent mail,
             // which goes straight to the second tier.
             let secondTier = messages
                 .filter { message in
-                    guard let remoteID = message.remoteID, !facts.hasExtracted(remoteID) else { return false }
+                    guard allowed(message),
+                          let remoteID = message.remoteID, !facts.hasExtracted(remoteID)
+                    else { return false }
                     if message.mailbox == .sent { return true }
                     return ClassificationCache.entry(for: remoteID)?.extract == true
                 }
@@ -1464,6 +1473,27 @@ final class MailStore {
     /// a few thousand; twenty batches of fifteen is a couple of minutes in
     /// the background, and the next refresh picks up where it stopped.
     static let enhancePassLimit = 300
+
+    /// How much of a mailbox the free tier sorts: the newest thousand at
+    /// import, and everything that arrives after, which is newest by
+    /// definition.
+    static let freeSortingDepth = 1000
+
+    /// Which messages the plan lets the model read, as ids. Nil means all.
+    ///
+    /// ⚠️ Not enforcement -- the ceiling on the server is that. This is about
+    /// what the free allowance is *spent on*. Left alone, an import spent the
+    /// whole thirty cents on the oldest mail in the box and had nothing left
+    /// for the message that arrived this morning, which is the one that
+    /// matters. Free sorts the newest thousand and then whatever comes in.
+    /// Paid plans sort everything, and so does a plan not yet known: the
+    /// answer arrives a moment after launch, and a first pass of three
+    /// hundred is a cent.
+    static func eligibleForAI(_ messages: [Message], tier: Plan?) -> Set<Message.ID>? {
+        guard tier == .free else { return nil }
+        let newest = messages.sorted { $0.date > $1.date }.prefix(freeSortingDepth)
+        return Set(newest.map(\.id))
+    }
 
     /// First tier, then the second where the first asked for it. False when
     /// the service did not answer.

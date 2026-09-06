@@ -103,6 +103,9 @@ struct EmailAppApp: App {
                     // Whatever this account has that this phone does not.
                     // After the mail, because nothing on screen waits on it.
                     Task {
+                        // Which plan this is, before the first sorting pass
+                        // decides how much of the mailbox to send. One RPC.
+                        await UsageStore.shared.refresh()
                         // The face at the top of You. First in this task
                         // because it is the one thing here that is visible
                         // immediately, and it is usually already on disk.
