@@ -413,11 +413,11 @@ struct InboxHomeView: View {
 
     @ViewBuilder
     private var emptyState: some View {
-        if let tag {
+        if let category {
             ContentUnavailableView(
-                "No \(tag.title) Mail",
-                systemImage: tag.systemImage,
-                description: Text("Nothing in \(mailbox.title) is tagged \(tag.title).")
+                "No \(category.name) Mail",
+                systemImage: category.symbol,
+                description: Text("Nothing in \(mailbox.title) is in \(category.name).")
             )
         } else {
             ContentUnavailableView(
