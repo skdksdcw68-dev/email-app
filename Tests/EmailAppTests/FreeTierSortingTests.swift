@@ -2,6 +2,7 @@ import XCTest
 @testable import EmailApp
 
 /// What the free allowance is spent on: the newest mail, not the oldest.
+@MainActor
 final class FreeTierSortingTests: XCTestCase {
 
     private func mailbox(count: Int) -> [Message] {
