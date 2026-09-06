@@ -181,7 +181,19 @@ final class UserStore {
     func next() {
         switch phase {
         case .question(let index):
-            phase = index + 1 < questions.count ? .question(index + 1) : .createAccount
+            if index + 1 < questions.count {
+                phase = .question(index + 1)
+            } else if account != nil {
+                // Already signed in -- the questions came after a sign-in the
+                // account could not vouch for. Asking them to sign in again
+                // here would be the second sign-in screen in a minute. The
+                // answers go up now, and they go on to the mailbox.
+                explainsQuestionsAfterSignIn = false
+                Task { await SettingsSync.shared.pushNow(.onboarding) }
+                phase = .connectInbox
+            } else {
+                phase = .createAccount
+            }
         case .createAccount, .signIn:
             phase = .connectInbox
         case .connectInbox:
@@ -304,13 +316,46 @@ final class UserStore {
     /// somebody who pressed "Sign in" having never registered is sent *to* the
     /// questions rather than past them.
     func continueAfterAuth() async {
+        let cameToSignIn = phase == .signIn
+
+        // 🔴 A returning sign-in trusts only what the account holds.
+        //
+        // Abel signed in with Apple, was shown the questions, tapped one
+        // answer, went back, and signed in again -- and was waved straight
+        // through to Gmail, because that one tap had made `answers`
+        // non-empty and this read it as "has been through onboarding".
+        // Whatever is on this phone before a sign-in is not the account's;
+        // it is cleared, and only what comes back from the server counts.
+        if cameToSignIn {
+            answers = [:]
+            persistAnswers()
+        }
+
         // What this account already has. Without it a genuine returning user
         // on a new phone looks identical to a stranger -- both have an empty
         // local `answers` -- and would be made to answer everything again.
         await SettingsSync.shared.pull()
 
-        phase = hasAnsweredQuestions ? .connectInbox : .question(0)
+        if hasAnsweredQuestions {
+            // A new account that just answered the questions: this is the
+            // first moment a push can succeed, and nothing else was going to
+            // send them. Without it the next phone asked everything again.
+            if !cameToSignIn { await SettingsSync.shared.pushNow(.onboarding) }
+            phase = .connectInbox
+        } else {
+            // A sign-in that the account cannot vouch for -- an Apple ID that
+            // never finished onboarding, a brand-new person who tapped "Sign
+            // in". The questions are the right next step, and the screen
+            // says why they are there.
+            explainsQuestionsAfterSignIn = cameToSignIn
+            phase = .question(0)
+        }
     }
+
+    /// Set when a sign-in landed on the questions rather than in the app, so
+    /// the first question can say "you're signed in; a few quick questions"
+    /// instead of looking like a demand to sign up. Cleared when they move on.
+    var explainsQuestionsAfterSignIn = false
 
     /// Whether this account has been through the questions at all.
     ///

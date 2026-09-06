@@ -68,6 +68,16 @@ struct QuestionView: View {
                     .padding(.bottom, 2)
             }
 
+            // Why the questions are here. Somebody who pressed "Sign in" and
+            // landed on this read it as being told to sign up first, and went
+            // back to try again. Said once, on the first question.
+            if user.explainsQuestionsAfterSignIn, question.id == user.questions.first?.id {
+                Label("You're signed in. A few quick questions and you're in.", systemImage: "checkmark.circle.fill")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.bottom, 4)
+            }
+
             Text(question.title)
                 .font(.title2.bold())
                 .fixedSize(horizontal: false, vertical: true)
