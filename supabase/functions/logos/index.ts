@@ -46,6 +46,11 @@ const GOOD_PIXELS = 120;
 /// One request must not be able to make the server do unbounded work.
 const MAX_DOMAINS = 60;
 
+/// How long a request waits for cold domains before answering with what it
+/// has. The rest keep resolving after the response and are in the table for
+/// the phone's retry ten seconds later.
+const ANSWER_WITHIN_MS = 12_000;
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -442,16 +447,37 @@ Deno.serve(async (request) => {
 
   // Resolved together rather than one after another: a cold inbox is thirty
   // unknown domains, and doing those in sequence would take a minute.
-  await Promise.all(
-    toResolve.map(async (domain) => {
+  //
+  // 🔴 And answered within a deadline. The slowest company in a cold batch
+  // used to set the latency of the whole answer -- a site that hangs on
+  // apple-touch-icon.png costs two 6s timeouts before an icon service is
+  // even tried -- and the phone gave up at 20s and, in build 189, remembered
+  // the entire batch as "no logo" for a week. Now whatever has resolved by
+  // the deadline goes out; a domain missing from the answer is simply not
+  // answered yet, and the phone asks again.
+  const work = toResolve.map(async (domain) => {
+    try {
       const found = await resolve(domain);
       await write(domain, found);
       answer[domain] = {
         url: found?.url ?? null,
         source: found?.source ?? "none",
       };
-    }),
-  );
+    } catch (error) {
+      // One company's failure must not 500 the batch for the other thirty.
+      console.error("resolve failed", domain, String(error));
+    }
+  });
+  const everything = Promise.all(work);
+  await Promise.race([
+    everything,
+    new Promise<void>((done) => setTimeout(done, ANSWER_WITHIN_MS)),
+  ]);
+  // Keep the isolate alive for the stragglers after the response has gone,
+  // where the runtime offers it. Where it does not, they still usually
+  // finish before the isolate is torn down.
+  (globalThis as { EdgeRuntime?: { waitUntil(p: Promise<unknown>): void } })
+    .EdgeRuntime?.waitUntil(everything);
 
   return json(answer);
 });

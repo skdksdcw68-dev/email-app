@@ -39,6 +39,15 @@ final class LogoDirectory {
     @ObservationIgnored private var flush: Task<Void, Never>?
     @ObservationIgnored private var loaded = false
 
+    /// Domains a request did not answer are asked for again after this, up
+    /// to this many times per launch. The first request of a cold inbox is
+    /// the slow one -- the server is resolving thirty companies at once and
+    /// answers what it has inside its own deadline -- and the second ask
+    /// finds the rest already in its table.
+    private static let retryDelay: Duration = .seconds(10)
+    private static let maxRetries = 3
+    @ObservationIgnored private var retries = 0
+
     /// Long enough to collect a screenful, short enough that nobody sees the
     /// wait. A list settles well inside this.
     private static let batchWindow: Duration = .milliseconds(120)
@@ -82,14 +91,24 @@ final class LogoDirectory {
         let batch = Array(pending.prefix(Self.maxPerRequest))
         pending.subtract(batch)
 
-        let answers = await Self.resolve(batch)
+        // 🔴 Only what the server actually answered is marked known.
+        //
+        // A domain it answered with no logo is known -- otherwise a company
+        // with none is re-requested every time its row scrolls past, forever.
+        // A request that failed, or a domain the server had not finished by
+        // its deadline, is neither of those things, and marking it known
+        // would turn a slow moment into a week of letters.
+        //
+        // Build 189 did exactly that: marked the whole batch known on any
+        // outcome, timed out at 20s on the first cold request, and saved the
+        // result to disk. Google, Instagram and Bybit drew letters while the
+        // server had all three.
+        let answers = await Self.resolve(batch) ?? [:]
 
-        // ⚠️ Every domain asked for is marked known, including the ones that
-        // came back empty. Otherwise a company with no logo is re-requested
-        // every time its row scrolls past, forever.
-        known.formUnion(batch)
         var arrived = false
         for (domain, url) in answers {
+            known.insert(domain)
+            guard let url else { continue }
             urls[domain] = url
             // Start the download straight away rather than waiting for the row
             // to appear again -- it usually still is.
@@ -99,6 +118,22 @@ final class LogoDirectory {
 
         save()
         if arrived { generation &+= 1 }
+
+        let unanswered = batch.filter { !answers.keys.contains($0) }
+        if unanswered.isEmpty {
+            retries = 0
+        } else if retries < Self.maxRetries {
+            retries += 1
+            pending.formUnion(unanswered)
+            flush = Task { [weak self] in
+                try? await Task.sleep(for: Self.retryDelay)
+                guard !Task.isCancelled else { return }
+                await self?.send()
+            }
+            return
+        }
+        // Past the retry budget they stay unknown: the next appearance of a
+        // row of theirs asks again. One request per screenful, not per row.
 
         // Anything the cap left behind.
         if !pending.isEmpty { await send() }
@@ -110,7 +145,10 @@ final class LogoDirectory {
     /// the main actor into a caller that only wants a cache key.
     nonisolated static func key(for domain: String) -> String { "brand-\(domain)" }
 
-    private static func resolve(_ domains: [String]) async -> [String: URL] {
+    /// The server's answer, or `nil` when there was none -- a timeout, a
+    /// non-200, a body that is not JSON. A domain the server answered with no
+    /// logo is present with a `nil` URL; one it had not finished is absent.
+    private static func resolve(_ domains: [String]) async -> [String: URL?]? {
         guard !domains.isEmpty else { return [:] }
 
         var request = URLRequest(
@@ -120,22 +158,35 @@ final class LogoDirectory {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(SupabaseConfig.anonKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["domains": domains])
-        request.timeoutInterval = 20
+        // The server's own deadline plus a cold start. Giving up early here
+        // does not stop the server -- it finishes and caches regardless -- it
+        // only decides whether *this* launch gets to draw the answer.
+        request.timeoutInterval = 45
 
         guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse, http.statusCode == 200,
-              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return [:] }
+              let http = response as? HTTPURLResponse, http.statusCode == 200
+        else { return nil }
 
-        var found: [String: URL] = [:]
-        for (domain, value) in payload {
-            guard let entry = value as? [String: Any],
-                  let text = entry["url"] as? String,
-                  let url = URL(string: text)
-            else { continue }
-            found[domain] = url
+        return parse(data)
+    }
+
+    /// `{"tiktok.com": {"url": "https://…"}, "nothing.com": {"url": null}}`
+    /// -- one entry per domain the server answered. Kept apart so a test can
+    /// hold the server's shape without a server.
+    nonisolated static func parse(_ data: Data) -> [String: URL?]? {
+        guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
         }
-        return found
+
+        var answers: [String: URL?] = [:]
+        for (domain, value) in payload {
+            guard let entry = value as? [String: Any] else { continue }
+            let url = (entry["url"] as? String).flatMap { URL(string: $0) }
+            // `updateValue`, not the subscript: assigning a nil `URL?` through
+            // the subscript *removes* the key, and a miss must stay present.
+            answers.updateValue(url, forKey: domain)
+        }
+        return answers
     }
 
     // MARK: - Disk
@@ -154,7 +205,13 @@ final class LogoDirectory {
         return folder.appendingPathComponent("logos.json")
     }
 
+    /// Bumped when what is on disk can no longer be trusted. 2: build 189
+    /// saved domains as known after a failed request -- see `send` -- and a
+    /// file it wrote would keep those letters for a week.
+    private static let version = 2
+
     private struct Stored: Codable {
+        var version: Int
         var urls: [String: URL]
         var known: [String]
         var savedAt: Date
@@ -170,6 +227,7 @@ final class LogoDirectory {
         guard let file = Self.file,
               let data = try? Data(contentsOf: file),
               let stored = try? JSONDecoder().decode(Stored.self, from: data),
+              stored.version == Self.version,
               Date.now.timeIntervalSince(stored.savedAt) < Self.maxAge
         else { return }
 
@@ -179,7 +237,7 @@ final class LogoDirectory {
 
     private func save() {
         guard let file = Self.file else { return }
-        let stored = Stored(urls: urls, known: Array(known), savedAt: .now)
+        let stored = Stored(version: Self.version, urls: urls, known: Array(known), savedAt: .now)
         guard let data = try? JSONEncoder().encode(stored) else { return }
         try? data.write(to: file, options: .atomic)
     }
