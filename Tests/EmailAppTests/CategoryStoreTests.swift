@@ -18,7 +18,9 @@ final class CategoryStoreTests: XCTestCase {
         super.tearDown()
     }
 
-    private func support() -> Category {
+    // Qualified: the test bundle sees another `Category` through XCTest's
+    // imports, and the app module's is the one meant.
+    private func support() -> EmailApp.Category {
         .custom(name: "Support requests", symbol: "lifepreserver.fill", color: .teal,
                 guidance: "customers writing about a problem with an order")
     }
