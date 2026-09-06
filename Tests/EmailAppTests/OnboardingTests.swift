@@ -203,15 +203,38 @@ final class OnboardingTests: XCTestCase {
         XCTAssertFalse(store.hasAnsweredQuestions)
     }
 
-    func testAnyAnswerCountsAsHavingOnboarded() {
-        // Any, not all: requiring the full set would trap somebody who
-        // abandoned onboarding halfway on an earlier install in a loop they
-        // could not finish differently.
+    func testOneAnswerDoesNotCountAsHavingOnboarded() {
+        // 🔴 The rule this replaced was "any answer counts", and it read one
+        // accidental tap on question one -- saved to the server the moment
+        // saving worked -- as a finished onboarding. Abel signed in with
+        // Apple and was sent straight to Gmail past every question.
         let store = makeStore(startAt: .question(0))
         let question = OnboardingQuestion.role
         store.toggle(question.options[0], in: question)
 
+        XCTAssertFalse(store.hasAnsweredQuestions)
+    }
+
+    func testPassingTheLastQuestionCountsAsHavingOnboarded() {
+        // Finished is a fact the flow records when the last question is
+        // passed -- answered or skipped -- so nobody is trapped by a question
+        // they have no answer to.
+        let store = makeStore(startAt: .question(OnboardingQuestion.all.count - 1))
+        store.next()
+
         XCTAssertTrue(store.hasAnsweredQuestions)
+        XCTAssertEqual(store.phase, .createAccount)
+    }
+
+    func testAFinishedRunSurvivesARelaunch() {
+        let suite = "maily.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+
+        let first = UserStore(defaults: defaults, startAt: .question(OnboardingQuestion.all.count - 1))
+        first.next()
+
+        let relaunched = UserStore(defaults: defaults, startAt: .splash)
+        XCTAssertTrue(relaunched.hasAnsweredQuestions)
     }
 
     func testAnswersSurviveARelaunch() {
