@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -94,6 +95,29 @@ final class AvatarStore {
         return answer
     }
 
+    /// The moving version of a picture, when it is an animated GIF.
+    ///
+    /// Google serves an animated profile photo as a GIF at every size -- the
+    /// account's own, and any sender's -- and `UIImage(data:)` keeps its
+    /// first frame only, so the face stood still. This decodes every frame
+    /// once and hands back an animated `UIImage` that `AnimatedImageView`
+    /// plays; nil for a still, which is nearly everything. Remembered per
+    /// picture, misses included: a `View` body asks on every draw.
+    @ObservationIgnored private var animated: [String: UIImage?] = [:]
+
+    func animation(for key: String) -> UIImage? {
+        if let known = animated[key] { return known }
+        let moving: UIImage? = {
+            guard let file = Self.file(for: key),
+                  let data = try? Data(contentsOf: file),
+                  data.isGIF
+            else { return nil }
+            return UIImage.animatedGIF(data)
+        }()
+        animated[key] = .some(moving)
+        return moving
+    }
+
     /// Fetches the picture if there is not a fresh one already.
     ///
     /// Safe to call from `onAppear` on every row: the guards below make the
@@ -128,7 +152,10 @@ final class AvatarStore {
             self.checked.insert(key)
             guard let fetched else { return }
 
-            self.memory[key] = fetched
+            self.memory[key] = fetched.image
+            // Worked out again from the fresh bytes, next time anybody asks.
+            self.animated[key] = nil
+            self.fills[key] = nil
             Self.write(fetched, for: key)
             // Only after a real picture landed. Bumping on a miss would redraw
             // every avatar in the app to show exactly what was already there.
@@ -140,6 +167,7 @@ final class AvatarStore {
     func forget(key: String) {
         memory[key] = nil
         fills[key] = nil
+        animated[key] = nil
         checked.remove(key)
         if let file = Self.file(for: key) {
             try? FileManager.default.removeItem(at: file)
@@ -155,6 +183,7 @@ final class AvatarStore {
     func forgetAll() {
         memory.removeAll()
         fills.removeAll()
+        animated.removeAll()
         checked.removeAll()
         if let folder = Self.folder {
             try? FileManager.default.removeItem(at: folder)
@@ -195,23 +224,31 @@ final class AvatarStore {
         return folder?.appendingPathComponent("\(safe).jpg")
     }
 
-    private static func write(_ image: UIImage, for key: String) {
-        // 🔴 PNG when there is transparency to keep. JPEG has no alpha, so a
-        // mark floating on nothing came back from disk on the next launch as
-        // a mark on a black square -- right in memory, wrong after a relaunch,
-        // the kind of difference nobody thinks to test. The file keeps its
-        // `.jpg` name; `UIImage(data:)` reads the bytes, not the name.
-        guard let path = path(for: key),
-              let data = image.hasAlphaChannel
-                  ? image.pngData()
-                  : image.jpegData(compressionQuality: 0.9)
-        else { return }
+    private static func write(_ fetched: (image: UIImage, data: Data), for key: String) {
+        // 🔴 A GIF is kept exactly as it came: re-encoding keeps one frame of
+        // an animated picture, and the whole point of keeping it is the
+        // other frames. PNG when there is transparency to keep -- JPEG has no
+        // alpha, so a mark floating on nothing came back from disk on the
+        // next launch as a mark on a black square. JPEG for everything else.
+        // The file keeps its `.jpg` name; `UIImage(data:)` reads the bytes,
+        // not the name.
+        let data: Data?
+        if fetched.data.isGIF {
+            data = fetched.data
+        } else if fetched.image.hasAlphaChannel {
+            data = fetched.image.pngData()
+        } else {
+            data = fetched.image.jpegData(compressionQuality: 0.9)
+        }
+        guard let path = path(for: key), let data else { return }
         try? data.write(to: path, options: .atomic)
     }
 
     // MARK: - Network
 
-    private static func download(_ url: URL) async -> UIImage? {
+    /// The decoded picture and the bytes it came as -- the bytes because a
+    /// GIF's other frames live only there.
+    private static func download(_ url: URL) async -> (image: UIImage, data: Data)? {
         var request = URLRequest(url: url)
         // A face is worth a few seconds and no more. Everything that draws one
         // has a letter to show meanwhile.
@@ -223,14 +260,19 @@ final class AvatarStore {
             // expensive way: a service that answers a miss with a 404 whose
             // body is still a decodable image will hand every account the same
             // placeholder, and nothing about the picture looks wrong.
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                return nil
-            }
-            return UIImage(data: data)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+                  let image = UIImage(data: data)
+            else { return nil }
+            return (image, data)
         } catch {
             return nil
         }
     }
+}
+
+extension Data {
+    /// "GIF87a" or "GIF89a" -- the only pictures that can move.
+    var isGIF: Bool { starts(with: [0x47, 0x49, 0x46, 0x38]) }
 }
 
 extension UIImage {
@@ -273,5 +315,41 @@ extension UIImage {
             ]
             return sides.allSatisfy { $0 >= 230 }
         }
+    }
+
+    /// Every frame of an animated GIF as one `UIImage` a `UIImageView` will
+    /// play. Nil for a still GIF, or anything that is not one.
+    ///
+    /// At most sixty frames are kept: a long GIF decoded whole is tens of
+    /// megabytes for a 44pt circle, and every sampled-out frame's delay is
+    /// folded into the one before it, so the picture keeps its pace.
+    static func animatedGIF(_ data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let count = CGImageSourceGetCount(source)
+        guard count > 1 else { return nil }
+
+        let step = max(1, Int((Double(count) / 60).rounded(.up)))
+        var frames: [UIImage] = []
+        var duration: TimeInterval = 0
+        for index in Swift.stride(from: 0, to: count, by: step) {
+            guard let frame = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+            frames.append(UIImage(cgImage: frame))
+            duration += gifDelay(source, at: index) * Double(step)
+        }
+        guard frames.count > 1 else { return nil }
+        return UIImage.animatedImage(with: frames, duration: duration)
+    }
+
+    /// A frame's delay, with the browsers' floor: a GIF that says "0" or
+    /// "0.01" means "as fast as you can", which every renderer reads as
+    /// 100ms.
+    private static func gifDelay(_ source: CGImageSource, at index: Int) -> TimeInterval {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
+              let gif = properties[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+        else { return 0.1 }
+        let delay = (gif[kCGImagePropertyGIFUnclampedDelayTime] as? Double)
+            ?? (gif[kCGImagePropertyGIFDelayTime] as? Double)
+            ?? 0.1
+        return delay < 0.02 ? 0.1 : delay
     }
 }

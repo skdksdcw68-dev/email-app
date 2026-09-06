@@ -309,14 +309,29 @@ enum GmailService {
         // Gmail returns a large body part as an attachmentId rather than inline
         // data. Without this the whole message collapses to its ~200 character
         // snippet -- which looks exactly like the app truncating long mail.
-        if let payload = json["payload"] as? [String: Any],
-           let deferred = deferredBody(in: payload),
+        let payload = json["payload"] as? [String: Any] ?? [:]
+        if let deferred = deferredBody(in: payload),
            let raw = try? await fetchAttachment(
                messageID: id, attachmentID: deferred.attachmentID, accessToken: accessToken
            ) {
             message.body = (deferred.isHTML || raw.looksLikeMarkup)
                 ? MailText.strippingHTML(raw)
                 : raw.removingStrayMarkup()
+            if deferred.isHTML { message.htmlBody = raw }
+        }
+
+        // 🔴 The HTML part is deferred on its own terms. `deferredBody` is
+        // about the *text*, and stops as soon as an inline text/plain exists
+        // -- which is exactly the shape of a newsletter: a short plain twin
+        // inline, the real HTML too large to inline. Without this the reading
+        // view showed the twin, a wall of raw tracking links in 17pt, while
+        // the designed email sat one request away.
+        if message.htmlBody == nil,
+           let htmlID = attachmentID(in: payload, mimeType: "text/html"),
+           let html = try? await fetchAttachment(
+               messageID: id, attachmentID: htmlID, accessToken: accessToken
+           ) {
+            message.htmlBody = html
         }
 
         return message

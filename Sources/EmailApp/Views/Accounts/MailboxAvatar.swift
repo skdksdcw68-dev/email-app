@@ -31,11 +31,19 @@ struct MailboxAvatar: View {
 
         Group {
             if let image = store.image(for: account.id.rawValue) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: size, height: size)
-                    .clipShape(Circle())
+                Group {
+                    // Moving when the photo is an animated GIF, which Google
+                    // serves as such at every size. Abel's is one.
+                    if let moving = store.animation(for: account.id.rawValue) {
+                        AnimatedImageView(image: moving)
+                    } else {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    }
+                }
+                .frame(width: size, height: size)
+                .clipShape(Circle())
             } else {
                 // The letter shows immediately and the face replaces it. A row
                 // of holes while four downloads run is worse than a letter

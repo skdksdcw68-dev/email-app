@@ -149,11 +149,11 @@ struct SenderAvatar: View {
             // In order: the person, then their company, then whatever they
             // published themselves, then a letter.
             if let face {
-                photo(face)
+                photo(face, key: Self.key(for: contact.address))
             } else if let logo, let key = logoKey {
                 brandIcon(logo, key: key)
             } else if let gravatar {
-                photo(gravatar)
+                photo(gravatar, key: BrandIcon.gravatarKey(for: contact.address))
             } else {
                 letterAvatar
             }
@@ -205,16 +205,23 @@ struct SenderAvatar: View {
     }
 
     /// A face, filling the circle. No plate and no inset -- those are for
-    /// marks that have to survive being any shape.
-    private func photo(_ image: UIImage) -> some View {
+    /// marks that have to survive being any shape. Moving, when the picture
+    /// is an animated GIF; `key` is how the store finds the other frames.
+    private func photo(_ image: UIImage, key: String) -> some View {
         // No `isMuted` fade here: the `Group` in `body` already applies it to
         // whichever tier drew, and doing it twice compounds to 0.72 rather
         // than the 0.85 a read message is meant to sit at.
-        Image(uiImage: image)
-            .resizable()
-            .scaledToFill()
-            .frame(width: size, height: size)
-            .clipShape(Circle())
+        Group {
+            if let moving = avatars.animation(for: key) {
+                AnimatedImageView(image: moving)
+            } else {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
     }
 
     /// A mark drawn like a photograph -- edge to edge, cropped to the circle
@@ -228,7 +235,7 @@ struct SenderAvatar: View {
     private func brandIcon(_ image: UIImage, key: String) -> some View {
         Group {
             if avatars.fillsFrame(key) {
-                photo(image)
+                photo(image, key: key)
             } else {
                 Circle()
                     .fill(.white)
