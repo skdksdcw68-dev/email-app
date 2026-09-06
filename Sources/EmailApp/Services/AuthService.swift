@@ -131,7 +131,7 @@ enum AuthService {
             email: email,
             displayName: result.user.profile?.name ?? email,
             photoURL: result.user.profile?.imageURL(withDimension: Self.photoPixels),
-            grantsContacts: granted.contains(GmailService.contactsScope),
+            grantsContacts: granted.isSuperset(of: Set(GmailService.contactScopes)),
             accessToken: result.user.accessToken.tokenString,
             refreshToken: result.user.refreshToken.tokenString
         )
@@ -158,7 +158,7 @@ enum AuthService {
             // an older build picks its picture up on the next launch rather
             // than needing to be signed in again.
             photoURL: user.profile?.imageURL(withDimension: Self.photoPixels),
-            grantsContacts: Set(user.grantedScopes ?? []).contains(GmailService.contactsScope),
+            grantsContacts: Set(user.grantedScopes ?? []).isSuperset(of: Set(GmailService.contactScopes)),
             accessToken: user.accessToken.tokenString,
             refreshToken: user.refreshToken.tokenString
         )
@@ -238,10 +238,13 @@ enum AuthService {
         }
     }
 
-    /// Whether the Google session currently held covers Contacts.
+    /// Whether the Google session currently held covers Contacts -- both
+    /// scopes. A grant from the build that asked for saved contacts only
+    /// counts as not granted, so the Settings row comes back and offers the
+    /// half that is missing; `addScopes` asks only for what is not held.
     static var hasContactsAccess: Bool {
         guard let user = GIDSignIn.sharedInstance.currentUser else { return false }
-        return Set(user.grantedScopes ?? []).contains(GmailService.contactsScope)
+        return Set(user.grantedScopes ?? []).isSuperset(of: Set(GmailService.contactScopes))
     }
 
     /// Asks for Contacts on top of a grant that already exists.
@@ -261,7 +264,7 @@ enum AuthService {
               let user = GIDSignIn.sharedInstance.currentUser
         else { return false }
 
-        guard (try? await user.addScopes([GmailService.contactsScope], presenting: presenter)) != nil
+        guard (try? await user.addScopes(GmailService.contactScopes, presenting: presenter)) != nil
         else { return false }
 
         return hasContactsAccess

@@ -28,7 +28,7 @@ enum GmailService {
         "https://www.googleapis.com/auth/gmail.compose",
     ]
 
-    /// Read-only access to the person's Google Contacts.
+    /// Read-only access to the person's saved Google Contacts.
     ///
     /// What it buys: a real photograph beside a message, for anybody they have
     /// in their contacts. Mail scopes carry no photo of the sender -- Gmail's
@@ -41,9 +41,25 @@ enum GmailService {
     /// every account that predates it -- see the note above.
     static let contactsScope = "https://www.googleapis.com/auth/contacts.readonly"
 
+    /// Read-only access to "Other contacts": the list Google keeps of everyone
+    /// the person has ever written to, saved or not.
+    ///
+    /// 🔴 This is the one that makes an inbox look like Gmail's. Saved
+    /// contacts are a handful of people; Other contacts is everybody, and
+    /// asked for with the Google profile merged in it carries each sender's
+    /// **account photo** -- the same picture Gmail and Shortwave draw. See
+    /// `PeopleDirectory` for the call, and for the merge without which the
+    /// list comes back as silhouettes.
+    static let otherContactsScope = "https://www.googleapis.com/auth/contacts.other.readonly"
+
+    /// Both halves of "faces for senders". Granted and checked together: a
+    /// grant holding one without the other came from an older build, and the
+    /// Settings row that offers them treats it as not yet granted.
+    static let contactScopes = [contactsScope, otherContactsScope]
+
     /// Nice to have, and asked for alongside the necessary ones so somebody
     /// signing in reads one consent screen rather than two.
-    static let optionalScopes = [contactsScope]
+    static let optionalScopes = contactScopes
 
     private static let base = "https://gmail.googleapis.com/gmail/v1/users/me"
 

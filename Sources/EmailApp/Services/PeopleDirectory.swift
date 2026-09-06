@@ -1,25 +1,38 @@
 import Foundation
 import Observation
 
-/// Photographs of the people who write to you, from Google Contacts.
+/// Photographs of the people who write to you, from Google.
 ///
 /// 🔴 **Mail scopes carry no photograph of a sender.** Gmail's own app shows
-/// faces because it has the person's *Contacts*, which is a different API and
-/// a different permission from reading mail -- so an app with mail access
+/// faces because it can see Google's *people* data, which is a different API
+/// and a different permission from reading mail -- so an app with mail access
 /// alone has nothing to draw and a coloured letter is the honest answer. This
-/// is the other half of that sentence: with `contacts.readonly` granted, the
+/// is the other half of that sentence: with the Contacts scopes granted, the
 /// photographs exist and can be shown.
 ///
-/// ## What it does and does not cover
+/// ## Two lists, and which one matters
 ///
-/// ⚠️ Only people actually **in** somebody's Google Contacts. That is usually
-/// colleagues, friends and family -- not the hundred newsletters and
-/// no-reply addresses that make up most of an inbox. Google's "Other
-/// contacts", the auto-collected list of everyone you have ever emailed, is
-/// reachable through `otherContacts.list` but **carries no photos at all**:
-/// its `readMask` accepts names, email addresses and phone numbers, and
-/// nothing else. So this cannot be made to cover everybody, and companies
-/// keep their brand mark from `BrandIcon`.
+/// - **Saved contacts** (`connections.list`, `contacts.readonly`): the people
+///   somebody added themselves. A handful.
+/// - **Other contacts** (`otherContacts.list`, `contacts.other.readonly`):
+///   the list Google keeps of everyone they have ever written to. This is
+///   most of the humans in an inbox.
+///
+/// 🔴 Other contacts must be asked for **with the Google profile merged in**
+/// (`sources=READ_SOURCE_TYPE_PROFILE`). Asked for plainly, every entry
+/// carries the grey silhouette and nothing else -- which is how an earlier
+/// version of this file concluded the list "carries no photos at all" and
+/// gave up on it. With the merge, each entry that is a Google account comes
+/// back with that account's own profile photo: the same picture Gmail and
+/// Shortwave draw. Measured on 2026-09-06 against a real mailbox: 84 other
+/// contacts, 0 photos without the merge, 5 addresses with a real one with it.
+///
+/// ## What is still not covered
+///
+/// ⚠️ Senders that are not Google accounts, and Google accounts whose owner
+/// never set a photo -- most no-reply and notification addresses. Those keep
+/// their brand mark from `BrandIcon` or a letter, which is what Gmail shows
+/// for the same rows too (a letter, or its grey silhouette).
 ///
 /// ## Why the whole list, once
 ///
@@ -43,7 +56,7 @@ final class PeopleDirectory {
     @ObservationIgnored private var loaded = false
     @ObservationIgnored private var isFetching = false
 
-    /// Google's page size limit for `connections.list`.
+    /// Google's page size limit for both lists.
     private static let pageSize = 1000
     /// Beyond this, stop paging. Somebody with more contacts than this has an
     /// address book that is not really an address book, and the tail of it is
@@ -64,15 +77,17 @@ final class PeopleDirectory {
 
     // MARK: - Fetching
 
-    /// Refreshes from Google, at most once a day.
+    /// Refreshes from Google, at most once a day -- unless forced, which is
+    /// for the moment somebody grants the permission from Settings and is
+    /// looking at the inbox waiting for the faces.
     ///
     /// Silent about everything. A missing grant, a quota, a network that is
     /// not there -- all of them mean the same thing to the person looking at
     /// the screen, which is that they see letters rather than faces, exactly
     /// as they did before.
-    func refresh(accessToken: String) async {
+    func refresh(accessToken: String, force: Bool = false) async {
         guard !isFetching else { return }
-        if let fetched = Self.fetchedAt, Date.now.timeIntervalSince(fetched) < Self.maxAge {
+        if !force, let fetched = Self.fetchedAt, Date.now.timeIntervalSince(fetched) < Self.maxAge {
             return
         }
 
@@ -80,33 +95,38 @@ final class PeopleDirectory {
         defer { isFetching = false }
 
         var found: [String: URL] = [:]
-        var pageToken: String?
-        var pages = 0
 
-        repeat {
-            guard let page = await Self.connections(accessToken: accessToken, pageToken: pageToken)
-            else { break }
+        for source in Source.allCases {
+            var pageToken: String?
+            var pages = 0
 
-            for person in page.connections ?? [] {
-                // 🔴 `default: true` is Google's grey silhouette, not a
-                // photograph. Taking it would give every contact without a
-                // picture the *same* generic face -- worse than a letter,
-                // which is at least their own initial, and exactly the failure
-                // `BrandIcon` documents for its own placeholder.
-                guard let photo = (person.photos ?? []).first(where: { $0.default != true }),
-                      let url = URL(string: photo.url)
-                else { continue }
+            repeat {
+                guard let page = await Self.fetch(source, accessToken: accessToken, pageToken: pageToken)
+                else { break }
 
-                for entry in person.emailAddresses ?? [] {
-                    let address = entry.value.lowercased()
-                    guard !address.isEmpty else { continue }
-                    found[address] = url
+                for person in page.people {
+                    // 🔴 `default: true` is Google's grey silhouette, not a
+                    // photograph. Taking it would give every contact without a
+                    // picture the *same* generic face -- worse than a letter,
+                    // which is at least their own initial, and exactly the
+                    // failure `BrandIcon` documents for its own placeholder.
+                    guard let photo = (person.photos ?? []).first(where: { $0.default != true }),
+                          let url = Self.sharpened(photo.url)
+                    else { continue }
+
+                    for entry in person.emailAddresses ?? [] {
+                        let address = entry.value.lowercased()
+                        // The first list to answer for an address keeps it;
+                        // see `Source` for the order and why.
+                        guard !address.isEmpty, found[address] == nil else { continue }
+                        found[address] = url
+                    }
                 }
-            }
 
-            pageToken = page.nextPageToken
-            pages += 1
-        } while pageToken != nil && pages < Self.maxPages
+                pageToken = page.nextPageToken
+                pages += 1
+            } while pageToken != nil && pages < Self.maxPages
+        }
 
         guard !found.isEmpty else { return }
 
@@ -127,9 +147,52 @@ final class PeopleDirectory {
 
     // MARK: - Google
 
+    /// The two lists, in the order they are trusted. A photo somebody chose
+    /// for a saved contact beats the one the contact chose for themselves, so
+    /// saved contacts go first and other contacts only fill the gaps.
+    ///
+    /// Each list needs its own scope, and a grant may hold one without the
+    /// other. A list whose scope is missing answers 403, which `fetch` reads
+    /// as an empty list and nothing else.
+    private enum Source: CaseIterable {
+        case connections, otherContacts
+
+        var endpoint: String {
+            switch self {
+            case .connections:
+                return "https://people.googleapis.com/v1/people/me/connections"
+            case .otherContacts:
+                return "https://people.googleapis.com/v1/otherContacts"
+            }
+        }
+
+        var query: [URLQueryItem] {
+            switch self {
+            case .connections:
+                return [
+                    URLQueryItem(name: "personFields", value: "emailAddresses,photos"),
+                    URLQueryItem(name: "sortOrder", value: "LAST_MODIFIED_DESCENDING"),
+                ]
+            case .otherContacts:
+                return [
+                    URLQueryItem(name: "readMask", value: "emailAddresses,photos"),
+                    // 🔴 The profile merge. Without PROFILE every entry is a
+                    // silhouette; CONTACT has to be named alongside it because
+                    // Google refuses PROFILE on its own.
+                    URLQueryItem(name: "sources", value: "READ_SOURCE_TYPE_CONTACT"),
+                    URLQueryItem(name: "sources", value: "READ_SOURCE_TYPE_PROFILE"),
+                ]
+            }
+        }
+    }
+
     private struct Page: Decodable {
         var connections: [Person]?
+        var otherContacts: [Person]?
         var nextPageToken: String?
+
+        /// Whichever list this is a page of.
+        var people: [Person] { connections ?? otherContacts ?? [] }
     }
 
     private struct Person: Decodable {
@@ -144,15 +207,11 @@ final class PeopleDirectory {
         }
     }
 
-    private static func connections(accessToken: String, pageToken: String?) async -> Page? {
-        var components = URLComponents(
-            string: "https://people.googleapis.com/v1/people/me/connections"
-        )
-        components?.queryItems = [
-            URLQueryItem(name: "personFields", value: "emailAddresses,photos"),
-            URLQueryItem(name: "pageSize", value: String(pageSize)),
-            URLQueryItem(name: "sortOrder", value: "LAST_MODIFIED_DESCENDING"),
-        ] + (pageToken.map { [URLQueryItem(name: "pageToken", value: $0)] } ?? [])
+    private static func fetch(_ source: Source, accessToken: String, pageToken: String?) async -> Page? {
+        var components = URLComponents(string: source.endpoint)
+        components?.queryItems = source.query
+            + [URLQueryItem(name: "pageSize", value: String(pageSize))]
+            + (pageToken.map { [URLQueryItem(name: "pageToken", value: $0)] } ?? [])
 
         guard let url = components?.url else { return nil }
 
@@ -165,6 +224,19 @@ final class PeopleDirectory {
         else { return nil }
 
         return try? JSONDecoder().decode(Page.self, from: data)
+    }
+
+    /// Google hands out `=s100`: a 100px thumbnail, soft in a 44pt circle on
+    /// a 3x screen. The suffix is a request rather than a fact about the
+    /// file -- the same URL answers `=s256-c` with a 256px centre crop.
+    ///
+    /// `nonisolated`: a pure string function with no business dragging the
+    /// main actor into a test.
+    nonisolated static func sharpened(_ text: String) -> URL? {
+        guard let range = text.range(of: #"=s\d+(-c)?$"#, options: .regularExpression) else {
+            return URL(string: text)
+        }
+        return URL(string: text.replacingCharacters(in: range, with: "=s256-c"))
     }
 
     // MARK: - Disk

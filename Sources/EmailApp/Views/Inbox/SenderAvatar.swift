@@ -9,19 +9,19 @@ import UIKit
 ///
 /// ## Where the photograph comes from
 ///
-/// Gmail's own app shows faces because Google already holds your Contacts and
-/// their pictures -- a different API and a different permission from reading
-/// mail. Maily now asks for that permission too, optionally, so this tier
-/// exists for anybody who granted it. See `PeopleDirectory`.
+/// Gmail's own app shows faces because Google holds the profile photo of
+/// every Google account, and the list of everyone you have ever written to.
+/// Both are reachable with the two Contacts scopes, which Maily asks for
+/// optionally -- see `PeopleDirectory` for the exact call, and for the
+/// profile merge without which the list comes back with no faces at all.
 ///
-/// ⚠️ It covers people **in** your contacts, which is not most of an inbox.
-/// Newsletters and no-reply addresses are not contacts of anybody's, and
-/// Google's auto-collected "Other contacts" list carries no photos at all. So
-/// the logo and the letter are not fallbacks for a rare failure -- they remain
-/// what most rows show.
+/// ⚠️ It covers senders that are Google accounts with a photo set. Most
+/// newsletters and no-reply addresses are not, so the logo and the letter are
+/// not fallbacks for a rare failure -- they remain what most rows show.
 ///
-/// The letter colour is a hash of the address, so a sender is always the same
-/// colour and two senders rarely collide.
+/// The letter colour follows the letter, as it does in Gmail: every G is the
+/// same purple and every B the same amber, so one company stays one colour
+/// however many hosts it mails from.
 struct SenderAvatar: View {
     let contact: Contact
     var size: CGFloat = 40
@@ -40,32 +40,57 @@ struct SenderAvatar: View {
 
     private var logos: LogoDirectory { .shared }
 
-    private static let palette: [Color] = [
-        Color(uiColor: .systemBlue), Color(uiColor: .systemIndigo),
-        Color(uiColor: .systemPurple), Color(uiColor: .systemPink),
-        Color(uiColor: .systemRed), Color(uiColor: .systemOrange),
-        Color(uiColor: .systemGreen), Color(uiColor: .systemTeal),
-        Color(uiColor: .systemCyan), Color(uiColor: .systemBrown),
+    /// 🔴 Keyed on the **letter**, not the address.
+    ///
+    /// It used to be a hash of the address, and Google -- which mails from
+    /// `accounts.google.com`, `google.com` and a Play host -- was purple, blue,
+    /// orange and red in a single screen. Gmail's rule is one colour per
+    /// letter, so the same company reads as one thing all the way down.
+    ///
+    /// G and B are sampled from Gmail's own list (`#9254EA`, `#FCBD00`). The
+    /// other letters are Google's palette, one each, and any of them can be
+    /// swapped for a sampled value without touching anything else.
+    private static let letterColors: [Character: Color] = [
+        "A": rgb(0xEA4335), "B": rgb(0xFCBD00), "C": rgb(0x12B5CB),
+        "D": rgb(0x34A853), "E": rgb(0xFA7B17), "F": rgb(0x5C6BC0),
+        "G": rgb(0x9254EA), "H": rgb(0xF538A0), "I": rgb(0x4285F4),
+        "J": rgb(0x00897B), "K": rgb(0xE8710A), "L": rgb(0xD81B60),
+        "M": rgb(0x1E8E3E), "N": rgb(0x039BE5), "O": rgb(0xC5221F),
+        "P": rgb(0x7627BB), "Q": rgb(0x6D4C41), "R": rgb(0x3949AB),
+        "S": rgb(0x009688), "T": rgb(0x43A047), "U": rgb(0x546E7A),
+        "V": rgb(0xD93025), "W": rgb(0xFF7043), "X": rgb(0x5E35B1),
+        "Y": rgb(0x00ACC1), "Z": rgb(0x8E24AA),
     ]
 
-    /// Deterministic and stable across launches. `hashValue` is seeded per
-    /// process in Swift, so a sender's colour would change every cold start.
-    private var color: Color {
-        let key = contact.address.lowercased()
-        var hash: UInt64 = 5381
-        for byte in key.utf8 {
-            hash = (hash &* 33) &+ UInt64(byte)
-        }
-        return Self.palette[Int(hash % UInt64(Self.palette.count))]
+    /// Digits, and a sender with nothing to take a letter from. Gmail's grey.
+    private static let otherColor = rgb(0x5F6368)
+
+    private static func rgb(_ hex: UInt32) -> Color {
+        Color(
+            red: Double((hex >> 16) & 0xFF) / 255,
+            green: Double((hex >> 8) & 0xFF) / 255,
+            blue: Double(hex & 0xFF) / 255
+        )
     }
 
-    private var letter: String {
+    /// Stable across launches and across every address a company mails from.
+    static func color(for contact: Contact) -> Color {
+        // `.first` rather than `Character(_:)`: uppercasing "ß" gives "SS",
+        // and a two-character string would trap the Character initialiser.
+        guard let first = letter(for: contact).first else { return otherColor }
+        return letterColors[first] ?? otherColor
+    }
+
+    static func letter(for contact: Contact) -> String {
         // The display name reads better than the address, unless the name IS
         // the address, in which case skip past any leading punctuation.
         let source = contact.name.contains("@") ? contact.address : contact.name
         let first = source.first { $0.isLetter || $0.isNumber }
         return first.map { String($0).uppercased() } ?? "?"
     }
+
+    private var color: Color { Self.color(for: contact) }
+    private var letter: String { Self.letter(for: contact) }
 
     private var people: PeopleDirectory { .shared }
     private var avatars: AvatarStore { .shared }
@@ -192,22 +217,18 @@ struct SenderAvatar: View {
     }
 
     private var letterAvatar: some View {
+        // Flat, as Gmail draws it. The sheen this used to carry was fine on
+        // its own and, next to Gmail's list, read as a different kind of
+        // object from every other avatar on the screen.
         Circle()
             .fill(color)
-            // A light-to-dark sheen instead of a flat disc. Color.mix would be
-            // tidier but is iOS 18, and this target is 17.
-            .overlay {
-                LinearGradient(
-                    colors: [.white.opacity(0.22), .black.opacity(0.18)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .clipShape(Circle())
-            }
             .opacity(isMuted ? 0.62 : 1)
             .overlay {
                 Text(letter)
-                    .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
+                    // Gmail's proportion: a ~24pt letter in a 40pt circle,
+                    // plain sans, a shade heavier than regular. Medium in SF
+                    // sits closest to Google Sans's stroke.
+                    .font(.system(size: size * 0.6, weight: .medium))
                     .foregroundStyle(.white)
             }
     }

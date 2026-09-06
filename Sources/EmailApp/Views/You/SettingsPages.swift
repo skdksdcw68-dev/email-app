@@ -167,7 +167,9 @@ struct AppSettingsView: View {
                     Task {
                         if await AuthService.requestContactsAccess() {
                             hasContacts = true
-                            await mail.refreshContacts()
+                            // Forced: whatever is on disk was fetched under
+                            // the grant that just got wider.
+                            await mail.refreshContacts(force: true)
                         }
                     }
                 } label: {
@@ -182,8 +184,8 @@ struct AppSettingsView: View {
             } footer: {
                 // ⚠️ Says what it actually delivers. "See who is emailing you"
                 // would promise a face on every row, and most rows will not
-                // have one: a newsletter is nobody's contact.
-                Text("Shows a photo instead of a letter for people in your Google Contacts. Maily reads their names, addresses and pictures, and nothing else.")
+                // have one: a newsletter is not a Google account with a photo.
+                Text("Shows a photo instead of a letter for people in your Google Contacts and people you have emailed, the way Gmail does. Maily reads their names, addresses and pictures, and nothing else.")
             }
         }
     }

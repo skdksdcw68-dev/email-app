@@ -583,12 +583,16 @@ final class MailStore {
     /// read as "no photos" and nothing else: the person sees the letters and
     /// logos they saw before, and is never told about a permission they
     /// declined on purpose.
-    func refreshContacts() async {
+    ///
+    /// `force` is for the moment the permission is granted from Settings: the
+    /// day-old answer on disk was fetched under the narrower grant and has
+    /// none of the faces the wider one just made reachable.
+    func refreshContacts(force: Bool = false) async {
         for account in registry.accounts where account.provider == .gmail {
             guard let token = try? await TokenBroker.shared.accessToken(for: account) else {
                 continue
             }
-            await PeopleDirectory.shared.refresh(accessToken: token)
+            await PeopleDirectory.shared.refresh(accessToken: token, force: force)
         }
     }
 
