@@ -84,7 +84,10 @@ struct MailboxSwitcher: View {
             }
 
             Divider()
-            Button { isAdding = true } label: { Label("Add account", systemImage: "plus") }
+            // Both land on Manage accounts: adding is its + button. Abel
+            // asked for the accounts page first and the provider sheet
+            // second, from wherever "add" is pressed.
+            Button { isManaging = true } label: { Label("Add account", systemImage: "plus") }
             Button { isManaging = true } label: { Label("Manage accounts", systemImage: "person.2") }
         } label: {
             if let account = mail.account {

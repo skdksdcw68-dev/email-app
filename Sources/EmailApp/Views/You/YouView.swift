@@ -23,8 +23,6 @@ struct YouView: View {
     /// Which provider was picked on the way in. Nil while nothing is being
     /// added -- and it drives the sheet directly, so the sheet cannot be up
     /// without one.
-    @State private var adding: MailProvider?
-    @State private var isChoosingProvider = false
     @State private var appearance = AppSettings.appearance
     /// The mailbox a swipe is offering to sign out of.
     @State private var signingOut: MailAccount?
@@ -84,23 +82,6 @@ struct YouView: View {
                 }
             }
             .navigationTitle("You")
-            // 🔴 Native, and asked here rather than on the first screen of the
-            // sheet. Abel asked for Google and IMAP to be on the You page
-            // itself: two named things to choose between is a decision, while
-            // "Add account" followed by a screen asking which kind is the same
-            // decision with a step in front of it.
-            .confirmationDialog(
-                "Add account", isPresented: $isChoosingProvider, titleVisibility: .visible
-            ) {
-                Button("Google") { adding = .gmail }
-                Button("Other email (IMAP)") { adding = .imap }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Gmail signs in with Google. Anything else — Hostinger, Zoho, your own domain — connects over IMAP.")
-            }
-            .sheet(item: $adding) { provider in
-                AddMailboxFlow(provider: provider)
-            }
             .alert(item: $signingOut) { account in
                 Alert(
                     title: Text("Sign out of \(account.address)?"),
@@ -191,12 +172,13 @@ struct YouView: View {
             // already on screen.)
             otherMailboxes
 
-            // Two rows, and finally two destinations. They pushed the same
-            // page as each other for months, which is why adding an account
-            // appeared to do nothing.
-            Button {
-                isChoosingProvider = true
-            } label: {
+            // 🔴 Straight to Manage accounts, and the + there asks which kind.
+            //
+            // This offered Google / IMAP right here for a while, at Abel's
+            // request; on 2026-09-06 he asked for the opposite -- "add" opens
+            // the accounts page, and the page's own + shows the sheet. One
+            // place that adds, rather than two that disagree.
+            NavigationLink { MailboxListView() } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "plus")
                         .font(.subheadline.weight(.semibold))
