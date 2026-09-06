@@ -106,6 +106,9 @@ enum ProfilePhoto {
             try data.write(to: url, options: [.atomic, .completeFileProtection])
             cache = .some(UIImage(data: data))
             NotificationCenter.default.post(name: changed, object: nil)
+            // The picture is part of the profile, and choosing one is an
+            // edit whether or not Save is pressed afterwards.
+            SettingsSync.notify(.profile)
             return true
         } catch {
             return false
@@ -116,6 +119,7 @@ enum ProfilePhoto {
         if let url { try? FileManager.default.removeItem(at: url) }
         cache = .some(nil)
         NotificationCenter.default.post(name: changed, object: nil)
+        SettingsSync.notify(.profile)
     }
 
     /// Signing out takes the picture with it, the same as the memories and the

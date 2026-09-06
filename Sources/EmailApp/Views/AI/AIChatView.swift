@@ -135,10 +135,15 @@ struct AIChatView: View {
                             onUndo: { undo(in: turn.id) }
                         )
                         .id(turn.id)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal: .opacity
-                        ))
+                        // 🔴 Fade only. A new turn used to slide up from the
+                        // bottom edge while the scroll view was also animating
+                        // to it and the composer was re-measuring underneath --
+                        // three animations on one send. The message appeared,
+                        // was carried off by the scroll, and came back: what
+                        // Abel described as "it disappears and comes back".
+                        // ChatGPT does none of that: the bubble is simply
+                        // there, and the list moves once.
+                        .transition(.opacity)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -147,7 +152,7 @@ struct AIChatView: View {
                 // read as one block; the answer wants to end before the input
                 // begins.
                 .padding(.bottom, 24)
-                .animation(.spring(response: 0.38, dampingFraction: 0.82), value: turns.count)
+                .animation(.easeOut(duration: 0.18), value: turns.count)
             }
             .background {
                 if showsWordmark {

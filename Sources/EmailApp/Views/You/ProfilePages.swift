@@ -23,6 +23,7 @@ struct EditProfileView: View {
     @State private var occupation = ""
     @State private var picked: PhotosPickerItem?
     @State private var isSigningOut = false
+    @State private var isConfirmingRemovePhoto = false
 
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -113,17 +114,27 @@ struct EditProfileView: View {
 
     // MARK: - Picture
 
+    // 🔴 Every control in this row is `.borderless`, and the picture itself
+    // opens the picker.
+    //
+    // A `List` row holding buttons with no explicit style fires *all of
+    // them* on a tap anywhere in the row. So tapping the photo -- the most
+    // natural thing to tap -- ran "Remove", and the picture vanished with
+    // nothing asked. Abel found it by doing exactly that.
     private var picture: some View {
         HStack(spacing: 16) {
-            ProfileAvatar(
-                contact: Contact(
-                    name: user.account?.displayName ?? "You",
-                    address: user.account?.email ?? ""
-                ),
-                size: 64,
-                photoURL: user.account?.photoURL,
-                photoKey: user.account.map { "app-\($0.id.uuidString)" }
-            )
+            PhotosPicker(selection: $picked, matching: .images) {
+                ProfileAvatar(
+                    contact: Contact(
+                        name: user.account?.displayName ?? "You",
+                        address: user.account?.email ?? ""
+                    ),
+                    size: 64,
+                    photoURL: user.account?.photoURL,
+                    photoKey: user.account.map { "app-\($0.id.uuidString)" }
+                )
+            }
+            .buttonStyle(.borderless)
 
             VStack(alignment: .leading, spacing: 6) {
                 // `PhotosPicker` reads one chosen image through the system's
@@ -133,16 +144,25 @@ struct EditProfileView: View {
                     Text(ProfilePhoto.image == nil ? "Add a photo" : "Change photo")
                         .font(Style.rowTitle)
                 }
+                .buttonStyle(.borderless)
 
                 if ProfilePhoto.image != nil {
-                    Button("Remove", role: .destructive) { ProfilePhoto.remove() }
+                    Button("Remove", role: .destructive) { isConfirmingRemovePhoto = true }
                         .font(Style.rowDetail)
+                        .buttonStyle(.borderless)
                 }
             }
 
             Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
+        .confirmationDialog(
+            "Remove your photo?", isPresented: $isConfirmingRemovePhoto, titleVisibility: .visible
+        ) {
+            Button("Remove photo", role: .destructive) { ProfilePhoto.remove() }
+        } message: {
+            Text("Your letter shows instead, on every device.")
+        }
     }
 
     private func adopt(_ item: PhotosPickerItem) async {

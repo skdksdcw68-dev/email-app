@@ -138,8 +138,19 @@ final class SettingsSync {
     private func push(_ scope: Scope) async {
         guard let payload = snapshot(of: scope) else { return }
 
+        // 🔴 This was `nil`, and that is why nothing was ever saved.
+        //
+        // `user_id` is `not null` with no default, and the row policy checks
+        // it against `auth.uid()`. Sent as null, every push since the table
+        // was made was refused -- and swallowed by the `try?` below, so the
+        // Usage of the feature looked fine from the phone. `user_settings`
+        // was empty for every account when Abel said "I don't think the save
+        // even works". Chats and memories fill the id the same way; this one
+        // never did.
+        guard let userID = try? await Backend.userID() else { return }
+
         let row = Row(
-            user_id: nil,
+            user_id: userID,
             scope: scope.rawValue,
             mailbox_id: scope.isPerMailbox ? (MailboxScope.current?.rawValue ?? "") : "",
             payload: payload,
