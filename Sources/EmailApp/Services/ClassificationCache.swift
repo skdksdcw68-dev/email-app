@@ -22,6 +22,14 @@ enum ClassificationCache {
         /// Whether a closer read was worth running. Optional like `category`,
         /// and for the same reason.
         let extract: Bool?
+        /// The person's own categories this landed in. Optional: written by
+        /// builds that had none.
+        let custom: [String]?
+        /// What the model was told about the person's categories when this
+        /// was decided, as id → revision. A category made or reworded since
+        /// is one this entry has not heard of, and `CategoryStore.isStale`
+        /// is how the message gets sorted again.
+        let customSeen: [String: Int]?
         let storedAt: Date
     }
 
@@ -57,7 +65,11 @@ enum ClassificationCache {
         return entries?[remoteID]
     }
 
-    static func store(_ classification: AIService.Classification, for remoteID: String) {
+    static func store(
+        _ classification: AIService.Classification,
+        for remoteID: String,
+        seen: [String: Int] = [:]
+    ) {
         var all = load()
         all[remoteID] = Entry(
             priority: classification.priority,
@@ -65,6 +77,8 @@ enum ClassificationCache {
             summary: classification.summary,
             category: classification.category,
             extract: classification.extract,
+            custom: classification.custom,
+            customSeen: seen.isEmpty ? nil : seen,
             storedAt: .now
         )
 
@@ -178,7 +192,8 @@ extension AIService.Classification {
             needsReply: entry.needsReply,
             summary: entry.summary,
             category: entry.category,
-            extract: entry.extract
+            extract: entry.extract,
+            custom: entry.custom
         )
     }
 }

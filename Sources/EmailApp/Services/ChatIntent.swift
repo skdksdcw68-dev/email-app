@@ -42,10 +42,12 @@ enum ChatIntent: Equatable {
 struct MarkReadRequest: Equatable {
     /// A named pile: "mark the newsletters as read".
     let tag: AITag?
+    /// One of the person's own categories: "mark the support requests read".
+    var custom: Category? = nil
     /// "mark everything as read".
     let isEverything: Bool
     /// Nothing named at all, so it means whatever was just listed.
-    var isImplicit: Bool { tag == nil && !isEverything }
+    var isImplicit: Bool { tag == nil && custom == nil && !isEverything }
 }
 
 struct DraftRequest: Equatable {
@@ -94,8 +96,13 @@ enum ChatIntentParser {
         let everything = ["all", "everything", "every one", "the whole", "inbox"]
             .contains { text.contains($0) }
 
+        // The person's own names first: a renamed built-in or a custom
+        // category is what they will say out loud, and "support requests"
+        // must not be read as a request for "replies".
+        let named = CategoryStore.anyNamed(in: text)
         return MarkReadRequest(
-            tag: AITag.named(in: text),
+            tag: named?.builtIn ?? AITag.named(in: text),
+            custom: named?.isCustom == true ? named : nil,
             isEverything: everything
         )
     }

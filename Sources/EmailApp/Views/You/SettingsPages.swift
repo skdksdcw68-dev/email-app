@@ -45,6 +45,17 @@ struct AppSettingsView: View {
                 Text("Account")
             }
 
+            // The chips at the top of the inbox, and what the AI sorts into.
+            Section {
+                SettingsRow("Categories", value: "\(CategoryStore.shared.visible.count)") {
+                    CategoriesView()
+                }
+            } header: {
+                Text("Inbox")
+            } footer: {
+                Text("Rename, reorder or hide the categories, or add your own and tell Maily what belongs in it.")
+            }
+
             senderPhotos
 
             // Everything Auto-Reply is configured to do. You carries whether

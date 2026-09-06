@@ -484,9 +484,13 @@ struct AIChatView: View {
         if request.isEverything {
             targets = mail.messages(in: .inbox).filter { !$0.isRead }
             pile = "everything"
+        } else if let custom = request.custom {
+            // One of their own: "mark the support requests read".
+            targets = mail.messages(in: .inbox, custom: custom.id).filter { !$0.isRead }
+            pile = custom.name
         } else if let tag = request.tag {
             targets = mail.messages(in: .inbox, tag: tag).filter { !$0.isRead }
-            pile = tag.title
+            pile = CategoryStore.shared.category(for: tag).name
         } else if !offered.isEmpty {
             // Nothing named: they mean whatever was just on screen.
             targets = offered.filter { !$0.isRead }
@@ -508,7 +512,11 @@ struct AIChatView: View {
         let changed = mail.markRead(targets.map(\.id))
         Analytics.record(.markedRead, [
             "count": .int(changed.count),
-            "scope": .string(request.isEverything ? "all" : (request.tag?.rawValue ?? "listed")),
+            "scope": .string(
+                request.isEverything ? "all"
+                    : request.custom != nil ? "custom"
+                    : (request.tag?.rawValue ?? "listed")
+            ),
         ])
         let title = changed.count == 1
             ? "Marked 1 email as read"
@@ -670,6 +678,9 @@ struct AIChatView: View {
                     // have reordered since the last one.
                     facts: FactStore.describe(facts, numbered: context),
                     inFull: opened,
+                    // The person's names for their categories, and the
+                    // ones they made, so the digest speaks their language.
+                    names: CategoryStore.shared.names,
                     people: standings.map { $0.described() }.joined(separator: "\n\n"),
                     hopsLeft: hopsLeft,
                     hasSearched: searchedFor != nil,

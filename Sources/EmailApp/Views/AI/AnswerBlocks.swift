@@ -69,6 +69,15 @@ struct Stat: Equatable, Codable {
         self.title = label
         self.value = value
 
+        // The person's own name for a category first -- one they made, or a
+        // built-in they renamed -- because that is the word the model was
+        // shown and will use back.
+        if let category = CategoryStore.anyNamed(in: label.lowercased()),
+           let tint = Tint(rawValue: category.color.rawValue) {
+            self.symbol = category.symbol
+            self.tint = tint
+            return
+        }
         if let tag = AITag.named(in: label.lowercased()) {
             self.symbol = tag.systemImage
             self.tint = tag.statTint

@@ -1167,14 +1167,18 @@ final class MailStore {
         defer { summarizing.remove(id) }
 
         let stamp = epoch
-        guard let classification = try? await AIService.classify(message) else { return }
+        let categories = CategoryStore.shared
+        let told = categories.revisionsForModel
+        guard let classification = try? await AIService.classify(
+            message, custom: categories.customForModel, notes: categories.notesForModel
+        ) else { return }
         // The summary belongs to the message it was asked about, and that
         // message belongs to a mailbox. Applying it after a switch would put
         // it on whatever now sits at that id.
         guard isCurrent(stamp) else { return }
         apply(classification, to: id)
         if let remoteID = message.remoteID {
-            ClassificationCache.store(classification, for: remoteID)
+            ClassificationCache.store(classification, for: remoteID, seen: told)
         }
     }
 
@@ -1425,10 +1429,24 @@ final class MailStore {
         let eligible = Self.eligibleForAI(messages, tier: UsageStore.shared.spend?.tier)
         func allowed(_ message: Message) -> Bool { eligible?.contains(message.id) ?? true }
 
+        // Messages sorted before the person's categories were what they are
+        // now. The newest hundred go again on their own; the rest only when
+        // "Apply to all mail" was pressed, and that switch turns itself off
+        // once nothing is left. See `CategoryStore.refreshDepth`.
+        let categories = CategoryStore.shared
+        let stale = messages
+            .filter { allowed($0) && Self.awaitsCategories($0, in: categories) }
+            .sorted { $0.date > $1.date }
+        let resort = Set(stale.prefix(categories.appliesToAllMail ? Int.max : CategoryStore.refreshDepth).map(\.id))
+        if stale.isEmpty { categories.appliesToAllMail = false }
+
         var budget = Self.enhancePassLimit
         while budget > 0 {
             let firstTier = messages
-                .filter { allowed($0) && $0.mailbox != .sent && $0.aiSummary == nil && !$0.tags.contains(.noReplyNeeded) }
+                .filter {
+                    allowed($0) && $0.mailbox != .sent && !$0.tags.contains(.noReplyNeeded)
+                        && ($0.aiSummary == nil || resort.contains($0.id))
+                }
                 .prefix(limit)
             // Messages the first tier already flagged whose second read never
             // ran -- the app was closed, the call failed -- and sent mail,
@@ -1499,7 +1517,14 @@ final class MailStore {
     /// the service did not answer.
     private func classifyAndExtract(_ message: Message) async -> Bool {
         let stamp = epoch
-        guard let classification = try? await AIService.classify(message) else { return false }
+        // What the person has told the model about their categories, read
+        // before the call and stored beside the answer, so the answer can be
+        // told apart from one made under different instructions.
+        let categories = CategoryStore.shared
+        let told = categories.revisionsForModel
+        guard let classification = try? await AIService.classify(
+            message, custom: categories.customForModel, notes: categories.notesForModel
+        ) else { return false }
         // Fifteen of these are in flight at once and each writes a tag and a
         // summary onto a message. A batch that lands after a switch would
         // write the previous mailbox's classifications into this one's mail
@@ -1508,7 +1533,7 @@ final class MailStore {
         guard isCurrent(stamp) else { return false }
         apply(classification, to: message.id)
         guard let remoteID = message.remoteID else { return true }
-        ClassificationCache.store(classification, for: remoteID)
+        ClassificationCache.store(classification, for: remoteID, seen: told)
 
         if classification.wantsExtraction {
             _ = await extractFacts(from: message)
@@ -1578,8 +1603,45 @@ final class MailStore {
             message.tags.insert(kind)
         }
 
+        // The person's own categories. Only when the answer said anything
+        // about them: an entry from before they existed carries nil, and
+        // nil is "not asked", not "none".
+        if let custom = classification.custom {
+            message.customTags = Set(custom)
+        }
+
         // Never leave a message untagged; it would appear in no filter.
         if message.tags.isEmpty { message.tags.insert(.noReplyNeeded) }
+    }
+
+    /// A deleted category leaves every message it was on. The cache keeps its
+    /// old answer, which is harmless: the id no longer maps to anything.
+    func removeCustomTag(_ id: String) {
+        write { list in
+            for index in list.indices where list[index].customTags?.contains(id) == true {
+                list[index].customTags?.remove(id)
+            }
+        }
+    }
+
+    /// How many already-sorted messages a new or reworded category has not
+    /// reached yet -- the number behind "Apply to all". Only mail the model
+    /// would read at all: not sent mail, not what the phone sorted itself.
+    func categoryRefreshCount() -> Int {
+        let categories = CategoryStore.shared
+        guard !categories.revisionsForModel.isEmpty else { return 0 }
+        return messages.filter { Self.awaitsCategories($0, in: categories) }.count
+    }
+
+    /// Whether a message was sorted before the current categories were told
+    /// to the model.
+    static func awaitsCategories(_ message: Message, in categories: CategoryStore) -> Bool {
+        guard message.mailbox != .sent, message.aiSummary != nil,
+              !message.tags.contains(.noReplyNeeded),
+              let remoteID = message.remoteID,
+              let entry = ClassificationCache.entry(for: remoteID)
+        else { return false }
+        return categories.isStale(entry.customSeen)
     }
 
     /// Removes the mailbox in front of you, and everything derived from it.
@@ -1663,19 +1725,32 @@ final class MailStore {
     func messages(
         in mailbox: Mailbox,
         tag: AITag? = nil,
+        custom: String? = nil,
         unreadOnly: Bool = false,
         matching query: String = ""
     ) -> [Message] {
         let list = derived.byMailbox[mailbox] ?? []
-        guard tag != nil || unreadOnly || !query.isEmpty else { return list }
+        guard tag != nil || custom != nil || unreadOnly || !query.isEmpty else { return list }
 
         return list
             .filter { message in
                 guard let tag else { return true }
                 return message.tags.contains(tag)
             }
+            .filter { message in
+                guard let custom else { return true }
+                return message.customTags?.contains(custom) == true
+            }
             .filter { !unreadOnly || !$0.isRead }
             .filter { query.isEmpty || $0.matches(query) }
+    }
+
+    /// The list a category chip shows: a built-in filters by its tag, a
+    /// custom one by its id.
+    func messages(in mailbox: Mailbox, category: Category?) -> [Message] {
+        guard let category else { return messages(in: mailbox) }
+        if let tag = category.builtIn { return messages(in: mailbox, tag: tag) }
+        return messages(in: mailbox, custom: category.id)
     }
 
     /// Unread conversations. Read straight off the index, because this is
@@ -1705,6 +1780,17 @@ final class MailStore {
     struct TagCounts {
         var total: [AITag: Int] = [:]
         var unread: [AITag: Int] = [:]
+        /// The same, for the person's own categories, by `Category.id`.
+        var customTotal: [String: Int] = [:]
+        var customUnread: [String: Int] = [:]
+
+        func total(of category: Category) -> Int {
+            category.builtIn.map { total[$0] ?? 0 } ?? (customTotal[category.id] ?? 0)
+        }
+
+        func unread(of category: Category) -> Int {
+            category.builtIn.map { unread[$0] ?? 0 } ?? (customUnread[category.id] ?? 0)
+        }
     }
 
     func tagCounts(in mailbox: Mailbox) -> TagCounts {
@@ -1719,6 +1805,20 @@ final class MailStore {
     func availableTags(in mailbox: Mailbox) -> [AITag] {
         let counts = tagCounts(in: mailbox)
         return AITag.allCases.filter { (counts.total[$0] ?? 0) > 0 }
+    }
+
+    /// The chips: the person's visible categories in their order. A built-in
+    /// only when something in the mailbox carries it; a custom one always,
+    /// because a category somebody just made must be there to be seen, empty
+    /// or not.
+    func availableCategories(in mailbox: Mailbox) -> [Category] {
+        let counts = tagCounts(in: mailbox)
+        return CategoryStore.shared.visible.filter { $0.isCustom || counts.total(of: $0) > 0 }
+    }
+
+    /// How many messages in the mailbox a category would show.
+    func count(of category: Category, in mailbox: Mailbox) -> Int {
+        tagCounts(in: mailbox).total(of: category)
     }
 
     func message(_ id: Message.ID) -> Message? {

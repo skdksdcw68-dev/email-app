@@ -57,6 +57,9 @@ struct Message: Identifiable, Hashable, Codable {
 
     /// What the AI decided about this message.
     var tags: Set<AITag> = []
+    /// The person's own categories this landed in, by `Category.id`. Optional
+    /// so every archive written before categories existed still decodes.
+    var customTags: Set<String>? = nil
     /// One-line gist of the thread, written by the AI.
     var aiSummary: String? = nil
 

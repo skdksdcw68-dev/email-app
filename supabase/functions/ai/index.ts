@@ -366,6 +366,55 @@ the reader by a person, or by someone acting for one, that carries any of
 those. False for newsletters, promotions, receipts, alerts, notifications
 and anything that wants nothing from the reader. Most mail is false.`;
 
+/// The person's own categories, as the app sends them. `custom` is what to
+/// sort into; `notes` are additions to the built-in definitions. Bounded in
+/// number and length, because the app is the intended caller and not the
+/// only possible one.
+interface Guidance {
+  id: string;
+  name: string;
+  what: string;
+}
+
+function readGuidance(raw: string | undefined, limit: number): Guidance[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((g) => g && typeof g.id === "string" && typeof g.name === "string")
+      .slice(0, limit)
+      .map((g) => ({
+        id: String(g.id).slice(0, 64),
+        name: String(g.name).slice(0, 40),
+        what: String(g.what ?? "").slice(0, 300),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/// Custom categories go to the model as L1, L2… rather than as their ids: a
+/// uuid is twenty tokens the model can mangle, a short alias is one it
+/// cannot. Mapped back on the way out.
+function customSection(custom: Guidance[], notes: Guidance[]): string {
+  const parts: string[] = [];
+  if (notes.length > 0) {
+    parts.push("The reader adds to the definitions above:");
+    for (const note of notes) parts.push(`  ${note.name}: ${note.what}`);
+  }
+  if (custom.length > 0) {
+    parts.push(
+      'The reader also sorts mail into labels of their own. Add "custom": a list',
+      "of the aliases of every label that applies, [] when none does. A label",
+      "applies only when the message clearly fits what the reader wrote; most",
+      "mail fits none.",
+    );
+    custom.forEach((label, index) => parts.push(`  L${index + 1}  ${label.name}: ${label.what}`));
+  }
+  return parts.length > 0 ? "\n\n" + parts.join("\n") : "";
+}
+
 async function classify(body: Record<string, string>, ctx: Ctx) {
   const content = [
     `From: ${body.from ?? ""}`,
@@ -373,6 +422,12 @@ async function classify(body: Record<string, string>, ctx: Ctx) {
     "",
     (body.body ?? "").slice(0, BODY_LIMIT),
   ].join("\n");
+
+  // Only when there is something to say. A mailbox with the ten built-ins
+  // pays for exactly the prompt it always did.
+  const custom = readGuidance(body.custom, 12);
+  const notes = readGuidance(body.notes, 10);
+  const system = CLASSIFY_SYSTEM + customSection(custom, notes);
 
   // 🔴 `minimal`, and it is 90% of what this call costs.
   //
@@ -385,14 +440,23 @@ async function classify(body: Record<string, string>, ctx: Ctx) {
   const raw = await openai(ctx,
     CLASSIFY_MODEL,
     [
-      { role: "system", content: CLASSIFY_SYSTEM },
+      { role: "system", content: system },
       { role: "user", content },
     ],
     true,
     { effort: "minimal" },
   );
 
-  return json({ ...JSON.parse(raw), model: CLASSIFY_MODEL });
+  const parsed = JSON.parse(raw);
+  // Aliases back to ids, and nothing the model was not asked about.
+  const byAlias = new Map(custom.map((label, index) => [`L${index + 1}`, label.id]));
+  const chosen = Array.isArray(parsed.custom)
+    ? parsed.custom
+        .map((alias: unknown) => byAlias.get(String(alias).trim()))
+        .filter((id: string | undefined): id is string => Boolean(id))
+    : [];
+
+  return json({ ...parsed, custom: chosen, model: CLASSIFY_MODEL });
 }
 
 // ----------------------------------------------------------------- extract

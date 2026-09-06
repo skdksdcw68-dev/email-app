@@ -71,6 +71,8 @@ enum MailboxScope {
         // the previous mailbox's stars -- silently, and looking entirely
         // normal.
         PersonPreferences.resetCache()
+        // The categories belong to the mailbox they were read from too.
+        CategoryStore.shared.reload()
     }
 
     /// Forgets everything one mailbox stored in `UserDefaults`. One call, and

@@ -122,10 +122,12 @@ extension MailStore {
     /// answer: what the model does with it is the model's business.
     var tagSummary: String {
         let counts = tagCounts(in: .inbox)
-        let parts = AITag.allCases.compactMap { tag -> String? in
-            let total = counts.total[tag] ?? 0
+        // Under the person's names, their own categories included, hidden
+        // or not: the model is answering about the mail, not drawing chips.
+        let parts = CategoryStore.shared.all.compactMap { category -> String? in
+            let total = counts.total(of: category)
             guard total > 0 else { return nil }
-            return "\(tag.title) \(total) (\(counts.unread[tag] ?? 0) unread)"
+            return "\(category.name) \(total) (\(counts.unread(of: category)) unread)"
         }
         return parts.joined(separator: ", ")
     }

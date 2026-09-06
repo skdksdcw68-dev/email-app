@@ -21,7 +21,7 @@ final class SettingsSync {
     /// never -- and because one blob means one conflict: changing a tone on
     /// the phone and starring a sender on the iPad would throw one away.
     enum Scope: String, CaseIterable {
-        case app, people, onboarding, autoreply, profile, writing
+        case app, people, onboarding, autoreply, profile, writing, categories
 
         /// Whether this belongs to one address rather than to the person.
         ///
@@ -34,7 +34,7 @@ final class SettingsSync {
         /// their name and picture, the Auto-Reply setup they wrote once.
         var isPerMailbox: Bool {
             switch self {
-            case .people, .writing: true
+            case .people, .writing, .categories: true
             case .app, .onboarding, .autoreply, .profile: false
             }
         }
@@ -246,6 +246,12 @@ final class SettingsSync {
                   let json = String(data: data, encoding: .utf8)
             else { return nil }
             return ["config": .init(json)]
+
+        case .categories:
+            // The whole list as one string, like the Auto-Reply config: it is
+            // written as one thing and read as one thing.
+            guard let json = CategoryStore.shared.snapshotJSON else { return nil }
+            return ["categories": .init(json)]
         }
     }
 
@@ -322,6 +328,11 @@ final class SettingsSync {
                   let incoming = try? JSONDecoder().decode(AutoReplyConfig.self, from: data)
             else { return }
             autoReply?.adoptSynced(incoming)
+
+        case .categories:
+            if let json: String = payload["categories"]?.value() {
+                CategoryStore.shared.adopt(json: json)
+            }
         }
     }
 

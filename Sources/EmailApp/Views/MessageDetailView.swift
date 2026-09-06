@@ -141,9 +141,14 @@ struct MessageDetailView: View {
 
                 senderRow(message)
 
-                if !message.sortedTags.isEmpty {
+                if !message.sortedTags.isEmpty || !(message.customTags ?? []).isEmpty {
+                    // Under the names the person gave them, and with any of
+                    // their own categories after the built-ins.
+                    let categories = CategoryStore.shared
+                    let custom = categories.custom.filter { message.customTags?.contains($0.id) == true }
                     HStack(spacing: 6) {
-                        ForEach(message.sortedTags) { TagBadge(tag: $0) }
+                        ForEach(message.sortedTags) { CategoryBadge(category: categories.category(for: $0)) }
+                        ForEach(custom) { CategoryBadge(category: $0) }
                     }
                 }
 

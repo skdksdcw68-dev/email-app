@@ -19,10 +19,12 @@ struct InboxHomeView: View {
     @Environment(SearchHistory.self) private var searches
 
     @State private var mailbox: Mailbox = .inbox
-    @State private var tag: AITag?
+    /// The chip that is on, if one is: a built-in or one of the person's own.
+    @State private var category: Category?
     @State private var isComposing = false
     @State private var isAddingMailbox = false
     @State private var isManagingMailboxes = false
+    @State private var isManagingCategories = false
     /// A draft picked back up. Opens the composer on it rather than the
     /// reader; see the Drafts case in the list below.
     @State private var editing: Message?
@@ -79,13 +81,13 @@ struct InboxHomeView: View {
     var body: some View {
         // Sorted and thread-collapsed once, in MailboxIndex, rather than
         // here: this used to sort the whole mailbox on every draw.
-        let all = mail.messages(in: mailbox, tag: tag)
+        let all = mail.messages(in: mailbox, category: category)
         let messages = Array(all.prefix(shownRows))
         let hasMoreLocally = all.count > messages.count
         let lastID = messages.last?.id
         let attention = mail.needsAttention(limit: .max)
         let counts = mail.tagCounts(in: mailbox)
-        let availableTags = AITag.allCases.filter { (counts.total[$0] ?? 0) > 0 }
+        let availableCategories = mail.availableCategories(in: mailbox)
 
         return List {
             // Field open, nothing typed: offer what they looked for before,
@@ -197,11 +199,12 @@ struct InboxHomeView: View {
         .navigationTitle(isBrowsing ? "Maily" : mailbox.title)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) {
-            if isBrowsing && !availableTags.isEmpty && !isSearching {
+            if isBrowsing && !availableCategories.isEmpty && !isSearching {
                 TagFilterBar(
-                    tags: availableTags,
-                    count: { counts.unread[$0] ?? 0 },
-                    selection: $tag
+                    categories: availableCategories,
+                    count: { counts.unread(of: $0) },
+                    selection: $category,
+                    onManage: { isManagingCategories = true }
                 )
             }
         }
@@ -278,16 +281,17 @@ struct InboxHomeView: View {
         }
         .animation(.snappy(duration: 0.25), value: isSearching)
         .onChange(of: mailbox) { _, newValue in
-            if let tag, mail.count(of: tag, in: newValue) == 0 { self.tag = nil }
+            if let category, mail.count(of: category, in: newValue) == 0 { self.category = nil }
             shownRows = Self.pageOfRows
         }
         // A different filter is a different list, and it should open at the
         // top of it rather than three hundred rows in.
-        .onChange(of: tag) { _, _ in shownRows = Self.pageOfRows }
+        .onChange(of: category) { _, _ in shownRows = Self.pageOfRows }
         .sheet(isPresented: $isComposing) { ComposeView().closesOnlyOnPurpose() }
         .sheet(item: $editing) { ComposeView(editing: $0).closesOnlyOnPurpose() }
         .sheet(isPresented: $isAddingMailbox) { AddMailboxFlow() }
         .navigationDestination(isPresented: $isManagingMailboxes) { MailboxListView() }
+        .navigationDestination(isPresented: $isManagingCategories) { CategoriesView() }
     }
 
     /// A row and whatever tapping it should do.

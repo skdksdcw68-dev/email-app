@@ -69,6 +69,13 @@ struct MessageRow: View {
                     if showsPriority, let priority = message.topPriority {
                         TagBadge(tag: priority)
                     }
+                    // One of the person's own categories, if the message is in
+                    // any: the first in their order. One, because a row has
+                    // one line for the name and the date.
+                    if showsPriority,
+                       let custom = CategoryStore.shared.custom.first(where: { message.customTags?.contains($0.id) == true }) {
+                        CategoryBadge(category: custom)
+                    }
 
                     Text(message.sender.name)
                         .font(Style.rowTitle)

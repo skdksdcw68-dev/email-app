@@ -69,6 +69,10 @@ struct MailboxIndex {
                     counts.total[tag, default: 0] += 1
                     if !message.isRead { counts.unread[tag, default: 0] += 1 }
                 }
+                for id in message.customTags ?? [] {
+                    counts.customTotal[id, default: 0] += 1
+                    if !message.isRead { counts.customUnread[id, default: 0] += 1 }
+                }
             }
             tagCounts[mailbox] = counts
         }

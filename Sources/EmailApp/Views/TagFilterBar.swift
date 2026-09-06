@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// The row of AI tag pills, pinned under the title.
+/// The row of category pills, pinned under the title.
 ///
 /// Deliberately not inside a card or a section: it sits on the plain grouped
 /// background the way Mail's category filters do, with no hairline and no
@@ -11,20 +11,34 @@ import UIKit
 /// filter and stays either way, but the number is a to-do count -- once
 /// everything urgent has been read or answered, "Very Urgent 49" becomes just
 /// "Very Urgent", which is the reward for having dealt with it.
+///
+/// The pills are the person's categories, in their order and under their
+/// names: the ten built in, and any they made. A long press on any pill, or
+/// the trailing slider, opens the screen that manages them.
 struct TagFilterBar: View {
-    let tags: [AITag]
-    let count: (AITag) -> Int
-    @Binding var selection: AITag?
+    let categories: [Category]
+    let count: (Category) -> Int
+    @Binding var selection: Category?
+    var onManage: (() -> Void)? = nil
 
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: Style.tight) {
-                ForEach(tags) { tag in
-                    Pill(tag: tag, count: count(tag), isSelected: selection == tag) {
+                ForEach(categories) { category in
+                    Pill(
+                        category: category,
+                        count: count(category),
+                        isSelected: selection?.id == category.id
+                    ) {
                         withAnimation(.snappy(duration: 0.22)) {
-                            selection = selection == tag ? nil : tag
+                            selection = selection?.id == category.id ? nil : category
                         }
                     }
+                    .onLongPressGesture { onManage?() }
+                }
+
+                if let onManage {
+                    ManagePill(action: onManage)
                 }
             }
             .padding(.horizontal, Style.rowGutter)
@@ -36,7 +50,7 @@ struct TagFilterBar: View {
 }
 
 private struct Pill: View {
-    let tag: AITag
+    let category: Category
     let count: Int
     let isSelected: Bool
     let action: () -> Void
@@ -44,13 +58,13 @@ private struct Pill: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Image(systemName: tag.systemImage)
+                Image(systemName: category.symbol)
                     .font(.footnote.weight(.bold))
-                    .foregroundStyle(isSelected ? tag.onColor : tag.color)
+                    .foregroundStyle(isSelected ? category.color.onColor : category.color.color)
 
-                Text(tag.title)
+                Text(category.name)
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(isSelected ? tag.onColor : Color.primary)
+                    .foregroundStyle(isSelected ? category.color.onColor : Color.primary)
                     .fixedSize()
 
                 // Nothing unread means no number at all. A zero would say
@@ -58,7 +72,7 @@ private struct Pill: View {
                 if count > 0 {
                     Text("\(count)")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(isSelected ? tag.onColor.opacity(0.75) : Color.secondary)
+                        .foregroundStyle(isSelected ? category.color.onColor.opacity(0.75) : Color.secondary)
                         .contentTransition(.numericText())
                 }
             }
@@ -71,7 +85,7 @@ private struct Pill: View {
                 // noise, not information.
                 Capsule().fill(
                     isSelected
-                        ? AnyShapeStyle(tag.color)
+                        ? AnyShapeStyle(category.color.color)
                         : AnyShapeStyle(Color(uiColor: .secondarySystemBackground))
                 )
             }
@@ -83,8 +97,30 @@ private struct Pill: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(count > 0 ? "\(tag.title), \(count) unread" : tag.title)
+        .accessibilityLabel(count > 0 ? "\(category.name), \(count) unread" : category.name)
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
+    }
+}
+
+/// The way in to managing the row, at its end. A glyph alone: it is not a
+/// filter and must not read as one.
+private struct ManagePill: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "slider.horizontal.3")
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 8)
+                .background(Capsule().fill(Color(uiColor: .secondarySystemBackground)))
+                .overlay {
+                    Capsule().strokeBorder(Color(uiColor: .separator).opacity(0.5), lineWidth: 0.5)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Manage categories")
     }
 }
 
@@ -93,13 +129,14 @@ private struct Pill: View {
 }
 
 private struct PreviewHost: View {
-    @State private var selection: AITag? = .urgent
+    @State private var selection: Category? = .builtIn(.urgent)
 
     var body: some View {
         VStack(spacing: 0) {
-            TagFilterBar(tags: AITag.allCases, count: { _ in 3 }, selection: $selection)
+            TagFilterBar(
+                categories: Category.defaults, count: { _ in 3 }, selection: $selection, onManage: {}
+            )
             Spacer()
         }
-        .background(Color(uiColor: .systemGroupedBackground))
     }
 }

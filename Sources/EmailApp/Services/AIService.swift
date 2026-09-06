@@ -22,13 +22,21 @@ enum AIService {
         /// ask, a promise, a date. The first tier deciding when the second
         /// runs, rather than a word list. Optional for the same reason.
         let extract: Bool?
+        /// Which of the person's own categories apply, by id. The server
+        /// only returns ids it was asked about. Optional for the same reason
+        /// as the others.
+        let custom: [String]?
 
-        init(priority: String, needsReply: Bool, summary: String, category: String? = nil, extract: Bool? = nil) {
+        init(
+            priority: String, needsReply: Bool, summary: String,
+            category: String? = nil, extract: Bool? = nil, custom: [String]? = nil
+        ) {
             self.priority = priority
             self.needsReply = needsReply
             self.summary = summary
             self.category = category
             self.extract = extract
+            self.custom = custom
         }
 
         enum CodingKeys: String, CodingKey {
@@ -37,6 +45,7 @@ enum AIService {
             case summary
             case category
             case extract
+            case custom
         }
 
         var wantsExtraction: Bool { extract == true }
@@ -74,15 +83,29 @@ enum AIService {
 
     // MARK: - Calls
 
-    static func classify(_ message: Message) async throws -> Classification {
-        try await call(
-            [
-                "action": "classify",
-                "from": "\(message.sender.name) <\(message.sender.address)>",
-                "subject": message.subject,
-                "body": message.body,
-            ]
-        )
+    /// `custom` and `notes` are what the person has told the AI about their
+    /// own categories, as JSON. Sent only when there is something to say, so
+    /// a mailbox with the ten built-ins pays for exactly the prompt it always
+    /// did.
+    static func classify(
+        _ message: Message,
+        custom: [CategoryStore.Guidance] = [],
+        notes: [CategoryStore.Guidance] = []
+    ) async throws -> Classification {
+        var payload = [
+            "action": "classify",
+            "from": "\(message.sender.name) <\(message.sender.address)>",
+            "subject": message.subject,
+            "body": message.body,
+        ]
+        if !custom.isEmpty, let json = Self.json(custom) { payload["custom"] = json }
+        if !notes.isEmpty, let json = Self.json(notes) { payload["notes"] = json }
+        return try await call(payload)
+    }
+
+    private static func json(_ guidance: [CategoryStore.Guidance]) -> String? {
+        guard let data = try? JSONEncoder().encode(guidance) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     /// The second tier: what this message asks, promises, questions or dates.
@@ -210,6 +233,28 @@ enum AIService {
         }
     }
 
+    /// The person's names for their categories, as a value the streaming
+    /// call can carry off the main actor: a built-in under whatever they
+    /// renamed it to, and each custom one by id.
+    struct CategoryNames: Sendable {
+        var builtIn: [AITag: String]
+        var custom: [String: String]
+
+        /// The ten under their own titles, nothing custom -- what the model
+        /// was told before there were categories to rename.
+        static let standard = CategoryNames(
+            builtIn: Dictionary(uniqueKeysWithValues: AITag.allCases.map { ($0, $0.title) }),
+            custom: [:]
+        )
+
+        /// Everything the message is in, built-ins first, in a stable order.
+        func labels(for message: Message) -> [String] {
+            let tags = AITag.allCases.filter(message.tags.contains).map { builtIn[$0] ?? $0.title }
+            let own = (message.customTags ?? []).compactMap { custom[$0] }.sorted()
+            return tags + own
+        }
+    }
+
     static func searchPlan(for question: String) async throws -> SearchPlan {
         try await call([
             "action": "search",
@@ -293,6 +338,9 @@ enum AIService {
         /// Messages the model asked to read properly. These go at length;
         /// everything else keeps the opening that says what it is.
         inFull: Set<Message.ID> = [],
+        /// What the person calls their categories, so the digest speaks
+        /// their language and carries the ones they made.
+        names: CategoryNames = .standard,
         /// Where things stand with whoever the question is about. Saves the
         /// model working it out from a dozen of their emails.
         people: String? = nil,
@@ -326,7 +374,9 @@ enum AIService {
                 // telling somebody to reply to an email they read on Monday
                 // and decided about already.
                 "read": message.isRead ? "yes" : "no",
-                "tags": message.tags.map(\.title).sorted().joined(separator: ", "),
+                // Under the person's own names, with their own categories:
+                // "show me the support requests" has to find them.
+                "tags": names.labels(for: message).joined(separator: ", "),
             ]
         }
         let prior = history.map { ["role": $0.role, "content": $0.content] }
