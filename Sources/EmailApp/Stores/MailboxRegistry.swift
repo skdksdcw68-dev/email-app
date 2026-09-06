@@ -148,6 +148,11 @@ final class MailboxRegistry {
     func forget(_ id: MailboxID) {
         accounts.removeAll { $0.id == id }
         Keychain.deleteAll(for: id)
+        // Before the purge, while the suite can still be read. Kept a week
+        // in case the same address comes straight back, which is the one
+        // case where wiping it costs real money: the whole import, sorted
+        // again.
+        ClassificationCache.park(id)
         MailboxScope.purge(id)
         MailboxPaths.purge(id)
         // Their face goes with the rest of it. Signing out is meant to leave

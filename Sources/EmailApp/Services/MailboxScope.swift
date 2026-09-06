@@ -49,6 +49,11 @@ enum MailboxScope {
 
         ClassificationCache.flush()
 
+        // A mailbox that was disconnected this week gets its sorting back
+        // before anything reads the suite, so nothing is paid for twice.
+        ClassificationCache.unpark(id)
+        ClassificationCache.sweepParked()
+
         defaults = UserDefaults(suiteName: suiteName(for: id)) ?? .standard
         current = id
 

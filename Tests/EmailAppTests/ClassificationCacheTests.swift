@@ -87,6 +87,39 @@ final class ClassificationCacheTests: XCTestCase {
         XCTAssertEqual(MailboxScope.defaults.data(forKey: "ai.classifications"), first)
     }
 
+    // MARK: - Surviving a disconnect
+
+    /// Disconnecting and reconnecting the same address within the week must
+    /// not pay for the import to be sorted again.
+    func testParkedEntriesComeBackWhenTheMailboxReturns() throws {
+        let temp = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        MailboxPaths.supportOverride = temp
+        defer {
+            MailboxPaths.supportOverride = nil
+            try? FileManager.default.removeItem(at: temp)
+        }
+
+        let id = try XCTUnwrap(MailboxID(rawValue: "0123456789abcdef"))
+        let suite = MailboxScope.defaults(for: id)
+        defer { suite.removePersistentDomain(forName: MailboxScope.suiteName(for: id)) }
+
+        let stored = Data(#"{"m1":{"priority":"urgent","needsReply":true,"summary":"Kept","storedAt":0}}"#.utf8)
+        suite.set(stored, forKey: "ai.classifications")
+
+        ClassificationCache.park(id)
+        // What the disconnect does to the suite.
+        suite.removeObject(forKey: "ai.classifications")
+        XCTAssertNil(suite.data(forKey: "ai.classifications"))
+
+        ClassificationCache.unpark(id)
+        XCTAssertEqual(suite.data(forKey: "ai.classifications"), stored)
+
+        // Put back once, not on every activation after.
+        suite.removeObject(forKey: "ai.classifications")
+        ClassificationCache.unpark(id)
+        XCTAssertNil(suite.data(forKey: "ai.classifications"))
+    }
+
     func testClearingEmptiesMemoryAndDisk() {
         ClassificationCache.store(classification("Gone"), for: "m1")
         ClassificationCache.flush()

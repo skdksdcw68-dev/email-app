@@ -105,6 +105,70 @@ enum ClassificationCache {
         entries = nil
         isDirty = false
     }
+
+    // MARK: - Surviving a disconnect
+
+    /// How long a removed mailbox's classifications wait for it to come back.
+    ///
+    /// Disconnecting wipes the mailbox's suite, and rightly: the entries are
+    /// model-written summaries of mail somebody just asked to remove. But
+    /// Abel disconnected and reconnected the same address within an hour and
+    /// paid to have the whole import sorted again -- a thousand calls, half
+    /// of a month's spend. So the entries are parked under the mailbox id for
+    /// a week, put back if the same address returns, and deleted after that
+    /// whether or not it did.
+    static let parkedFor: TimeInterval = 7 * 24 * 60 * 60
+
+    private static var parkingFolder: URL {
+        let url = MailboxPaths.root.appending(path: "ParkedClassifications", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private static func parkingFile(for id: MailboxID) -> URL {
+        parkingFolder.appending(path: "\(id.rawValue).json")
+    }
+
+    /// Before the suite is purged, while its entries can still be read.
+    static func park(_ id: MailboxID) {
+        flush()
+        guard let data = MailboxScope.defaults(for: id).data(forKey: key) else { return }
+        try? data.write(to: parkingFile(for: id), options: .atomic)
+    }
+
+    /// When a mailbox is activated. Restores what was parked within the week;
+    /// the parked file goes either way.
+    static func unpark(_ id: MailboxID) {
+        let file = parkingFile(for: id)
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        guard let modified = try? FileManager.default
+                  .attributesOfItem(atPath: file.path)[.modificationDate] as? Date,
+              Date.now.timeIntervalSince(modified) < parkedFor,
+              let data = try? Data(contentsOf: file)
+        else { return }
+
+        // Only where there is nothing already: a mailbox that has been
+        // sorting since it came back has the newer answers.
+        let suite = MailboxScope.defaults(for: id)
+        guard suite.data(forKey: key) == nil else { return }
+        suite.set(data, forKey: key)
+    }
+
+    /// Whatever has waited longer than a week is deleted, whoever it was for.
+    static func sweepParked() {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: parkingFolder, includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else { return }
+
+        for file in files {
+            guard let modified = try? file.resourceValues(forKeys: [.contentModificationDateKey])
+                      .contentModificationDate,
+                  Date.now.timeIntervalSince(modified) >= parkedFor
+            else { continue }
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
 }
 
 extension AIService.Classification {

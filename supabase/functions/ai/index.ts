@@ -287,7 +287,17 @@ async function meter(ctx: Ctx, model: string, usage: Usage | null) {
 
 // ------------------------------------------------------------------ provider
 
-async function openai(ctx: Ctx, model: string, messages: unknown[], jsonMode: boolean) {
+/// How hard the model may think before answering. Read from the ledger, not
+/// assumed: see the note on `classify`.
+type Effort = "minimal" | "low" | "medium" | "high";
+
+async function openai(
+  ctx: Ctx,
+  model: string,
+  messages: unknown[],
+  jsonMode: boolean,
+  options: { effort?: Effort } = {},
+) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -298,6 +308,7 @@ async function openai(ctx: Ctx, model: string, messages: unknown[], jsonMode: bo
       model,
       messages,
       ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
+      ...(options.effort ? { reasoning_effort: options.effort } : {}),
     }),
   });
 
@@ -363,6 +374,14 @@ async function classify(body: Record<string, string>, ctx: Ctx) {
     (body.body ?? "").slice(0, BODY_LIMIT),
   ].join("\n");
 
+  // 🔴 `minimal`, and it is 90% of what this call costs.
+  //
+  // gpt-5-nano is a reasoning model, and left at its default it thought for
+  // ~1,100 tokens before writing ~60 tokens of JSON -- on every one of the
+  // 457 classifications in the first month's ledger. Output is the expensive
+  // side, so the thinking was 95% of the cost of a call whose whole job is
+  // to pick one of four words. Minimal effort puts the answer at ~$0.00006
+  // rather than $0.0005, which is the number the tiers were priced on.
   const raw = await openai(ctx,
     CLASSIFY_MODEL,
     [
@@ -370,6 +389,7 @@ async function classify(body: Record<string, string>, ctx: Ctx) {
       { role: "user", content },
     ],
     true,
+    { effort: "minimal" },
   );
 
   return json({ ...JSON.parse(raw), model: CLASSIFY_MODEL });
@@ -436,6 +456,9 @@ async function extract(body: Record<string, string>, ctx: Ctx) {
     (body.body ?? "").slice(0, EXTRACT_BODY_LIMIT),
   ].join("\n");
 
+  // Minimal for the same reason as classify: 1,733 of the 1,807 output
+  // tokens per call were thinking, on a job that is copying phrases out of
+  // an email into four lists.
   const raw = await openai(ctx,
     CLASSIFY_MODEL,
     [
@@ -443,6 +466,7 @@ async function extract(body: Record<string, string>, ctx: Ctx) {
       { role: "user", content },
     ],
     true,
+    { effort: "minimal" },
   );
 
   const parsed = JSON.parse(raw);
