@@ -220,7 +220,12 @@ final class SettingsSync {
             ]
 
         case .onboarding:
-            return ["answers": .init((user?.answers ?? [:]).mapValues(Array.init))]
+            return [
+                "answers": .init((user?.answers ?? [:]).mapValues(Array.init)),
+                // Finished, as a fact of its own. Answers alone cannot say it:
+                // one accidental tap looked identical to a completed run.
+                "completed": .init(user?.questionsCompleted ?? false),
+            ]
 
         case .writing:
             // The voice this one address writes in. Nil tone means it has not
@@ -304,9 +309,16 @@ final class SettingsSync {
             }
 
         case .onboarding:
-            if let raw: [String: [String]] = payload["answers"]?.value() {
+            let raw: [String: [String]] = payload["answers"]?.value() ?? [:]
+            if !raw.isEmpty {
                 user?.replaceAnswers(raw.mapValues(Set.init))
             }
+            // Rows written before the flag existed carry answers only. Most
+            // of the questions answered is a finished run; one or two is a
+            // run abandoned on question one -- or a stray tap.
+            let completed: Bool = payload["completed"]?.value()
+                ?? (raw.count * 2 >= OnboardingQuestion.all.count)
+            user?.markQuestionsCompleted(completed)
 
         case .writing:
             if let value: String = payload["customInstructions"]?.value() {

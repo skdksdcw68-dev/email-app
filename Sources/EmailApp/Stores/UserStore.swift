@@ -22,12 +22,25 @@ final class UserStore {
     /// Answers keyed by question id. A single-select question holds one value.
     private(set) var answers: [String: Set<String>]
 
+    /// Whether the questions were *finished* -- the last one passed -- as
+    /// opposed to touched. Synced with the answers, and the only thing that
+    /// decides whether a sign-in skips them.
+    ///
+    /// 🔴 "Any answer counts" was the rule before, and it read one accidental
+    /// tap on question one, faithfully saved to the server, as a completed
+    /// onboarding. Finished is a fact the flow records; answered is not.
+    private(set) var questionsCompleted: Bool
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard, startAt phase: Phase? = nil) {
         self.defaults = defaults
         self.answers = Self.loadAnswers(from: defaults)
         self.account = Self.loadAccount(from: defaults)
+        // Anybody who finished the whole flow on this phone before the flag
+        // existed finished the questions too.
+        self.questionsCompleted = defaults.bool(forKey: Key.questionsDone)
+            || defaults.bool(forKey: Key.completed)
 
         // The splash shows on every launch, not only the first, so it is always
         // the starting phase. `advanceFromSplash` decides where to go next.
@@ -188,10 +201,14 @@ final class UserStore {
                 // account could not vouch for. Asking them to sign in again
                 // here would be the second sign-in screen in a minute. The
                 // answers go up now, and they go on to the mailbox.
+                markQuestionsCompleted(true)
                 explainsQuestionsAfterSignIn = false
                 Task { await SettingsSync.shared.pushNow(.onboarding) }
                 phase = .connectInbox
             } else {
+                // Recorded before the sign-in, so `continueAfterAuth` knows
+                // this account has just been through them.
+                markQuestionsCompleted(true)
                 phase = .createAccount
             }
         case .createAccount, .signIn:
@@ -329,6 +346,7 @@ final class UserStore {
         if cameToSignIn {
             answers = [:]
             persistAnswers()
+            markQuestionsCompleted(false)
         }
 
         // What this account already has. Without it a genuine returning user
@@ -357,13 +375,19 @@ final class UserStore {
     /// instead of looking like a demand to sign up. Cleared when they move on.
     var explainsQuestionsAfterSignIn = false
 
-    /// Whether this account has been through the questions at all.
+    /// Whether this account has been through the questions to the end.
     ///
-    /// Any answer counts. Requiring all of them would trap somebody who
-    /// abandoned onboarding halfway on an earlier install in a loop they
-    /// could not get out of.
-    var hasAnsweredQuestions: Bool {
-        answers.values.contains { !$0.isEmpty }
+    /// Not "has any answer": that read one accidental tap, saved to the
+    /// server, as a finished onboarding and sent Abel straight to Gmail.
+    /// Skipping a question is still finishing -- the flag is set when the
+    /// last one is passed, whatever was picked -- so nobody is trapped.
+    var hasAnsweredQuestions: Bool { questionsCompleted }
+
+    /// Set by the flow on the last question, cleared before a sign-in, and
+    /// taken from the server when another device recorded it.
+    func markQuestionsCompleted(_ done: Bool) {
+        questionsCompleted = done
+        defaults.set(done, forKey: Key.questionsDone)
     }
 
     /// Convenience for Apple, which hands back `PersonNameComponents`.
@@ -378,8 +402,10 @@ final class UserStore {
     func signOut() {
         account = nil
         answers = [:]
+        questionsCompleted = false
         defaults.removeObject(forKey: Key.account)
         defaults.removeObject(forKey: Key.answers)
+        defaults.removeObject(forKey: Key.questionsDone)
         // The signup snapshot goes too. Keeping it would mean the next person
         // to sign in on this phone could reset to a stranger's answers.
         defaults.removeObject(forKey: Key.originalAnswers)
@@ -452,6 +478,7 @@ final class UserStore {
     private enum Key {
         static let answers = "onboarding.answers"
         static let originalAnswers = "onboarding.answers.original"
+        static let questionsDone = "onboarding.questionsDone"
         static let account = "onboarding.account"
         static let completed = "onboarding.completed"
     }
