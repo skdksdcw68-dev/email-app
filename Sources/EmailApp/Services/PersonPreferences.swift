@@ -20,7 +20,6 @@ enum PersonPreferences {
     private static let importantKey = "people.important"
     private static let mutedKey = "people.muted"
     private static let categoryKey = "people.categories"
-    private static let imagesKey = "people.images"
 
     // MARK: - Important
 
@@ -40,7 +39,6 @@ enum PersonPreferences {
     private static let mutedCache = Guarded<Set<String>?>(nil)
     private static let overridesCache = Guarded<[String: String]?>(nil)
     private static let relationshipsCache = Guarded<[String: String]?>(nil)
-    private static let imagesCache = Guarded<Set<String>?>(nil)
 
     /// Fill-on-read, with the reading done *outside* the lock.
     ///
@@ -131,41 +129,6 @@ enum PersonPreferences {
         SettingsSync.notify(.people)
     }
 
-    // MARK: - Pictures
-
-    /// Senders whose messages may fetch their own pictures.
-    ///
-    /// Per sender rather than per message, because the answer is about a
-    /// relationship: a shop somebody buys from can have its pictures every
-    /// time, and a stranger asking them to view an invoice cannot have them
-    /// once. See `RemoteContentBlocker` for what is actually being refused.
-    static var showsImages: Set<String> {
-        get {
-            cached(imagesCache) {
-                Set(MailboxScope.defaults.stringArray(forKey: imagesKey) ?? [])
-            }
-        }
-        set {
-            imagesCache.withLock { held in held = newValue }
-            MailboxScope.defaults.set(Array(newValue), forKey: imagesKey)
-        }
-    }
-
-    static func showsImages(from address: String) -> Bool {
-        showsImages.contains(address.lowercased())
-    }
-
-    static func setShowsImages(_ shows: Bool, for address: String) {
-        var all = showsImages
-        let key = address.lowercased()
-        if shows {
-            all.insert(key)
-        } else {
-            all.remove(key)
-        }
-        showsImages = all
-        SettingsSync.notify(.people)
-    }
 
     // MARK: - Category
 
@@ -253,7 +216,6 @@ enum PersonPreferences {
         mutedCache.withLock { $0 = nil }
         overridesCache.withLock { $0 = nil }
         relationshipsCache.withLock { $0 = nil }
-        imagesCache.withLock { $0 = nil }
     }
 
     /// Adds what another device has marked, without removing anything.
@@ -288,11 +250,9 @@ enum PersonPreferences {
         mutedCache.withLock { held in held = [] }
         overridesCache.withLock { held in held = [:] }
         relationshipsCache.withLock { held in held = [:] }
-        imagesCache.withLock { held in held = [] }
         MailboxScope.defaults.removeObject(forKey: importantKey)
         MailboxScope.defaults.removeObject(forKey: mutedKey)
         MailboxScope.defaults.removeObject(forKey: categoryKey)
         MailboxScope.defaults.removeObject(forKey: relationshipKey)
-        MailboxScope.defaults.removeObject(forKey: imagesKey)
     }
 }

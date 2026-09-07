@@ -35,12 +35,10 @@ struct AppSettingsView: View {
                             value: memory.facts.isEmpty ? "Empty" : "\(memory.facts.count)") {
                     MemorySettingsView()
                 }
-                // No value rather than a wrong one. It read the string
-                // literal "Free", so a paying Max subscriber was told their
-                // plan was Free in Settings while the paywall simultaneously
-                // showed Max as current. The screen behind it knows the truth
-                // and asks the server for it.
-                SettingsRow("Plan") { PlanView() }
+                // Plan moved to You, at the top, under the profile. What
+                // somebody is paying for is not a setting they went looking
+                // for -- it is one of the two or three things they open this
+                // tab to see.
             } header: {
                 Text("Account")
             }
@@ -493,7 +491,7 @@ struct PrivacySettingsView: View {
             } header: {
                 Text("Reading mail")
             } footer: {
-                Text("A picture in an email is fetched from the sender's server, which tells them you opened it, when, and roughly where from. Maily leaves them out until you tap Show, and you can allow individual senders as you go.\n\nChecking links shows you the real destination before Safari opens it. The words in a link and where it goes are unrelated.")
+                Text("Pictures are shown as the sender meant them to be. Turning this off leaves them out until you tap Show — a picture is fetched from the sender's server, which tells them you opened the message, when, and roughly where from.\n\nChecking links shows you the real destination before Safari opens it. The words in a link and where it goes are unrelated.")
             }
 
             Section {

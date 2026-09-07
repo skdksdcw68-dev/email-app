@@ -39,6 +39,8 @@ struct YouView: View {
                         .font(.subheadline)
                 }
 
+                planSection
+
                 accounts
 
                 Section {
@@ -145,6 +147,60 @@ struct YouView: View {
 
     /// The mailbox, shown rather than named.
     ///
+    /// What they are on, and the way to change it.
+    ///
+    /// It was a row called "Plan" inside Settings, two taps down, next to
+    /// memory and categories. What somebody pays for is not a setting they go
+    /// looking for -- it is one of the few things this tab exists to answer,
+    /// and on a free account it is also the only place the app ever mentions
+    /// that there is more. Directly under the profile, where the eye already
+    /// is.
+    ///
+    /// The tier comes from `UsageStore`, which asks the server. The old
+    /// Settings row read the literal string "Free", so a paying Max
+    /// subscriber was told they were on Free while the paywall behind it
+    /// showed Max as current.
+    private var planSection: some View {
+        Section {
+            NavigationLink {
+                PlanView()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: plan == .free ? "sparkles" : "crown.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(plan == .free ? Color.secondary : Color.accentColor)
+                        .frame(width: 26)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(plan == .free ? "Maily Free" : "Maily \(plan.title)")
+                            .font(Style.rowTitle)
+                        Text(plan == .free ? "See what Pro and Max add" : "Manage your subscription")
+                            .font(Style.rowDetail)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    if usage.spend?.is_in_grace == true {
+                        Image(systemName: "creditcard.trianglebadge.exclamationmark")
+                            .font(.footnote)
+                            .foregroundStyle(Color.warning)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        } header: {
+            Text("Subscription")
+        }
+        .task { await usage.refresh() }
+    }
+
+    /// `UsageStore.shared`, the same instance the Usage screen reads. Two
+    /// stores would mean this row and that screen could disagree about what
+    /// somebody is paying for.
+    private var usage: UsageStore { .shared }
+    private var plan: Plan { usage.spend?.tier ?? .free }
+
     /// A single row saying "Mailbox — abel@gmail.com" is the same words in
     /// less space, and it loses the thing that made this section worth
     /// having: the face beside the address, and somewhere obvious to go when

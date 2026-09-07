@@ -187,13 +187,17 @@ enum AppSettings {
 
     /// Whether a message's pictures are fetched the moment it is opened.
     ///
-    /// Off by default, and the default is the point. A single-pixel image on
-    /// a sender's server tells them the address is live, when it was read,
-    /// roughly where from and on what -- from an email nobody clicked. The
-    /// reader blocks every http(s) sub-resource until asked; see
-    /// `RemoteContentBlocker`.
+    /// **On by default.** A tracking pixel on a sender's server does tell
+    /// them the address is live and when it was read -- that is real, and the
+    /// switch to refuse it is here for anybody who wants it -- but a mail app
+    /// whose messages arrive as grey boxes with a button on them is a mail
+    /// app that is wrong about what people came for. Abel's call, and the
+    /// right one: an email is meant to look like the email that was sent.
+    ///
+    /// Off turns on `RemoteContentBlocker`, which refuses every http(s)
+    /// sub-resource until asked, message by message.
     static var loadsRemoteImages: Bool {
-        get { UserDefaults.standard.object(forKey: "settings.remoteImages") as? Bool ?? false }
+        get { UserDefaults.standard.object(forKey: "settings.remoteImages") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "settings.remoteImages"); SettingsSync.notify(.app) }
     }
 

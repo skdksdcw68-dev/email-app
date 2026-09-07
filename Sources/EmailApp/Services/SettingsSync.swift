@@ -217,11 +217,6 @@ final class SettingsSync {
             return [
                 "important": .init(Array(PersonPreferences.important)),
                 "muted": .init(Array(PersonPreferences.muted)),
-                // Who is allowed to send pictures. Worth carrying: it is a
-                // list somebody built one sender at a time, and rebuilding it
-                // on a second phone is the kind of chore that makes people
-                // turn the protection off instead.
-                "showsImages": .init(Array(PersonPreferences.showsImages)),
             ]
 
         case .onboarding:
@@ -313,11 +308,6 @@ final class SettingsSync {
             }
             if let incoming: [String] = payload["muted"]?.value() {
                 PersonPreferences.merge(muted: Set(incoming))
-            }
-            if let incoming: [String] = payload["showsImages"]?.value() {
-                for address in incoming where !PersonPreferences.showsImages(from: address) {
-                    PersonPreferences.setShowsImages(true, for: address)
-                }
             }
 
         case .onboarding:

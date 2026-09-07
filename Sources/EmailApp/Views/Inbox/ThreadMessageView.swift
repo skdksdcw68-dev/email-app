@@ -53,7 +53,6 @@ struct ThreadMessageView: View {
         }
         .onAppear {
             showsImages = AppSettings.loadsRemoteImages
-                || PersonPreferences.showsImages(from: message.sender.address)
             warning = SenderScrutiny.check(message.sender)
         }
         .alert(warning?.headline ?? "", isPresented: $isShowingWarning) {
@@ -144,14 +143,13 @@ struct ThreadMessageView: View {
 
             Spacer(minLength: 8)
 
-            Menu {
-                Button("Show pictures") {
-                    withAnimation(.easeOut(duration: 0.2)) { showsImages = true }
-                }
-                Button("Always from this sender") {
-                    PersonPreferences.setShowsImages(true, for: message.sender.address)
-                    withAnimation(.easeOut(duration: 0.2)) { showsImages = true }
-                }
+            // One button. It was a menu offering "Show pictures" and "Always
+            // from this sender", which made a two-step decision out of
+            // something somebody wants to get past in one tap -- and the
+            // per-sender half is unreachable for the overwhelming majority
+            // who never turn blocking on at all.
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { showsImages = true }
             } label: {
                 Text("Show")
                     .font(.footnote.weight(.semibold))
@@ -159,6 +157,7 @@ struct ThreadMessageView: View {
                     .padding(.vertical, 6)
                     .background(Capsule().fill(Color.accentColor.opacity(0.12)))
             }
+            .buttonStyle(.plain)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
