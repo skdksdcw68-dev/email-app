@@ -1854,6 +1854,36 @@ final class MailStore {
         return messages[index]
     }
 
+    /// The whole conversation this message belongs to, oldest first.
+    ///
+    /// Oldest first because that is the order it happened in and the order
+    /// Gmail shows: the newest message is at the *bottom*, where somebody
+    /// scrolling to the end of a thread expects to find what is being replied
+    /// to. Plenty of apps do newest-first and every one of them makes a long
+    /// thread read backwards.
+    ///
+    /// The list already collapses a conversation to one row -- see
+    /// `collapsingThreads` -- so every other message in it was already here,
+    /// imported and indexed, and only the reading screen could not see them.
+    ///
+    /// A message with no `threadID` is a conversation of one. So is a message
+    /// whose thread has a single member: nothing about the screen should
+    /// change for ordinary mail.
+    func thread(of id: Message.ID) -> [Message] {
+        guard let message = message(id) else { return [] }
+        guard let threadID = message.threadID else { return [message] }
+
+        // Drafts and deleted mail are not part of what was said. A draft in
+        // particular would appear as a message that was never sent.
+        let conversation = messages
+            .filter { $0.threadID == threadID && $0.mailbox != .trash && $0.mailbox != .drafts }
+            .sorted { $0.date < $1.date }
+
+        // ⚠️ The message being read wins over the filter above. Opening
+        // something from Trash must show it, not an empty screen.
+        return conversation.contains { $0.id == id } ? conversation : [message]
+    }
+
     // MARK: - Writing
 
     /// Messages read inside Maily.
