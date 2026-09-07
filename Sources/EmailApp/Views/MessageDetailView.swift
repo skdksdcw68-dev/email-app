@@ -8,6 +8,8 @@ struct MessageDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var isReplying = false
+    /// The same sheet, addressed to everybody rather than to the sender.
+    @State private var isReplyingAll = false
     /// Passing it on, which is not the same as answering it -- and used to
     /// be the same flag, so Forward opened a reply to the sender.
     @State private var isForwarding = false
@@ -89,6 +91,11 @@ struct MessageDetailView: View {
                 ComposeView(replyingTo: message).closesOnlyOnPurpose()
             }
         }
+        .sheet(isPresented: $isReplyingAll) {
+            if let message {
+                ComposeView(replyingTo: message, replyAll: true).closesOnlyOnPurpose()
+            }
+        }
         .sheet(isPresented: $isForwarding) {
             if let message {
                 ComposeView(forwarding: message).closesOnlyOnPurpose()
@@ -106,8 +113,8 @@ struct MessageDetailView: View {
             Button {
                 store.toggleFlag(message.id)
             } label: {
-                Label(message.isFlagged ? "Unflag" : "Flag",
-                      systemImage: message.isFlagged ? "flag.slash" : "flag")
+                Label(message.isFlagged ? "Remove star" : "Star",
+                      systemImage: message.isFlagged ? "star.slash" : "star")
             }
 
             Button {
@@ -117,11 +124,8 @@ struct MessageDetailView: View {
                 Label("Mark as unread", systemImage: "envelope.badge")
             }
 
-            Button {
-                isForwarding = true
-            } label: {
-                Label("Forward", systemImage: "arrowshape.turn.up.forward")
-            }
+            // Forward moved to the bar beside Reply, with Reply all. Leaving
+            // a copy here would be two routes to one sheet.
 
             Divider()
 
@@ -147,22 +151,60 @@ struct MessageDetailView: View {
         .accessibilityLabel("More options")
     }
 
-    /// One action. Dictation lives on the reply screen, not here -- opening a
-    /// message should not arm a microphone.
+    /// One action, and the two next to it behind a second button.
+    ///
+    /// Reply is what somebody came here to do and stays a full-width target.
+    /// Reply all and Forward earn a place in the bar -- they were a menu away
+    /// at the top right, which is not where anybody looks after reading a
+    /// message -- without competing with it.
+    ///
+    /// Dictation lives on the reply screen, not here: opening a message
+    /// should not arm a microphone.
     private var replyBar: some View {
-        Button {
-            isReplying = true
-        } label: {
-            Label("Reply", systemImage: "arrowshape.turn.up.left.fill")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .background(Capsule().fill(Color.accentColor))
+        HStack(spacing: 10) {
+            Button {
+                isReplying = true
+            } label: {
+                Label("Reply", systemImage: "arrowshape.turn.up.left.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(Capsule().fill(Color.accentColor))
+            }
+            .buttonStyle(.plain)
+
+            Menu {
+                if canReplyAll {
+                    Button {
+                        isReplyingAll = true
+                    } label: {
+                        Label("Reply all", systemImage: "arrowshape.turn.up.left.2")
+                    }
+                }
+                Button {
+                    isForwarding = true
+                } label: {
+                    Label("Forward", systemImage: "arrowshape.turn.up.forward")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 48, height: 48)
+                    .background(Circle().fill(Color.accentColor.opacity(0.12)))
+            }
+            .accessibilityLabel("More ways to answer")
         }
-        .buttonStyle(.plain)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    /// Only when there is somebody else on it. "Reply all" on a message sent
+    /// to one person is the same button twice.
+    private var canReplyAll: Bool {
+        guard let message else { return false }
+        return !ComposeView.everyoneElse(on: message, mine: store.account?.address).isEmpty
     }
 
     // MARK: - Content

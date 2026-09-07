@@ -5,10 +5,13 @@ enum Mailbox: String, CaseIterable, Identifiable, Codable {
 
     var id: Self { self }
 
+    /// ⚠️ The raw value of `flagged` stays as it is. It is written into every
+    /// archived message on disk, so renaming the case would make an existing
+    /// mailbox fail to decode. Only the word people read changed.
     var title: String {
         switch self {
         case .inbox:   "Inbox"
-        case .flagged: "Flagged"
+        case .flagged: "Starred"
         case .sent:    "Sent"
         case .drafts:  "Drafts"
         case .archive: "Archive"
@@ -19,7 +22,7 @@ enum Mailbox: String, CaseIterable, Identifiable, Codable {
     var systemImage: String {
         switch self {
         case .inbox:   "tray.fill"
-        case .flagged: "flag.fill"
+        case .flagged: "star.fill"
         case .sent:    "paperplane.fill"
         case .drafts:  "doc.fill"
         case .archive: "archivebox.fill"

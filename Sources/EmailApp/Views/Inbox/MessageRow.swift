@@ -113,7 +113,10 @@ struct MessageRow: View {
                     Spacer(minLength: 0)
 
                     if message.isFlagged {
-                        Image(systemName: "flag.fill")
+                        // Gmail's word and Gmail's shape. It arrives from
+                        // Gmail's own STARRED label, and calling it a flag
+                        // here meant the same mark had two names.
+                        Image(systemName: "star.fill")
                             .font(Style.caption)
                             .foregroundStyle(Color.flagged)
                     }
@@ -185,7 +188,8 @@ struct MessageSwipeActions: ViewModifier {
                 Button {
                     store.toggleFlag(message.id)
                 } label: {
-                    Label("Flag", systemImage: "flag")
+                    Label(message.isFlagged ? "Unstar" : "Star",
+                          systemImage: message.isFlagged ? "star.slash" : "star")
                 }
                 .tint(.orange)
             }

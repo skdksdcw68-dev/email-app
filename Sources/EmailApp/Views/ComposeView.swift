@@ -11,6 +11,13 @@ struct ComposeView: View {
     /// When set, the sheet opens as a reply: recipient and subject prefilled,
     /// with the original quoted underneath.
     var replyingTo: Message? = nil
+    /// Whether the reply goes to everybody the original went to, not only the
+    /// person who wrote it.
+    ///
+    /// The Cc row is opened when it is on, because a reply-all whose extra
+    /// recipients are hidden behind a disclosure is how somebody answers
+    /// eleven people believing they answered one.
+    var replyAll = false
     /// A body written for the user -- an AI draft from dictation, say. It
     /// replaces the quoted-original prefill so they see their reply, not a
     /// wall of quoted text.
@@ -87,7 +94,8 @@ struct ComposeView: View {
     private var title: String {
         if editing != nil { return "Draft" }
         if forwarding != nil { return "Forward" }
-        return replyingTo == nil ? "New Message" : "Reply"
+        if replyingTo != nil { return replyAll ? "Reply all" : "Reply" }
+        return "New Message"
     }
 
     private var hasContent: Bool {
@@ -753,7 +761,35 @@ struct ComposeView: View {
         subject = original.subject.lowercased().hasPrefix("re:")
             ? original.subject
             : "Re: \(original.subject)"
+
+        if replyAll {
+            let others = Self.everyoneElse(on: original, mine: store.account?.address)
+            if !others.isEmpty {
+                cc = others.joined(separator: ", ")
+                showsCcBcc = true
+            }
+        }
+
         if let initialBody { setBody(initialBody) }
+    }
+
+    /// Everybody the original was addressed to, except the sender (who is
+    /// already in To) and the person replying.
+    ///
+    /// ⚠️ Yourself, deliberately. Gmail leaves you out of your own reply-all,
+    /// and a copy of every answer landing back in your own inbox is how
+    /// somebody decides the feature is broken.
+    static func everyoneElse(on message: Message, mine: String?) -> [String] {
+        let sender = message.sender.address.lowercased()
+        let me = mine?.lowercased()
+        var seen: Set<String> = [sender]
+        if let me { seen.insert(me) }
+
+        return message.recipients.compactMap { contact in
+            let address = contact.address.lowercased()
+            guard !address.isEmpty, seen.insert(address).inserted else { return nil }
+            return contact.address
+        }
     }
 
     /// The original, under a header saying where it came from.
