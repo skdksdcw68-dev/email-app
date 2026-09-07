@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Maily</title>
+<meta name="description" content="How Maily handles your email, your Google account data, and everything else.">
+<style>
+  :root {
+    --bg: #ffffff; --ink: #101114; --muted: #5f6368;
+    --line: rgba(0,0,0,0.10); --accent: #3b6cf6; --card: #f7f8fa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0e11; --ink: #f2f3f5; --muted: #a0a4ad;
+      --line: rgba(255,255,255,0.12); --accent: #7ea2ff; --card: #16181d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px 80px; }
+  header { padding: 48px 0 8px; }
+  .mark {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-weight: 700; font-size: 18px; letter-spacing: -0.02em;
+    text-decoration: none; color: var(--ink);
+  }
+  .dot { width: 24px; height: 24px; border-radius: 7px; background: var(--accent); display: inline-block; }
+  h1 { font-size: clamp(30px, 5vw, 40px); letter-spacing: -0.03em; margin: 32px 0 8px; }
+  .updated { color: var(--muted); font-size: 15px; margin: 0 0 40px; }
+  h2 { font-size: 21px; letter-spacing: -0.02em; margin: 44px 0 12px; }
+  h3 { font-size: 17px; margin: 28px 0 8px; }
+  p { margin: 0 0 16px; }
+  ul { padding-left: 22px; }
+  li { margin-bottom: 10px; }
+  a { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; }
+  .callout {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px 20px; margin: 24px 0;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  footer { margin-top: 64px; border-top: 1px solid var(--line); padding-top: 24px; font-size: 15px; color: var(--muted); }
+  footer a { margin-right: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header><a class="mark" href="/"><span class="dot"></span> Maily</a></header>
+
+<h1>Privacy Policy</h1>
+<p class="updated">Last updated 7 September 2026</p>
+
+<p>
+  Maily is an email app for iPhone, operated by Abel Amare ("Maily", "we").
+  This policy explains what the app does with your mail, your Google account
+  data and everything else it touches. It is written to be read, not to be
+  survived.
+</p>
+
+<div class="callout">
+  <p><strong>The short version.</strong> Your email stays on your phone. Our
+  servers hold your settings and your subscription, never your messages. When
+  you use an AI feature, the text of the messages that feature needs is sent
+  to our AI provider to answer, and is never used to train anyone's model. You
+  can delete everything from inside the app.</p>
+</div>
+
+<h2>1. Who this covers</h2>
+<p>
+  This policy covers the Maily iOS app and the website at mailyco.com. It
+  applies to everyone who uses Maily, wherever they are.
+</p>
+
+<h2>2. What we collect, and where it lives</h2>
+
+<h3>Your mail</h3>
+<p>
+  When you connect a mailbox, Maily downloads recent messages — by default the
+  last three months — and stores them <strong>on your device</strong>, so the
+  app works without a connection. Message content, attachments, read state,
+  drafts, snoozes and the categories Maily assigns are held on your phone and
+  in your device's own backup if you have one enabled.
+</p>
+<p>
+  <strong>We do not store the contents of your mailbox on our servers.</strong>
+  There is no copy of your messages, subjects, attachments or addresses in our
+  database.
+</p>
+
+<h3>Your Maily account</h3>
+<p>
+  You sign in to Maily itself with Apple, Google or an email address. We store
+  your account identifier, your email address, and the display name and photo
+  you choose. Authentication is handled by Supabase Auth.
+</p>
+
+<h3>What our servers do hold</h3>
+<table>
+  <tr><th>What</th><th>Why</th></tr>
+  <tr><td>Settings and preferences</td><td>So your setup follows you to another device</td></tr>
+  <tr><td>Your answers to the setup questions</td><td>To match the assistant to how you work</td></tr>
+  <tr><td>Assistant conversations</td><td>Only if chat syncing is on — you can turn it off, which deletes the stored copy</td></tr>
+  <tr><td>Facts you asked Maily to remember</td><td>Only what you explicitly told it to keep. Visible and deletable in the app</td></tr>
+  <tr><td>AI usage records</td><td>Token counts and cost, to enforce your plan's allowance. <strong>No message content</strong></td></tr>
+  <tr><td>Push notification token</td><td>To tell your phone new mail has arrived</td></tr>
+  <tr><td>Subscription status</td><td>Your plan, renewal date and Apple transaction identifiers</td></tr>
+</table>
+
+<h3>IMAP mailboxes</h3>
+<p>
+  If you connect a mailbox that is not Gmail, the server addresses are stored
+  on your device and the password is stored in the iOS Keychain. Neither is
+  ever sent to our servers.
+</p>
+
+<h2>3. Google user data</h2>
+<p>
+  When you connect a Gmail account, Maily asks for these permissions and uses
+  them for these purposes only:
+</p>
+<table>
+  <tr><th>Permission</th><th>What Maily does with it</th></tr>
+  <tr>
+    <td><code>gmail.readonly</code></td>
+    <td>Reads your messages so the app can show your inbox, search it, and
+        produce the summaries and categories you see. Displayed only to you,
+        cached only on your device.</td>
+  </tr>
+  <tr>
+    <td><code>gmail.compose</code></td>
+    <td>Creates and updates drafts, and sends the messages you write. Auto-Reply
+        is off unless you turn it on; when on, it sends only within the limits
+        you set and notifies you each time.</td>
+  </tr>
+  <tr>
+    <td><code>contacts.readonly</code><br><code>contacts.other.readonly</code></td>
+    <td>Looks up the photo and name for an address that has written to you, so
+        senders have faces the way they do in Gmail. Cached on your device,
+        deleted when you sign out.</td>
+  </tr>
+</table>
+
+<div class="callout">
+  <p>
+    Maily's use of information received from Google APIs will adhere to the
+    <a href="https://developers.google.com/terms/api-services-user-data-policy">Google
+    API Services User Data Policy</a>, including the Limited Use requirements.
+  </p>
+  <p>
+    In particular: Google user data is used only to provide and improve the
+    features you can see in the app; it is not transferred to anyone except as
+    described below; it is not used for advertising; no human reads it except
+    where you explicitly ask us to for support, where required by law, or for
+    security investigations; and it is never used to train generalised AI or
+    machine-learning models.
+  </p>
+</div>
+
+<h2>4. The AI features</h2>
+<p>
+  Sorting, summaries, search answers, drafts and Auto-Reply are produced by
+  large language models run by <strong>OpenAI</strong>. To answer, the text of
+  the specific messages that feature needs is sent to OpenAI through our
+  server.
+</p>
+<ul>
+  <li>OpenAI processes it as our data processor, under their API terms.</li>
+  <li><strong>It is not used to train OpenAI's models.</strong> Data submitted
+      through the OpenAI API is excluded from training by default.</li>
+  <li>OpenAI may retain it briefly for abuse monitoring and then deletes it.</li>
+  <li>We do not keep the text after the answer is returned. What we record is
+      the number of tokens used and what it cost.</li>
+</ul>
+<p>
+  If you would rather no message content left your phone, you can turn AI
+  sorting and summaries off in the app's settings. The mailbox, search, reading
+  and sending all keep working.
+</p>
+
+<h2>5. Who else sees anything</h2>
+<table>
+  <tr><th>Who</th><th>What they get</th></tr>
+  <tr><td>Google</td><td>Your Gmail and Contacts requests, because that is where your mail lives</td></tr>
+  <tr><td>OpenAI</td><td>Message text needed for an AI feature, as above</td></tr>
+  <tr><td>Supabase</td><td>Hosts our database and servers, and stores what section 2 lists</td></tr>
+  <tr><td>Apple</td><td>Handles subscriptions and delivers push notifications</td></tr>
+</table>
+<p>
+  That is the whole list. We do not sell your data, we do not share it with
+  advertisers, and there is no advertising network in this app.
+</p>
+
+<h2>6. Deleting your data</h2>
+<ul>
+  <li><strong>One mailbox:</strong> Settings → Sign out of this mailbox. Its
+      mail, cached photos and preferences are removed from the phone and
+      Maily's access to it ends.</li>
+  <li><strong>Everything on the phone:</strong> You → Edit profile → Sign out of
+      Maily. Every connected mailbox is disconnected and the offline copy,
+      memories and conversations are erased.</li>
+  <li><strong>Your account entirely:</strong> You → Edit profile → Delete
+      account. This deletes your login and every row we hold about you —
+      settings, conversations, memories, usage records — and cannot be undone.
+      We keep only the transaction records we are required to keep for tax and
+      accounting.</li>
+  <li>You can also write to <a href="mailto:support@mailyco.com">support@mailyco.com</a>
+      and we will do it for you.</li>
+</ul>
+<p>
+  Removing Maily's access from your
+  <a href="https://myaccount.google.com/permissions">Google account permissions
+  page</a> revokes it immediately, from Google's side, whatever the app does.
+</p>
+
+<h2>7. Keeping it safe</h2>
+<ul>
+  <li>Everything in transit uses TLS.</li>
+  <li>Mailbox passwords and tokens are held in the iOS Keychain, not in app storage.</li>
+  <li>Our database enforces row-level security: rows are readable only by the account that owns them.</li>
+  <li>Message HTML is rendered with scripting disabled, and pictures and links from a message cannot reach the rest of the app.</li>
+</ul>
+<p>
+  No system is perfect, and we will not pretend otherwise. If something
+  happens that affects you, we will tell you.
+</p>
+
+<h2>8. How long we keep things</h2>
+<p>
+  Settings, memories and conversations are kept until you delete them or delete
+  your account. Usage records are kept for as long as your account exists, so
+  your allowance can be counted. Anything on your phone lasts until you sign
+  out or remove the app.
+</p>
+
+<h2>9. Children</h2>
+<p>
+  Maily is not for children under 13, and where local law sets a higher age for
+  consent to data processing, that age applies instead. We do not knowingly
+  collect data from anyone below it.
+</p>
+
+<h2>10. Your rights</h2>
+<p>
+  Depending on where you live, you may have the right to see what we hold, to
+  correct it, to have it deleted, to object to processing, or to take it with
+  you. The app gives you most of these directly. For anything else, write to
+  <a href="mailto:support@mailyco.com">support@mailyco.com</a> and we will
+  answer within 30 days.
+</p>
+
+<h2>11. Changes</h2>
+<p>
+  If this policy changes in a way that affects you, we will say so in the app
+  before the change takes effect. The date at the top always tells you which
+  version you are reading.
+</p>
+
+<h2>12. Contact</h2>
+<p>
+  Abel Amare, Maily<br>
+  <a href="mailto:support@mailyco.com">support@mailyco.com</a>
+</p>
+
+<footer>
+  <a href="/">Home</a>
+  <a href="/terms">Terms</a>
+  <a href="mailto:support@mailyco.com">Support</a>
+  <div style="margin-top:14px">© 2026 Maily</div>
+</footer>
+
+</div>
+</body>
+</html>

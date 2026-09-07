@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maily — AI email that sorts itself</title>
+<meta name="description" content="Maily is an iOS email app that reads, sorts and answers your mail with you. Connect Gmail or any IMAP mailbox.">
+<style>
+  :root {
+    --bg: #ffffff;
+    --ink: #101114;
+    --muted: #5f6368;
+    --line: rgba(0,0,0,0.10);
+    --accent: #3b6cf6;
+    --card: #f7f8fa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0e11;
+      --ink: #f2f3f5;
+      --muted: #a0a4ad;
+      --line: rgba(255,255,255,0.12);
+      --accent: #7ea2ff;
+      --card: #16181d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 72px 0 48px; }
+  .mark {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-weight: 700; font-size: 19px; letter-spacing: -0.02em;
+    text-decoration: none; color: var(--ink);
+  }
+  .dot { width: 26px; height: 26px; border-radius: 8px; background: var(--accent); display: inline-block; }
+  h1 {
+    font-size: clamp(34px, 6vw, 52px);
+    line-height: 1.1; letter-spacing: -0.03em;
+    margin: 40px 0 16px; font-weight: 700;
+  }
+  .lede { font-size: 20px; color: var(--muted); margin: 0 0 32px; max-width: 34em; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin: 48px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; letter-spacing: -0.01em; }
+  .card p { margin: 0; font-size: 15px; color: var(--muted); }
+  h2 { font-size: 22px; letter-spacing: -0.02em; margin: 48px 0 12px; }
+  p { margin: 0 0 16px; }
+  a { color: var(--accent); }
+  ul { padding-left: 20px; color: var(--muted); }
+  li { margin-bottom: 8px; }
+  footer {
+    margin-top: 72px; border-top: 1px solid var(--line);
+    padding: 28px 0 64px; font-size: 15px; color: var(--muted);
+  }
+  footer a { margin-right: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <a class="mark" href="/"><span class="dot"></span> Maily</a>
+  </header>
+
+  <h1>Email that sorts itself out.</h1>
+  <p class="lede">
+    Maily is an email app for iPhone. It reads your inbox the way you would —
+    what needs an answer, what can wait, what is just noise — and it can write
+    the replies with you.
+  </p>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Sorted on arrival</h3>
+      <p>Every message lands in a category you control. Add your own and describe it in your own words.</p>
+    </div>
+    <div class="card">
+      <h3>Ask your inbox</h3>
+      <p>"What did the landlord say about the deposit?" — answered from your own mail, with the message attached.</p>
+    </div>
+    <div class="card">
+      <h3>Replies in your voice</h3>
+      <p>Drafts that sound like you, from how you already write. Nothing sends without you.</p>
+    </div>
+    <div class="card">
+      <h3>Gmail and IMAP</h3>
+      <p>Connect a Google account, or any mail server. Several at once, kept apart.</p>
+    </div>
+  </div>
+
+  <h2>What Maily does with your mail</h2>
+  <p>
+    Your messages are read on your phone and kept there. Maily's servers hold
+    your settings and your subscription, never the contents of your mailbox.
+    When a feature needs the assistant, the text of that message is sent to
+    our AI provider to answer it and is not used to train anybody's model.
+  </p>
+  <p>
+    The whole of it is written down plainly in the
+    <a href="/privacy">privacy policy</a>.
+  </p>
+
+  <h2>Get in touch</h2>
+  <p>
+    <a href="mailto:support@mailyco.com">support@mailyco.com</a> — a person reads it.
+  </p>
+
+  <footer>
+    <a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a>
+    <a href="mailto:support@mailyco.com">Support</a>
+    <div style="margin-top:14px">© 2026 Maily</div>
+  </footer>
+
+</div>
+</body>
+</html>
