@@ -24,6 +24,9 @@ struct EditProfileView: View {
     @State private var picked: PhotosPickerItem?
     @State private var isSigningOut = false
     @State private var isConfirmingRemovePhoto = false
+    @State private var isConfirmingDelete = false
+    @State private var isDeleting = false
+    @State private var deleteFailure: String?
 
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -75,6 +78,7 @@ struct EditProfileView: View {
 
             mailboxes
             signOut
+            deleteAccount
         }
         .keyboardDismissable()
         .navigationTitle("Edit profile")
@@ -103,6 +107,20 @@ struct EditProfileView: View {
         .onChange(of: picked) { _, item in
             guard let item else { return }
             Task { await adopt(item) }
+        }
+        .alert("Delete your Maily account?", isPresented: $isConfirmingDelete) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) { Task { await deleteEverything() } }
+        } message: {
+            Text("This removes your account and everything Maily holds about you — your settings, your conversations, what it remembers, and every connected mailbox on this phone. It cannot be undone.\n\nYour mail stays with Gmail or your provider, untouched.")
+        }
+        .alert("Account not deleted", isPresented: Binding(
+            get: { deleteFailure != nil },
+            set: { if !$0 { deleteFailure = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let deleteFailure { Text(deleteFailure) }
         }
         .alert("Sign out of Maily?", isPresented: $isSigningOut) {
             Button("Cancel", role: .cancel) {}
@@ -232,11 +250,66 @@ struct EditProfileView: View {
         }
     }
 
+    /// Ending the account, not the session.
+    ///
+    /// 🔴 App Store guideline 5.1.1(v): an app that lets somebody make an
+    /// account has to let them delete it, in the app. Maily had "Sign out of
+    /// Maily" and nothing else, which is a rejection at review and a fair one
+    /// -- the account outlived every way the person had of ending it.
+    ///
+    /// Its own section, below sign-out, with the word "permanently" in the
+    /// footer rather than only in the alert. Somebody should know what this
+    /// row is before they touch it.
+    private var deleteAccount: some View {
+        Section {
+            Button(role: .destructive) {
+                isConfirmingDelete = true
+            } label: {
+                HStack {
+                    Text("Delete account")
+                        .font(Style.rowTitle)
+                        .foregroundStyle(Color.urgent)
+                    Spacer(minLength: 0)
+                    if isDeleting { ProgressView() }
+                }
+            }
+            .disabled(isDeleting)
+        } footer: {
+            Text("Permanently removes your Maily account, your settings, your conversations and everything Maily remembers. This cannot be undone. Your mail itself is untouched — it stays with Gmail or your provider.")
+        }
+    }
+
     /// The list this used to hold in line is in `AccountTeardown`, which
     /// Privacy's "Sign out and erase" now shares -- the two had drifted into
     /// clearing different things under the same promise.
     private func signOutCompletely() {
         AccountTeardown.signOutOfMaily(mail: mail, memory: memory, chats: chats, user: user)
+    }
+
+    /// Server first, phone second.
+    ///
+    /// 🔴 The order is the whole of it. Tearing down locally first would sign
+    /// the session out, and the delete request needs that session to prove who
+    /// is asking -- so a failure halfway would leave the account alive on the
+    /// server with no way back into it from this phone. Nothing local is
+    /// touched until the server has confirmed the account is gone.
+    private func deleteEverything() async {
+        isDeleting = true
+        defer { isDeleting = false }
+
+        do {
+            try await Backend.deleteAccount()
+        } catch {
+            deleteFailure = error.readable
+            return
+        }
+
+        // The same teardown as signing out: every mailbox, every cached face,
+        // every remembered fact. `signOut` at the end of it puts the app back
+        // on the welcome screen, which is the only honest place to be once
+        // the account behind it does not exist.
+        AccountTeardown.signOutOfMaily(mail: mail, memory: memory, chats: chats, user: user)
+        dismiss()
     }
 }
 

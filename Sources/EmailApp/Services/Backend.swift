@@ -168,11 +168,58 @@ enum Backend {
         return (data, http)
     }
 
+    // MARK: - Ending an account
+
+    /// Deletes the account and everything keyed to it, on the server.
+    ///
+    /// App Store guideline 5.1.1(v): an app that creates accounts must delete
+    /// them from inside the app. Signing out is not deleting, and "write to
+    /// support" is not either -- both were all Maily had.
+    ///
+    /// Deliberately *not* built on `deleteAll` below. That deletes one table
+    /// through PostgREST as the signed-in user, which cannot touch the auth
+    /// record itself and would leave the login standing with its data gone.
+    /// The `account` edge function holds the service role, removes the rows
+    /// and the login in one pass, and refuses outright if the caller's token
+    /// does not verify.
+    ///
+    /// Throws rather than reporting success quietly. A screen that says
+    /// "deleted" over an account that still exists is worse than an error.
+    static func deleteAccount() async throws {
+        guard let session = try? await SupabaseClient.shared.auth.session else {
+            throw BackendError.server(status: 401, detail: "no session")
+        }
+
+        var request = URLRequest(url: SupabaseConfig.url.appending(path: "functions/v1/account"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["action": "delete"])
+        // Longer than the usual 20: this is nine deletes and an admin call,
+        // and it is the one request nobody wants retried by hand.
+        request.timeoutInterval = 60
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            // The `account` function's failures are written for the person --
+            // "your data is deleted but the sign-in could not be removed" is
+            // something they need to read, and no status code says it.
+            if let message, !message.isEmpty { throw BackendError.explained(message) }
+            throw BackendError.server(status: http.statusCode, detail: nil)
+        }
+    }
+
     enum BackendError: LocalizedError {
         case server(status: Int, detail: String?)
+        /// A failure the server described in words meant to be read.
+        case explained(String)
 
         var errorDescription: String? {
             switch self {
+            case .explained(let message): message
             case .server(let status, _):
                 switch status {
                 case 401, 403: "You've been signed out. Sign in again."
@@ -188,7 +235,10 @@ enum Backend {
 
         /// What the server actually said, for a log. Never for a screen.
         var detail: String? {
-            switch self { case .server(_, let detail): detail }
+            switch self {
+            case .server(_, let detail): detail
+            case .explained(let message): message
+            }
         }
     }
 
