@@ -258,15 +258,21 @@ struct EditProfileView: View {
 /// and there was no way to change your mind except to delete it again.
 struct WritingStyleView: View {
     @Environment(UserStore.self) private var user
+    @Environment(MailStore.self) private var mail
     @Environment(\.dismiss) private var dismiss
 
     @State private var tone: WritingTone = .matchMe
     @State private var instructions = ""
+    @State private var signature = ""
+    @State private var signsReplies = false
     @State private var isDiscarding = false
     @FocusState private var isTyping: Bool
 
     private var hasChanges: Bool {
-        tone != user.chosenTone || instructions != AppSettings.customInstructions
+        tone != user.chosenTone
+            || instructions != AppSettings.customInstructions
+            || signature != AppSettings.signature
+            || signsReplies != AppSettings.signsReplies
     }
 
     var body: some View {
@@ -316,6 +322,22 @@ struct WritingStyleView: View {
             } footer: {
                 Text("Anything you want Maily to remember whenever it writes for you. Written in your own words — it is passed to the model as you type it.")
             }
+
+            Section {
+                TextField(
+                    "Abel Amare\nMaily",
+                    text: $signature,
+                    axis: .vertical
+                )
+                .lineLimit(3...8)
+                .focused($isTyping)
+
+                Toggle("Add to replies and forwards", isOn: $signsReplies)
+            } header: {
+                Text("Signature")
+            } footer: {
+                Text("Put at the end of what you send from \(mail.account?.address ?? "this mailbox"), after a line of two dashes — the mark other mail apps use to tell a signature from the message.\n\nEach mailbox has its own.")
+            }
         }
         .navigationTitle("Writing")
         .navigationBarTitleDisplayMode(.inline)
@@ -341,6 +363,8 @@ struct WritingStyleView: View {
         .onAppear {
             tone = user.chosenTone
             instructions = AppSettings.customInstructions
+            signature = AppSettings.signature
+            signsReplies = AppSettings.signsReplies
         }
         // Leaving with unsaved edits used to be impossible to do wrong,
         // because there was nothing to save. Now there is.
@@ -362,6 +386,8 @@ struct WritingStyleView: View {
     private func save() {
         user.setTone(tone.rawValue)
         AppSettings.customInstructions = instructions
+        AppSettings.signature = signature
+        AppSettings.signsReplies = signsReplies
     }
 }
 

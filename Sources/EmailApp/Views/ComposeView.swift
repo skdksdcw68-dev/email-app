@@ -752,11 +752,19 @@ struct ComposeView: View {
             subject = forwarding.subject.lowercased().hasPrefix("fwd:")
                 ? forwarding.subject
                 : "Fwd: \(forwarding.subject)"
-            setBody(Self.quoted(forwarding))
+            // Above the quoted original, which is where every mail client
+            // puts it and where anybody scanning the top of the message will
+            // look for it.
+            setBody(Self.signed("", replying: true) + Self.quoted(forwarding))
             return
         }
 
-        guard let original = replyingTo else { return }
+        guard let original = replyingTo else {
+            // A message from nothing. There is no original to quote, but the
+            // sign-off still belongs at the end of it.
+            setBody(Self.signed(initialBody ?? "", replying: false))
+            return
+        }
         recipient = original.sender.address
         subject = original.subject.lowercased().hasPrefix("re:")
             ? original.subject
@@ -770,7 +778,19 @@ struct ComposeView: View {
             }
         }
 
-        if let initialBody { setBody(initialBody) }
+        setBody(Self.signed(initialBody ?? "", replying: true))
+    }
+
+    /// The body somebody starts with: what they have written so far, then the
+    /// sign-off.
+    ///
+    /// `-- ` on a line of its own is the convention every mail client knows,
+    /// dash-dash-space, and it is what tells a reader's client where the
+    /// message ends and the boilerplate begins.
+    static func signed(_ body: String, replying: Bool) -> String {
+        let signature = AppSettings.signature.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !signature.isEmpty, !replying || AppSettings.signsReplies else { return body }
+        return body + "\n\n-- \n" + signature
     }
 
     /// Everybody the original was addressed to, except the sender (who is

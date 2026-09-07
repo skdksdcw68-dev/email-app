@@ -238,6 +238,8 @@ final class SettingsSync {
             // by the account-level `onboarding` scope instead.
             var payload: [String: AnyCodable] = [
                 "customInstructions": .init(AppSettings.customInstructions),
+                "signature": .init(AppSettings.signature),
+                "signsReplies": .init(AppSettings.signsReplies),
             ]
             if let tone = AppSettings.mailboxTone { payload["tone"] = .init(tone) }
             return payload
@@ -333,6 +335,12 @@ final class SettingsSync {
         case .writing:
             if let value: String = payload["customInstructions"]?.value() {
                 AppSettings.customInstructions = value
+            }
+            if let value: String = payload["signature"]?.value() {
+                AppSettings.signature = value
+            }
+            if let value: Bool = payload["signsReplies"]?.value() {
+                AppSettings.signsReplies = value
             }
             // Absent means this mailbox inherits, and that has to be applied
             // as well: a device that had set a tone here should lose it when

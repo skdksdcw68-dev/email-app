@@ -118,6 +118,34 @@ enum AppSettings {
         }
     }
 
+    /// What is put at the end of everything sent from this mailbox.
+    ///
+    /// **Per mailbox**, for the same reason as the voice above: a name and a
+    /// job title are right from a work address and wrong from a personal one.
+    ///
+    /// Empty by default. A signature nobody wrote is somebody else's
+    /// advertisement appended to their mail, and "Sent from Maily" on every
+    /// message is not a decision this app gets to make for them.
+    static var signature: String {
+        get { MailboxScope.defaults.string(forKey: "settings.signature") ?? "" }
+        set {
+            MailboxScope.defaults.set(newValue, forKey: "settings.signature")
+            SettingsSync.notify(.writing)
+        }
+    }
+
+    /// Whether replies and forwards carry it too, or only new messages.
+    ///
+    /// Gmail asks the same question, because a signature under every line of
+    /// a fast back-and-forth turns a thread into a wall of contact details.
+    static var signsReplies: Bool {
+        get { MailboxScope.defaults.object(forKey: "settings.signReplies") as? Bool ?? false }
+        set {
+            MailboxScope.defaults.set(newValue, forKey: "settings.signReplies")
+            SettingsSync.notify(.writing)
+        }
+    }
+
     /// The tone this mailbox writes in, as a `WritingTone` raw value.
     ///
     /// Nil until somebody sets one here, and the onboarding answer is what
