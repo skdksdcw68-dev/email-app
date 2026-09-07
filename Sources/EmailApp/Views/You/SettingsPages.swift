@@ -474,9 +474,28 @@ struct PrivacySettingsView: View {
     @State private var showingSignOut = false
     @State private var syncsChats = AppSettings.syncsChats
     @State private var sharesUsageData = AppSettings.sharesUsageData
+    @State private var loadsImages = AppSettings.loadsRemoteImages
+    @State private var confirmsLinks = AppSettings.confirmsLinks
 
     var body: some View {
         List {
+            // First, because it is the only setting here that changes what a
+            // sender can learn about somebody without them doing anything.
+            Section {
+                Toggle("Load pictures automatically", isOn: $loadsImages)
+                    .onChange(of: loadsImages) { _, value in
+                        AppSettings.loadsRemoteImages = value
+                    }
+                Toggle("Check links before opening", isOn: $confirmsLinks)
+                    .onChange(of: confirmsLinks) { _, value in
+                        AppSettings.confirmsLinks = value
+                    }
+            } header: {
+                Text("Reading mail")
+            } footer: {
+                Text("A picture in an email is fetched from the sender's server, which tells them you opened it, when, and roughly where from. Maily leaves them out until you tap Show, and you can allow individual senders as you go.\n\nChecking links shows you the real destination before Safari opens it. The words in a link and where it goes are unrelated.")
+            }
+
             Section {
                 NavigationLink {
                     MemorySettingsView()

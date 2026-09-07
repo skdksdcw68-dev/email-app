@@ -12,6 +12,16 @@ struct MessageDetailView: View {
     /// be the same flag, so Forward opened a reply to the sender.
     @State private var isForwarding = false
     @State private var htmlHeight: CGFloat = 0
+    /// Pictures for *this* reading of *this* message. Deliberately not
+    /// remembered: saying yes once is not the same as trusting a sender, and
+    /// the sender-level answer has its own switch in the same banner.
+    @State private var showsImages = false
+    /// A link that was tapped and has not been opened yet.
+    @State private var pendingLink: URL?
+    /// Shown when the sender's name and address disagree. Worked out once per
+    /// message rather than on every redraw.
+    @State private var warning: SenderScrutiny.Warning?
+    @State private var isShowingWarning = false
 
     private var message: Message? { store.message(messageID) }
 
@@ -48,6 +58,31 @@ struct MessageDetailView: View {
         .onAppear {
             store.markRead(messageID)
             Task { await store.summarize(messageID) }
+            if let message {
+                showsImages = AppSettings.loadsRemoteImages
+                    || PersonPreferences.showsImages(from: message.sender.address)
+                warning = SenderScrutiny.check(message.sender)
+            }
+        }
+        .confirmationDialog(
+            pendingLink?.host.map { "Open \($0)?" } ?? "Open this link?",
+            isPresented: Binding(get: { pendingLink != nil }, set: { if !$0 { pendingLink = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let url = pendingLink {
+                Button("Open") { UIApplication.shared.open(url) }
+                Button("Copy link") { UIPasteboard.general.string = url.absoluteString }
+                Button("Cancel", role: .cancel) {}
+            }
+        } message: {
+            // The whole address, not the host alone: the deception is often
+            // in the path -- paypal.com.verify-account.top/login.
+            if let url = pendingLink { Text(url.absoluteString) }
+        }
+        .alert(warning?.headline ?? "", isPresented: $isShowingWarning) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let warning { Text(warning.detail) }
         }
         .sheet(isPresented: $isReplying) {
             if let message {
@@ -158,7 +193,14 @@ struct MessageDetailView: View {
                     AISummaryCard(summary: summary)
                 }
 
+                if let warning { warningCard(warning) }
+
                 Divider()
+
+                if let html = message.htmlBody, !showsImages,
+                   HTMLMessageView.wantsRemoteContent(html) {
+                    imagesBlockedBar(sender: message.sender.address)
+                }
 
                 body(for: message)
 
@@ -174,16 +216,99 @@ struct MessageDetailView: View {
         }
     }
 
+    /// What the message would fetch, and who from.
+    ///
+    /// The wording says what is actually at stake -- being told you opened it
+    /// -- rather than "remote content blocked", which reads like a failure
+    /// and teaches nobody anything.
+    private func imagesBlockedBar(sender: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "eye.slash")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Pictures not loaded")
+                    .font(.footnote.weight(.semibold))
+                Text("Loading them tells the sender you opened this.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Menu {
+                Button("Show pictures") {
+                    withAnimation(.easeOut(duration: 0.2)) { showsImages = true }
+                }
+                Button("Always from this sender") {
+                    PersonPreferences.setShowsImages(true, for: sender)
+                    withAnimation(.easeOut(duration: 0.2)) { showsImages = true }
+                }
+            } label: {
+                Text("Show")
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 12).fill(Color.secondary.opacity(0.08))
+        }
+    }
+
+    /// The sender's name disagrees with the sender's address.
+    private func warningCard(_ warning: SenderScrutiny.Warning) -> some View {
+        Button {
+            isShowingWarning = true
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(Color.urgent)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(warning.headline)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(warning.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 12).fill(Color.urgent.opacity(0.10))
+            }
+        }
+        .buttonStyle(.plain)
+        // Not colour alone: the symbol, the words and the label all carry it.
+        .accessibilityLabel("Warning. \(warning.headline). \(warning.detail)")
+    }
+
     private func senderRow(_ message: Message) -> some View {
         HStack(spacing: 12) {
             SenderAvatar(contact: message.sender, size: 44)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(message.sender.name).font(.headline)
+                // 🔴 Was `.caption` grey, which is how "PayPal Support"
+                // <billing@invoice-2847.top> reads as PayPal. The address is
+                // the part that cannot be typed by somebody else.
                 Text(message.sender.address)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.footnote)
+                    .foregroundStyle(warning == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.urgent))
                     .lineLimit(1)
+                    .textSelection(.enabled)
             }
 
             Spacer(minLength: 0)
@@ -209,9 +334,14 @@ struct MessageDetailView: View {
                 // height, so the message does not appear as an empty gap.
                 if htmlHeight == 0 { MessageSkeleton() }
 
-                HTMLMessageView(html: html, height: $htmlHeight)
-                    .frame(height: max(htmlHeight, 1))
-                    .opacity(htmlHeight == 0 ? 0 : 1)
+                HTMLMessageView(
+                    html: html,
+                    height: $htmlHeight,
+                    loadsRemoteContent: showsImages,
+                    onLink: { pendingLink = $0 }
+                )
+                .frame(height: max(htmlHeight, 1))
+                .opacity(htmlHeight == 0 ? 0 : 1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .animation(.easeOut(duration: 0.25), value: htmlHeight == 0)

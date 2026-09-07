@@ -156,6 +156,28 @@ enum AppSettings {
         get { UserDefaults.standard.object(forKey: "settings.usageData") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "settings.usageData"); SettingsSync.notify(.app) }
     }
+
+    /// Whether a message's pictures are fetched the moment it is opened.
+    ///
+    /// Off by default, and the default is the point. A single-pixel image on
+    /// a sender's server tells them the address is live, when it was read,
+    /// roughly where from and on what -- from an email nobody clicked. The
+    /// reader blocks every http(s) sub-resource until asked; see
+    /// `RemoteContentBlocker`.
+    static var loadsRemoteImages: Bool {
+        get { UserDefaults.standard.object(forKey: "settings.remoteImages") as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.remoteImages"); SettingsSync.notify(.app) }
+    }
+
+    /// Whether tapping a link in a message shows where it actually goes
+    /// before opening it.
+    ///
+    /// The visible text of a link and its destination are unrelated strings,
+    /// which is the whole mechanism of a phishing email.
+    static var confirmsLinks: Bool {
+        get { UserDefaults.standard.object(forKey: "settings.confirmLinks") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "settings.confirmLinks"); SettingsSync.notify(.app) }
+    }
 }
 
 extension Notification.Name {

@@ -36,6 +36,12 @@ struct HTMLMessageView: UIViewRepresentable {
     /// Reported back so the web view can size itself inside a ScrollView
     /// instead of scrolling within its own fixed box.
     @Binding var height: CGFloat
+    /// Whether this message may fetch its pictures from the sender's servers.
+    /// False until somebody says otherwise -- see `RemoteContentBlocker`.
+    var loadsRemoteContent = false
+    /// A tapped link, handed back rather than opened here, so the screen can
+    /// show where it actually goes first.
+    var onLink: ((URL) -> Void)? = nil
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -60,6 +66,10 @@ struct HTMLMessageView: UIViewRepresentable {
         context.coordinator.observe(webView)
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
+        // A long press on a link shows WebKit's own preview, which names the
+        // destination. That is the cheapest honest answer to "where does this
+        // actually go", and it costs nothing to allow.
+        webView.allowsLinkPreview = true
         return webView
     }
 
@@ -78,9 +88,14 @@ struct HTMLMessageView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         let dark = colorScheme == .dark
         let coordinator = context.coordinator
-        guard coordinator.loadedHTML != html || coordinator.loadedDark != dark else { return }
+        coordinator.onLink = onLink
+        guard coordinator.loadedHTML != html
+                || coordinator.loadedDark != dark
+                || coordinator.loadedRemote != loadsRemoteContent
+        else { return }
         coordinator.loadedHTML = html
         coordinator.loadedDark = dark
+        coordinator.loadedRemote = loadsRemoteContent
 
         let designed = Self.isDesigned(html)
         // A designed email in light mode keeps its white canvas. Everything
@@ -91,7 +106,10 @@ struct HTMLMessageView: UIViewRepresentable {
         webView.backgroundColor = whiteCanvas ? .white : .clear
         webView.scrollView.backgroundColor = whiteCanvas ? .white : .clear
 
-        coordinator.load(html, designed: designed, dark: dark, into: webView)
+        coordinator.load(
+            html, designed: designed, dark: dark,
+            remote: loadsRemoteContent, into: webView
+        )
     }
 
     /// A viewport, a readable type scale, and images clamped to the width.
@@ -175,10 +193,18 @@ struct HTMLMessageView: UIViewRepresentable {
         private let parent: HTMLMessageView
         var loadedHTML: String?
         var loadedDark = false
+        var loadedRemote = false
+        /// Reassigned on every update, because a SwiftUI view is a value and
+        /// the closure captured at `makeCoordinator` time is the first one.
+        var onLink: ((URL) -> Void)?
 
         private var observation: NSKeyValueObservation?
         private weak var webView: WKWebView?
         private var current: (html: String, designed: Bool, dark: Bool)?
+        /// Whether the HTML being shown had its remote references cut out
+        /// rather than blocked by WebKit. Remembered so the second,
+        /// width-corrected pass loads the same thing as the first.
+        private var strippedRemote = false
         /// The width the current pass is laid out at; nil on the first,
         /// device-width pass. Set once, so a wide second pass cannot start a
         /// third.
@@ -192,12 +218,48 @@ struct HTMLMessageView: UIViewRepresentable {
 
         deinit { observation?.invalidate() }
 
-        func load(_ html: String, designed: Bool, dark: Bool, into webView: WKWebView) {
+        func load(
+            _ html: String, designed: Bool, dark: Bool, remote: Bool, into webView: WKWebView
+        ) {
             current = (html, designed, dark)
             layoutWidth = nil
             self.webView = webView
+
+            guard !remote else {
+                webView.configuration.userContentController.removeAllContentRuleLists()
+                strippedRemote = false
+                show(html, designed: designed, dark: dark, in: webView)
+                return
+            }
+
+            // ⚠️ Nothing is loaded until the blocker is in place. Loading now
+            // and applying the rule list when it arrives would fetch exactly
+            // the pictures this is here to refuse -- the tracking request is
+            // made once, and it is made on the first paint.
+            Task { @MainActor in
+                let list = await RemoteContentBlocker.list()
+                guard let webView = self.webView, self.current?.html == html else { return }
+
+                webView.configuration.userContentController.removeAllContentRuleLists()
+                if let list {
+                    webView.configuration.userContentController.add(list)
+                    self.strippedRemote = false
+                    self.show(html, designed: designed, dark: dark, in: webView)
+                } else {
+                    // No rule list. Cut the references out of the HTML rather
+                    // than let them through.
+                    self.strippedRemote = true
+                    self.show(
+                        HTMLMessageView.strippingRemoteContent(html),
+                        designed: designed, dark: dark, in: webView
+                    )
+                }
+            }
+        }
+
+        private func show(_ body: String, designed: Bool, dark: Bool, in webView: WKWebView) {
             webView.loadHTMLString(
-                HTMLMessageView.wrap(html, designed: designed, dark: dark, layoutWidth: nil),
+                HTMLMessageView.wrap(body, designed: designed, dark: dark, layoutWidth: nil),
                 baseURL: nil
             )
         }
@@ -223,9 +285,15 @@ struct HTMLMessageView: UIViewRepresentable {
                 let width = min(size.width, viewWidth * HTMLMessageView.maxScaleDown)
                 layoutWidth = width
                 acceptShrink = true
+                // The same body as the first pass. When the references were
+                // stripped rather than blocked, reloading the original here
+                // would quietly fetch them on the second pass.
+                let body = strippedRemote
+                    ? HTMLMessageView.strippingRemoteContent(current.html)
+                    : current.html
                 webView.loadHTMLString(
                     HTMLMessageView.wrap(
-                        current.html, designed: current.designed, dark: current.dark, layoutWidth: width
+                        body, designed: current.designed, dark: current.dark, layoutWidth: width
                     ),
                     baseURL: nil
                 )
@@ -242,7 +310,14 @@ struct HTMLMessageView: UIViewRepresentable {
             }
         }
 
-        /// Taps open in Safari rather than navigating inside the message.
+        /// A tapped link never navigates inside the message, and never opens
+        /// straight away unless it is safe to and the person asked for that.
+        ///
+        /// 🔴 This used to be `UIApplication.shared.open(url)` for any scheme
+        /// at all. The visible text of a link and its `href` are unrelated
+        /// strings -- that is the entire mechanism of a phishing email -- and
+        /// a scheme this app does not understand had no business being handed
+        /// to the system from inside somebody else's HTML.
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
@@ -254,8 +329,24 @@ struct HTMLMessageView: UIViewRepresentable {
                 decisionHandler(.allow)
                 return
             }
-            UIApplication.shared.open(url)
             decisionHandler(.cancel)
+
+            switch url.scheme?.lowercased() {
+            case "http", "https":
+                if AppSettings.confirmsLinks, let onLink {
+                    onLink(url)
+                } else {
+                    UIApplication.shared.open(url)
+                }
+            // Writing to somebody or ringing them is what the link says it
+            // is, and iOS asks before placing a call anyway.
+            case "mailto", "tel":
+                UIApplication.shared.open(url)
+            // Everything else -- a custom scheme aimed at another app, or
+            // `javascript:`, or `file:` -- is refused in silence.
+            default:
+                break
+            }
         }
     }
 }

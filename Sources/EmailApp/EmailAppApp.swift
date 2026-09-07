@@ -64,6 +64,10 @@ struct EmailAppApp: App {
                 // Re-establish the Google session silently, so a cold launch
                 // does not look like being signed out.
                 .onAppear {
+                    // Compiled once, before any message can be opened, so
+                    // the first one read does not sit waiting for it -- and
+                    // never renders without it. See `RemoteContentBlocker`.
+                    RemoteContentBlocker.prepare()
                     Task {
                         // Which mailbox everything scoped is looking at.
                         // Must come first: the file-backed stores start on
