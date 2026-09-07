@@ -228,33 +228,15 @@ struct EditProfileView: View {
                     .foregroundStyle(Color.urgent)
             }
         } footer: {
-            Text("Everything on this phone. Your mail itself stays where it is.")
+            Text("Every connected mailbox is disconnected too, so you will connect them again next time. Your mail itself stays where it is.")
         }
     }
 
+    /// The list this used to hold in line is in `AccountTeardown`, which
+    /// Privacy's "Sign out and erase" now shares -- the two had drifted into
+    /// clearing different things under the same promise.
     private func signOutCompletely() {
-        mail.disconnect()
-        PersonPreferences.clearAll()
-        FollowUpPreferences.clearAll()
-        // Memory is about the person rather than the mailbox, so disconnecting
-        // an inbox keeps it. Signing out of the account does not.
-        memory.forgetAll()
-        chats.clearAll()
-        ProfilePhoto.clearAll()
-        // Both kinds of face: the one they chose, above, and every one a
-        // provider supplied. All of them, because `disconnect()` only takes
-        // the active mailbox and a picture whose account has already been
-        // deleted is the one nothing would think to remove.
-        AvatarStore.shared.forgetAll()
-        // And the contact list those faces were matched against. It is
-        // somebody's address book; it does not outlive their account.
-        PeopleDirectory.shared.forgetAll()
-        // The domain-to-logo map too. It holds no addresses -- only which
-        // companies write to this phone -- but that is still a list about
-        // somebody, and signing out means leaving nothing behind.
-        LogoDirectory.shared.forgetAll()
-        user.signOut()
-        Task { await AuthService.signOut() }
+        AccountTeardown.signOutOfMaily(mail: mail, memory: memory, chats: chats, user: user)
     }
 }
 

@@ -157,17 +157,38 @@ enum Backend {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         guard (200..<300).contains(http.statusCode) else {
-            // PostgREST reports its own failures as { "message": "..." }.
+            // PostgREST reports its own failures as { "message": "..." }, and
+            // those are written for whoever wrote the SQL: "duplicate key
+            // value violates unique constraint \"user_settings_pkey\"". Kept
+            // for the console, never shown -- `errorDescription` answers from
+            // the status instead.
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
-            throw BackendError.server(message ?? "The server returned \(http.statusCode).")
+            throw BackendError.server(status: http.statusCode, detail: message)
         }
         return (data, http)
     }
 
     enum BackendError: LocalizedError {
-        case server(String)
+        case server(status: Int, detail: String?)
+
         var errorDescription: String? {
-            switch self { case .server(let message): message }
+            switch self {
+            case .server(let status, _):
+                switch status {
+                case 401, 403: "You've been signed out. Sign in again."
+                case 404: "That isn't there any more."
+                case 409: "That is already saved."
+                case 413: "That was too big to save."
+                case 429: "Too much at once. Give it a moment and try again."
+                case 500...599: "Maily's server is having trouble. Try again shortly."
+                default: "Maily couldn't save that just now. Try again."
+                }
+            }
+        }
+
+        /// What the server actually said, for a log. Never for a screen.
+        var detail: String? {
+            switch self { case .server(_, let detail): detail }
         }
     }
 

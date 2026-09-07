@@ -62,7 +62,7 @@ final class PushService: NSObject {
             // the main thread.
             UIApplication.shared.registerForRemoteNotifications()
         } catch {
-            lastError = error.localizedDescription
+            lastError = error.readable
         }
     }
 
@@ -202,7 +202,7 @@ final class PushService: NSObject {
             // Not surfaced. Notifications quietly not starting is bad, but a
             // banner about Pub/Sub on somebody's inbox is worse, and the
             // retry is the next launch.
-            lastError = error.localizedDescription
+            lastError = error.readable
         }
     }
 

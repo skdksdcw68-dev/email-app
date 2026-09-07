@@ -338,7 +338,7 @@ struct BulkReplyFlow: View {
             } catch {
                 produced.append(
                     PendingReply(id: message.id, message: message, body: "",
-                                 failure: error.localizedDescription)
+                                 failure: error.readable)
                 )
             }
             generated += 1
@@ -389,7 +389,7 @@ struct BulkReplyFlow: View {
         } catch {
             withAnimation(.easeInOut(duration: 0.2)) {
                 drafts[index].isSending = false
-                drafts[index].failure = error.localizedDescription
+                drafts[index].failure = error.readable
             }
         }
     }

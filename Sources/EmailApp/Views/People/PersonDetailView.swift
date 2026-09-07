@@ -300,7 +300,7 @@ struct PersonDetailView: View {
         do {
             summary = try await AIService.ask(question: question, context: context).answer
         } catch {
-            summaryError = error.localizedDescription
+            summaryError = error.readable
         }
     }
 }

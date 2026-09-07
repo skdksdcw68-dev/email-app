@@ -1104,8 +1104,11 @@ async function askStream(body: Record<string, unknown>, ctx: Ctx) {
   });
 
   if (!response.ok || !response.body) {
-    const detail = await response.text();
-    return json({ error: detail.slice(0, 300) || "The AI service failed." }, 502);
+    // OpenAI's body goes to the log, never to the phone: it is JSON, it names
+    // models and parameters, and none of it is actionable by the person who
+    // just asked a question about their mail.
+    console.error("upstream draft failure", response.status, (await response.text()).slice(0, 300));
+    return json({ error: "The assistant is having trouble right now. Try again shortly." }, 502);
   }
 
   // Two readers over one body. The client's half is passed through untouched
@@ -1504,7 +1507,8 @@ Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
   if (!OPENAI_KEY) {
-    return json({ error: "OPENAI_API_KEY is not set on this project." }, 500);
+    console.error("OPENAI_API_KEY is not set on this project");
+    return json({ error: "Maily's assistant isn't available right now." }, 500);
   }
 
   try {
@@ -1598,9 +1602,13 @@ Deno.serve(async (request) => {
       case "ask_stream":
         return await askStream(payload, ctx);
       default:
-        return json({ error: `unknown action: ${payload.action}` }, 400);
+        console.error("unknown action", payload.action);
+        return json({ error: "Maily asked for something this version doesn't do." }, 400);
     }
   } catch (error) {
-    return json({ error: String(error instanceof Error ? error.message : error) }, 500);
+    // Whatever threw, the phone gets a sentence rather than a stack. The
+    // detail is in the function log, which is where it is any use.
+    console.error("unhandled", error instanceof Error ? error.stack ?? error.message : error);
+    return json({ error: "The assistant hit a problem. Try again." }, 500);
   }
 });

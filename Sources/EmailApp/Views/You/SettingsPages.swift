@@ -553,18 +553,10 @@ struct PrivacySettingsView: View {
         .alert("Sign out and erase?", isPresented: $showingSignOut) {
             Button("Cancel", role: .cancel) {}
             Button("Sign out", role: .destructive) {
-                mail.disconnect()
-                PersonPreferences.clearAll()
-                FollowUpPreferences.clearAll()
-                // Memory is about the person rather than the mailbox, so
-                // disconnecting an inbox keeps it. Signing out does not.
-                memory.forgetAll()
-                chats.clearAll()
-                user.signOut()
-                Task { await AuthService.signOut() }
+                AccountTeardown.signOutOfMaily(mail: mail, memory: memory, chats: chats, user: user)
             }
         } message: {
-            Text("Signs you out and removes the mailbox, the offline copy and your saved preferences from this device.")
+            Text("Signs you out and removes every connected mailbox, the offline copy and your saved preferences from this device.")
         }
     }
 }

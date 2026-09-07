@@ -270,7 +270,7 @@ struct ComposeView: View {
             )
             dismiss()
         } catch {
-            sendError = error.localizedDescription
+            sendError = error.readable
         }
     }
 
@@ -565,7 +565,7 @@ struct ComposeView: View {
     private func take(_ result: Result<[URL], Error>) {
         switch result {
         case .failure(let error):
-            sendError = error.localizedDescription
+            sendError = error.readable
         case .success(let urls):
             for url in urls {
                 let scoped = url.startAccessingSecurityScopedResource()
@@ -711,7 +711,7 @@ struct ComposeView: View {
             dictation.reset()
             markJustDrafted()
         } catch {
-            draftError = error.localizedDescription
+            draftError = error.readable
         }
     }
 

@@ -86,7 +86,7 @@ final class UsageStore {
             spend = rows.first ?? Spend()
             checkedAt = .now
         } catch {
-            failure = error.localizedDescription
+            failure = error.readable
         }
     }
 }

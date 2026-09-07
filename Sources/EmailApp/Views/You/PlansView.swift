@@ -275,7 +275,7 @@ struct PlansView: View {
                 note = "That is waiting for approval. It will unlock on its own once it goes through."
             }
         } catch {
-            note = error.localizedDescription
+            note = error.readable
         }
     }
 

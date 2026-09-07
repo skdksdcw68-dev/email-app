@@ -123,8 +123,8 @@ struct AutoReplyCard: View {
             try await mail.sendAutoReply(edited, queue: queue)
             draft.status = .sent
         } catch {
-            draft.status = .failed(error.localizedDescription)
-            failure = error.localizedDescription
+            draft.status = .failed(error.readable)
+            failure = error.readable
         }
     }
 }

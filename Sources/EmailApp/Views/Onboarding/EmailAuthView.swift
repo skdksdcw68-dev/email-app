@@ -113,7 +113,7 @@ struct EmailAuthView: View {
                     finish(try await AuthService.signInWithEmail(email, password: password))
                 }
             } catch {
-                self.error = error.localizedDescription
+                self.error = error.readable
             }
             isWorking = false
         }

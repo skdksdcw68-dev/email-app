@@ -78,7 +78,7 @@ final class Store {
             // has no App Store account. Neither is something the person can
             // fix from here, so the paywall says it plainly rather than
             // showing an empty list that looks broken.
-            failure = error.localizedDescription
+            failure = error.readable
         }
     }
 
@@ -174,7 +174,7 @@ final class Store {
         } catch {
             // A cancelled password prompt lands here too, which is why this
             // is "unknown" and not "nothing".
-            return .unknown(error.localizedDescription)
+            return .unknown(error.readable)
         }
 
         // Re-send every live entitlement, not just re-read them. This is the

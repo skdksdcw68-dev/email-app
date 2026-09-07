@@ -78,7 +78,7 @@ enum IMAPProbe {
             try await connection.open()
         } catch {
             await connection.close()
-            return .unreachable(error.localizedDescription)
+            return .unreachable(error.readable)
         }
 
         do {
@@ -88,7 +88,7 @@ enum IMAPProbe {
             return .ok(Success(config: config, folders: folders))
         } catch {
             await connection.close()
-            return .refused(reason: error.localizedDescription, host: config.imapHost)
+            return .refused(reason: error.readable, host: config.imapHost)
         }
     }
 

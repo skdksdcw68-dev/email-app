@@ -75,7 +75,7 @@ extension MailStore {
                 // the text if the send failed.
                 if let draft { await discardDraft(draft.id) }
             } catch {
-                sendFailure = error.localizedDescription
+                sendFailure = error.readable
             }
         }
 

@@ -77,7 +77,7 @@ extension MailStore {
             searchTerms = terms
             searchExplanation = explanation
         } catch {
-            searchError = error.localizedDescription
+            searchError = error.readable
         }
     }
 

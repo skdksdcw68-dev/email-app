@@ -230,8 +230,8 @@ enum AuthService {
 
         var errorDescription: String? {
             switch self {
-            case .noPresenter: "Could not present the sign-in screen."
-            case .missingIDToken: "The provider did not return an identity token."
+            case .noPresenter: "Maily couldn't open the sign-in screen. Try again."
+            case .missingIDToken: "That sign-in didn't finish. Try it again."
             case .scopesDeclined: "Maily needs permission to read your mail and create drafts."
             case .notConnected: "No mailbox is connected."
             }

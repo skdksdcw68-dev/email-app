@@ -123,7 +123,7 @@ final class DictationService {
                 }
             }
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.readable
             teardown()
         }
     }

@@ -678,7 +678,7 @@ final class MailStore {
 
             if importNow { await importRecentMail() }
         } catch {
-            connectionError = error.localizedDescription
+            connectionError = error.readable
             account = nil
         }
     }
@@ -713,7 +713,7 @@ final class MailStore {
             }
             Task { await enhanceWithAI() }
         } catch {
-            connectionError = error.localizedDescription
+            connectionError = error.readable
         }
     }
 
@@ -1142,7 +1142,7 @@ final class MailStore {
             nextPageToken = page.nextPageToken
             Task { await enhanceWithAI() }
         } catch {
-            connectionError = error.localizedDescription
+            connectionError = error.readable
         }
     }
 
@@ -1714,6 +1714,34 @@ final class MailStore {
         }
     }
 
+    /// Every mailbox on this phone, one properly-scoped teardown each.
+    ///
+    /// 🔴 Signing out of Maily called `disconnect()` -- one mailbox, and then
+    /// it *promotes the next one*. Somebody with two accounts signed out,
+    /// signed back in, and found the second still connected and still full of
+    /// mail. See `AccountTeardown` for why that is the account's data, not
+    /// the phone's.
+    ///
+    /// A loop over `disconnect()` rather than a bulk purge on purpose: each
+    /// pass revokes that mailbox's grant, stops its Gmail watch, drops its
+    /// push row and clears its suite while it is the active one, which is the
+    /// only state in which those clears are scoped to the right mailbox.
+    func disconnectEverything() {
+        // Bounded: `disconnect` always removes the record it started with, so
+        // this cannot spin, and the ceiling is there for the case it one day
+        // can.
+        var guardRail = registry.accounts.count + 1
+        while account != nil, guardRail > 0 {
+            disconnect()
+            guardRail -= 1
+        }
+
+        // Records the active pointer never reached -- a mailbox saved by a
+        // build that crashed before it was made active. No token to revoke,
+        // so the registry's own teardown is the whole job.
+        for stranded in registry.accounts { registry.forget(stranded.id) }
+    }
+
     // MARK: - Reading
 
     /// Messages in a mailbox, narrowed by an optional AI tag, unread state and
@@ -2134,7 +2162,7 @@ final class MailStore {
             guard let draftID = try await draftID(of: message, token: token) else { return }
             try await GmailService.deleteDraft(accessToken: token, id: draftID)
         } catch {
-            sendFailure = "The draft is gone from here, but Gmail kept it. \(error.localizedDescription)"
+            sendFailure = "The draft is gone from here, but Gmail kept it. \(error.readable)"
         }
     }
 

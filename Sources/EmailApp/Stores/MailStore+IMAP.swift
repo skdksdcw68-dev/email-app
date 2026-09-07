@@ -138,7 +138,7 @@ extension MailStore {
             }
             Task { await enhanceWithAI() }
         } catch {
-            connectionError = error.localizedDescription
+            connectionError = error.readable
         }
     }
 }

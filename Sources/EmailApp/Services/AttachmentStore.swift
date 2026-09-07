@@ -136,7 +136,7 @@ final class AttachmentStore {
             try data.write(to: destination, options: .atomic)
             return destination
         } catch {
-            failures[attachment.id] = error.localizedDescription
+            failures[attachment.id] = error.readable
             return nil
         }
     }

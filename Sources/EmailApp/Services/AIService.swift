@@ -75,8 +75,22 @@ enum AIService {
 
         var errorDescription: String? {
             switch self {
+            // Our own edge function's words, and they are written for the
+            // person: "You've used this month's allowance", "Sign in to Maily
+            // to use its AI features". Anything it did not write is caught by
+            // `HumanError`, which drops a body or a code before it is shown.
             case .server(let message): message
-            case .malformed: "The AI service returned something unexpected."
+            case .malformed: "Maily's assistant sent something it couldn't read. Try again."
+            }
+        }
+
+        /// When the service failed and said nothing useful about why.
+        static func trouble(_ status: Int) -> String {
+            switch status {
+            case 401, 403: "Sign in to Maily again to use its assistant."
+            case 429: "The assistant is busy. Try again in a moment."
+            case 500...599: "The assistant is having trouble right now. Try again shortly."
+            default: "The assistant couldn't answer that. Try again."
             }
         }
     }
@@ -292,7 +306,7 @@ enum AIService {
         guard let http = response as? HTTPURLResponse else { throw AIError.malformed }
         guard (200..<300).contains(http.statusCode) else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw AIError.server(message ?? "AI service returned \(http.statusCode).")
+            throw AIError.server(message ?? AIError.trouble(http.statusCode))
         }
         do {
             return try JSONDecoder().decode(Answer.self, from: data)
@@ -419,7 +433,7 @@ enum AIService {
             var body = ""
             for try await line in bytes.lines { body += line }
             let message = (try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])?["error"] as? String
-            throw AIError.server(message ?? "AI service returned \(http.statusCode).")
+            throw AIError.server(message ?? AIError.trouble(http.statusCode))
         }
 
         for try await line in bytes.lines {
@@ -484,7 +498,7 @@ enum AIService {
         guard (200..<300).contains(http.statusCode) else {
             // The function reports its own failures as { "error": "..." }.
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw AIError.server(message ?? "AI service returned \(http.statusCode).")
+            throw AIError.server(message ?? AIError.trouble(http.statusCode))
         }
 
         do {

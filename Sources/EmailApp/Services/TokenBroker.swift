@@ -170,10 +170,14 @@ enum TokenError: LocalizedError, Equatable {
         switch self {
         case .noCredential:
             "This mailbox needs connecting again."
-        case .revoked(let why):
-            "Google ended the connection to this mailbox. \(why)"
-        case .provider(let why):
-            "Google refused the sign-in. \(why)"
+        // The `why` is Google's own `error_description` -- "Token has been
+        // expired or revoked." at best, `invalid_grant` at worst. What the
+        // person has to do is the same in every case, and that is the
+        // sentence worth their attention.
+        case .revoked:
+            "Google ended Maily's access to this mailbox. Connect it again to carry on."
+        case .provider:
+            "Google wouldn't renew this mailbox just now. Try again in a moment."
         case .unsupported(let provider):
             "\(provider.title) mailboxes are not connected yet."
         }

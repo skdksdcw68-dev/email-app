@@ -220,7 +220,7 @@ struct AutoReplySetupView: View {
             understanding = result
             config.understanding = result
         } catch {
-            failure = error.localizedDescription
+            failure = error.readable
         }
     }
 
@@ -230,7 +230,7 @@ struct AutoReplySetupView: View {
         do {
             example = try await AIService.autoReplyExample(config.payload(labels: labels))
         } catch {
-            failure = error.localizedDescription
+            failure = error.readable
         }
     }
 

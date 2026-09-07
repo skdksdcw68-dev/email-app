@@ -124,8 +124,8 @@ struct AccountView: View {
                 handleApple(authorization)
             case .failure(let error):
                 // Cancelling is not an error worth showing.
-                if (error as? ASAuthorizationError)?.code == .canceled { return }
-                authError = error.localizedDescription
+                if error.isCancellation { return }
+                authError = error.readable
             }
         }
         .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
@@ -140,7 +140,7 @@ struct AccountView: View {
               let idToken = String(data: tokenData, encoding: .utf8),
               let nonce = appleNonce
         else {
-            authError = "Apple did not return a usable identity token."
+            authError = "Sign in with Apple didn't finish. Try it again."
             return
         }
 
@@ -163,7 +163,7 @@ struct AccountView: View {
                 )
                 await user.continueAfterAuth()
             } catch {
-                authError = error.localizedDescription
+                authError = error.readable
             }
             pending = nil
         }
@@ -189,17 +189,16 @@ struct AccountView: View {
                 // The SDK throws on a user-cancelled sheet too; that is not
                 // worth a red error line.
                 if !isCancellation(error) {
-                    authError = error.localizedDescription
+                    authError = error.readable
                 }
             }
             pending = nil
         }
     }
 
-    private func isCancellation(_ error: Error) -> Bool {
-        let nsError = error as NSError
-        return nsError.domain == "com.google.GIDSignIn" && nsError.code == -5
-    }
+    /// Google's is not the only sheet somebody can back out of. `HumanError`
+    /// knows all of them, and is the one place that has to.
+    private func isCancellation(_ error: Error) -> Bool { error.isCancellation }
 
     // MARK: - Chrome
 

@@ -29,8 +29,11 @@ actor IMAPConnection {
                 "This server will not accept a password on an unencrypted connection. Try SSL/TLS."
             case .noSuchFolder(let name):
                 "The folder \(name) is not there."
-            case .unexpected(let what):
-                "Unexpected reply from the server: \(what)"
+            // The reply itself is protocol text -- "A3 BAD Missing sequence
+            // set" -- and belongs in a log, not under a text field somebody
+            // is trying to fill in.
+            case .unexpected:
+                "The server replied with something Maily didn't understand."
             }
         }
     }

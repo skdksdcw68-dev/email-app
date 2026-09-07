@@ -67,10 +67,28 @@ enum GmailService {
         case http(Int, String)
         case malformed
 
+        /// The status stays on the case -- `draftID` matches on 404 -- but it
+        /// never reaches a screen. "Gmail returned 401. {"error":{"code":401
+        /// ...}}" told somebody holding a phone nothing they could act on.
         var errorDescription: String? {
             switch self {
-            case .http(let code, let body): "Gmail returned \(code). \(body)"
-            case .malformed: "Gmail returned something unexpected."
+            case .http(let code, _):
+                switch code {
+                case 401, 403:
+                    "Maily's access to this mailbox has ended. Connect it again from Mailboxes."
+                case 404:
+                    "That message isn't in Gmail any more."
+                case 413:
+                    "That was too big for Gmail to accept."
+                case 429:
+                    "Gmail is asking Maily to slow down. It will catch up shortly."
+                case 500...599:
+                    "Gmail is having trouble right now. Maily will try again."
+                default:
+                    "Gmail wouldn't do that just now. Try again."
+                }
+            case .malformed:
+                "Gmail sent something Maily couldn't read. Try again."
             }
         }
     }

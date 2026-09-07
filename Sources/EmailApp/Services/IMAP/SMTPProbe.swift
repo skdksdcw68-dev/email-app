@@ -34,7 +34,7 @@ enum SMTPProbe {
             return .ok
         } catch {
             await smtp.close()
-            return .failed(error.localizedDescription)
+            return .failed(error.readable)
         }
     }
 }

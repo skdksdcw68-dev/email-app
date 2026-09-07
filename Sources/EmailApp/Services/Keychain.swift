@@ -95,10 +95,10 @@ enum Keychain {
     struct Failure: LocalizedError {
         let status: OSStatus
 
+        /// No status, no `SecCopyErrorMessageString`. Both were for whoever
+        /// was reading the console, and this string goes on a phone.
         var errorDescription: String? {
-            let detail = SecCopyErrorMessageString(status, nil) as String?
-            return "The keychain refused that (\(status)). \(detail ?? "")"
-                .trimmingCharacters(in: .whitespaces)
+            "This phone wouldn't let Maily store that securely. Restart and try again."
         }
     }
 }

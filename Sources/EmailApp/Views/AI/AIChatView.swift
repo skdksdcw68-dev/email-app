@@ -789,7 +789,7 @@ struct AIChatView: View {
                 stopped(pendingID, sources: context)
                 Analytics.record(.chatStopped, ["seconds": .int(Int(Date.now.timeIntervalSince(started)))])
             } else {
-                replace(pendingID, with: error.localizedDescription, failed: true)
+                replace(pendingID, with: error.readable, failed: true)
                 Analytics.record(.chatFailed, ["used_mail": .bool(!context.isEmpty)])
             }
         }
@@ -1154,7 +1154,7 @@ struct AIChatView: View {
             if isCancellation(error) {
                 replace(pendingID, with: "Stopped.", failed: false)
             } else {
-                replace(pendingID, with: "I couldn't write that. \(error.localizedDescription)", failed: true)
+                replace(pendingID, with: "I couldn't write that. \(error.readable)", failed: true)
             }
         }
     }
@@ -1209,9 +1209,9 @@ struct AIChatView: View {
             ])
         } catch {
             withAnimation(.easeOut(duration: 0.2)) {
-                turns[index].draft?.status = .failed(error.localizedDescription)
+                turns[index].draft?.status = .failed(error.readable)
             }
-            var report = ChatMessage.say("It didn't send. \(error.localizedDescription)")
+            var report = ChatMessage.say("It didn't send. \(error.readable)")
             report.failed = true
             turns.append(report)
         }

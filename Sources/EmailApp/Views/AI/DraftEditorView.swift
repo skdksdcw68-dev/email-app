@@ -240,7 +240,7 @@ struct DraftEditorView: View {
                     draft.body = result.body
                 }
             } catch {
-                revisionError = error.localizedDescription
+                revisionError = error.readable
             }
         }
     }

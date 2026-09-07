@@ -52,7 +52,6 @@ struct AddMailboxFlow: View {
     @State private var provider: MailProvider?
     @State private var nickname = ""
     @State private var tint: MailboxTint = .blue
-    @State private var window: ImportWindow = .threeMonths
     @State private var failure: String?
 
     // The IMAP half. Nothing here is written anywhere until it has been
@@ -78,7 +77,6 @@ struct AddMailboxFlow: View {
         case imapIncoming
         case imapOutgoing
         case naming
-        case importScope
         case importing
         case done
 
@@ -297,7 +295,6 @@ struct AddMailboxFlow: View {
         case .imapIncoming: imapIncomingStep
         case .imapOutgoing: imapOutgoingStep
         case .naming:     namingStep
-        case .importScope: scopeStep
         case .importing:  importingStep
         case .done:       doneStep
         }
@@ -553,25 +550,16 @@ struct AddMailboxFlow: View {
         }
     }
 
-    private var scopeStep: some View {
-        AutoReplyStep(
-            "How much to bring over",
-            "Older mail is still searchable in Gmail either way."
-        ) {
-            VStack(spacing: 9) {
-                ForEach(ImportWindow.allCases, id: \.self) { option in
-                    OptionRowCard(
-                        label: option.title,
-                        detail: option.detail,
-                        symbol: nil,
-                        isSelected: window == option
-                    ) {
-                        window = option
-                    }
-                }
-            }
-        }
-    }
+    // There was a "How much to bring over" step here, offering three months,
+    // a year, or everything.
+    //
+    // 🔴 It asked a question whose answer never changed anything worth a
+    // screen: three months is what Maily is built around -- the sorting, the
+    // free allowance, the size of the offline copy -- and the other two
+    // answers made the first import slow enough to look broken. Asking and
+    // then behaving the same way either side of the answer is worse than not
+    // asking. It is three months for every mailbox now, and
+    // `MailboxDetailView` says so as a fact rather than a setting.
 
     /// No heading of its own.
     ///
@@ -644,8 +632,7 @@ struct AddMailboxFlow: View {
         case .imapSignIn:    "Next"
         case .imapIncoming:  "Check receiving"
         case .imapOutgoing:  "Check sending"
-        case .naming:        "Continue"
-        case .importScope:   "Bring it over"
+        case .naming:        "Bring it over"
         case .importing:     nil
         case .done:          firstRun ? "Start using Maily" : "Done"
         }
@@ -679,14 +666,25 @@ struct AddMailboxFlow: View {
             Task { await checkReceiving() }
         case .imapOutgoing:
             Task { await checkSending() }
-        case .importScope:
-            Task { await runImport() }
         case .done:
             onFinish?()
             dismiss()
         default:
-            withAnimation(.snappy(duration: 0.25)) { index += 1 }
+            advanceStep()
         }
+    }
+
+    /// One step forward, and the import if that is where it lands.
+    ///
+    /// The import used to be started by the "how much to bring over" step,
+    /// which was the last thing between signing in and the ring. With that
+    /// question gone there are three different steps that can be the last one
+    /// -- Google consent, the IMAP sending check, naming -- so no single one
+    /// of them can own starting it. This does: whatever arrives at
+    /// `.importing` begins the import, and nothing has to remember to.
+    private func advanceStep() {
+        withAnimation(.snappy(duration: 0.25)) { index += 1 }
+        if step == .importing { Task { await runImport() } }
     }
 
     /// The consent screen, and then a check nothing else does: is this
@@ -707,7 +705,7 @@ struct AddMailboxFlow: View {
         }
         guard mail.isConnected else { return }
 
-        withAnimation(.snappy(duration: 0.25)) { index += 1 }
+        advanceStep()
     }
 
     /// Half one: can we read this mailbox?
@@ -732,7 +730,7 @@ struct AddMailboxFlow: View {
             // Keep what the server said about itself -- the folder names in
             // particular, which are what tell Sent from Drafts later.
             verified = success
-            withAnimation(.snappy(duration: 0.25)) { index += 1 }
+            advanceStep()
 
         case .refused(let reason, _), .unreachable(let reason):
             failure = reason
@@ -795,27 +793,25 @@ struct AddMailboxFlow: View {
         smtpPassword = ""
 
         await mail.adopt(connected)
-        withAnimation(.snappy(duration: 0.25)) { index += 1 }
+        advanceStep()
     }
 
+    /// Called by `advanceStep` on arrival, so the ring and the work start
+    /// together. It does not move the flow onto the importing step -- it is
+    /// already there -- and moves on to `.done` when the mail is in.
     private func runImport() async {
-        // ⚠️ Any ledger from before this moment counted a different window.
+        // ⚠️ A ledger left by another mailbox counted somebody else's mail.
         // `importRecentMail` reuses a saved ledger that is complete, so
-        // without this the answer just given could be overruled by a count
-        // taken before it was asked for.
+        // without this a stale count decides this import is already finished.
         ImportLedger.clear()
 
-        if let id = mail.account?.id {
+        if !firstRun, let id = mail.account?.id {
             mail.registry.update(id) {
-                $0.importWindow = window
-                if !firstRun {
-                    $0.tint = tint
-                    let trimmed = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
-                    $0.nickname = trimmed.isEmpty ? nil : trimmed
-                }
+                $0.tint = tint
+                let trimmed = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+                $0.nickname = trimmed.isEmpty ? nil : trimmed
             }
         }
-        withAnimation(.snappy(duration: 0.25)) { index += 1 }
         await mail.importRecentMail()
         withAnimation(.snappy(duration: 0.25)) { index += 1 }
     }

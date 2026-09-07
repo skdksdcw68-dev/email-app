@@ -283,7 +283,7 @@ struct AIWriterSheet: View {
                 result = draft.body
             }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = error.readable
         }
     }
 }
