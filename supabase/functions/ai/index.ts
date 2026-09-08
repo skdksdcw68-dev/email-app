@@ -327,17 +327,13 @@ async function openai(
 
 // ---------------------------------------------------------------- classify
 
-const CLASSIFY_SYSTEM = `You triage email for a busy professional.
-
-Return JSON only, no prose:
-{
-  "priority": "urgent" | "very_important" | "important" | "normal",
-  "needs_reply": boolean,
-  "category": "meeting" | "finance" | "security" | "newsletter" | "promotion" | "other",
-  "summary": "one sentence, under 20 words, what this asks of the reader",
-  "extract": boolean
-}
-
+/// Everything after the output shape.
+///
+/// The shape itself is built per request by `classifySystem`, because whether
+/// `"custom"` is one of its keys depends on whether this reader has any labels
+/// of their own. It cannot be a constant with the custom part bolted on the
+/// end -- see the note there.
+const CLASSIFY_RULES = `
 priority
   urgent          a real deadline or consequence attached, today or tomorrow
   very_important  matters a lot but nothing is on fire
@@ -405,14 +401,45 @@ function customSection(custom: Guidance[], notes: Guidance[]): string {
   }
   if (custom.length > 0) {
     parts.push(
-      'The reader also sorts mail into labels of their own. Add "custom": a list',
-      "of the aliases of every label that applies, [] when none does. A label",
-      "applies only when the message clearly fits what the reader wrote; most",
-      "mail fits none.",
+      '"custom" is the reader\'s own labels. List the alias of every one that',
+      "applies, [] when none does. A label applies only when the message clearly",
+      "fits what the reader wrote; most mail fits none.",
     );
     custom.forEach((label, index) => parts.push(`  L${index + 1}  ${label.name}: ${label.what}`));
   }
   return parts.length > 0 ? "\n\n" + parts.join("\n") : "";
+}
+
+/// The whole system prompt, shape first.
+///
+/// 🔴 `"custom"` is written into the JSON shape rather than described after
+/// the rules, and that is the difference between the feature working and not.
+///
+/// It used to be a constant ending in a five-key shape, with "also add
+/// custom" appended forty lines below it. The model returned those five keys
+/// every single time -- a label defined as "every single email without
+/// exception" never once came back. At `reasoning_effort: minimal` there is no
+/// deliberation to reconcile a concrete schema at the top with a sentence at
+/// the bottom, and the schema wins. Naming the key where the keys are named
+/// costs nothing and is the only version that works.
+function classifySystem(custom: Guidance[], notes: Guidance[]): string {
+  const shape = [
+    "You triage email for a busy professional.",
+    "",
+    "Return JSON only, no prose:",
+    "{",
+    '  "priority": "urgent" | "very_important" | "important" | "normal",',
+    '  "needs_reply": boolean,',
+    '  "category": "meeting" | "finance" | "security" | "newsletter" | "promotion" | "other",',
+    '  "summary": "one sentence, under 20 words, what this asks of the reader",',
+    custom.length > 0 ? '  "extract": boolean,' : '  "extract": boolean',
+    ...(custom.length > 0
+      ? ['  "custom": ["L1", "L2"]   // the reader\'s own labels that apply, [] when none']
+      : []),
+    "}",
+  ].join("\n");
+
+  return shape + "\n" + CLASSIFY_RULES + customSection(custom, notes);
 }
 
 async function classify(body: Record<string, string>, ctx: Ctx) {
@@ -427,7 +454,7 @@ async function classify(body: Record<string, string>, ctx: Ctx) {
   // pays for exactly the prompt it always did.
   const custom = readGuidance(body.custom, 12);
   const notes = readGuidance(body.notes, 10);
-  const system = CLASSIFY_SYSTEM + customSection(custom, notes);
+  const system = classifySystem(custom, notes);
 
   // 🔴 `minimal`, and it is 90% of what this call costs.
   //
