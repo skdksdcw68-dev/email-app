@@ -102,7 +102,23 @@ async function forget(token: string) {
 
 /// One silent push. No alert, because the phone writes its own once it knows
 /// what arrived.
-async function notify(device: Device, historyId: string, address: string, jwt: string) {
+/// What APNs said, so a caller can be told rather than a log file.
+///
+/// This used to return nothing and write the failure to `console.error`. A
+/// notification that never arrives leaves no trace anybody looks at, which is
+/// how "push does not work" stayed unexplained: every layer reported success
+/// because no layer was asked.
+interface Delivered {
+  status: number;
+  reason?: string;
+}
+
+async function notify(
+  device: Device,
+  historyId: string,
+  address: string,
+  jwt: string,
+): Promise<Delivered> {
   const host = HOSTS[device.environment] ?? HOSTS.production;
 
   const response = await fetch(`${host}/3/device/${device.token}`, {
@@ -110,13 +126,32 @@ async function notify(device: Device, historyId: string, address: string, jwt: s
     headers: {
       authorization: `bearer ${jwt}`,
       "apns-topic": APNS_TOPIC ?? "",
-      "apns-push-type": "background",
-      // Background pushes must be priority 5. Apple rejects 10 outright.
-      "apns-priority": "5",
-      "apns-expiration": "0",
+      // 🔴 An alert, not a background push, and this is why notifications
+      // never arrived.
+      //
+      // It sent `content-available: 1` at priority 5 and left the phone to
+      // wake up, fetch the mail and write its own notification. That is a
+      // lovely design -- the server never learns a subject or a sender -- and
+      // Apple does not guarantee it will ever run. Background pushes are
+      // throttled at the system's discretion, and when somebody has swiped
+      // the app away they are not delivered at all. So the mail arrived, the
+      // push was accepted, and the phone stayed silent.
+      //
+      // An alert push is delivered. What it carries is deliberately empty of
+      // content: the mailbox address and nothing else -- no sender, no
+      // subject, no snippet -- so the privacy claim on mailyco.com/privacy is
+      // still true word for word. `mutable-content` leaves the door open for
+      // a notification service extension to fill in the detail on the device,
+      // which is how this gets rich without the server ever seeing it.
+      "apns-push-type": "alert",
+      "apns-priority": "10",
     },
     body: JSON.stringify({
-      aps: { "content-available": 1 },
+      aps: {
+        alert: { title: "New mail", body: address },
+        sound: "default",
+        "mutable-content": 1,
+      },
       historyId,
       // Which mailbox this is about. Gmail tells us and this used to drop
       // it, so a phone with two accounts connected could not tell which
@@ -128,7 +163,7 @@ async function notify(device: Device, historyId: string, address: string, jwt: s
     }),
   });
 
-  if (response.ok) return;
+  if (response.ok) return { status: response.status };
 
   const reason = await response.text();
   // The app was deleted, or the token was reissued. Keeping it means
@@ -137,6 +172,7 @@ async function notify(device: Device, historyId: string, address: string, jwt: s
     await forget(device.token);
   }
   console.error(`APNs ${response.status} for ${device.token.slice(0, 8)}…: ${reason}`);
+  return { status: response.status, reason };
 }
 
 Deno.serve(async (request) => {
@@ -160,7 +196,20 @@ Deno.serve(async (request) => {
     if (targets.length === 0) return new Response("no devices", { status: 200 });
 
     const jwt = await providerToken();
-    await Promise.all(targets.map((device) => notify(device, historyId, address, jwt)));
+    const results = await Promise.all(
+      targets.map((device) => notify(device, historyId, address, jwt)),
+    );
+
+    // Asked for by hand, never by Pub/Sub. Without this the only way to learn
+    // that APNs refused every push was to read a log nobody opens -- and
+    // "notifications do not work" is precisely the failure that leaves no
+    // other trace. Device tokens are deliberately not in the answer.
+    if (body?.debug === true) {
+      return new Response(
+        JSON.stringify({ address, devices: targets.length, apns: results }, null, 2),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
 
     return new Response("ok", { status: 200 });
   } catch (error) {

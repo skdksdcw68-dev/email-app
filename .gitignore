@@ -30,3 +30,8 @@ fastlane/README.md
 
 # Supabase CLI scratch
 supabase/.temp/
+
+# The OAuth demonstration video. Deployed to Vercel, never committed: it is
+# tens of megabytes, git keeps every version of it for ever, and it comes down
+# again the moment verification passes.
+site/v/
