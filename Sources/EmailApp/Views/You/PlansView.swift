@@ -256,6 +256,20 @@ struct PlansView: View {
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // 🔴 Required by guideline 3.1.2, and missing until now.
+            //
+            // An auto-renewable subscription has to show functional links to
+            // the terms and the privacy policy **on the screen that sells
+            // it** -- not somewhere in Settings, not on the website alone.
+            // It is one of the most reliable rejections there is, and it is
+            // two lines of code.
+            HStack(spacing: 14) {
+                Link("Terms of Use", destination: URL(string: "https://mailyco.com/terms")!)
+                Link("Privacy Policy", destination: URL(string: "https://mailyco.com/privacy")!)
+            }
+            .font(Style.caption)
+            .padding(.top, 2)
         }
     }
 
