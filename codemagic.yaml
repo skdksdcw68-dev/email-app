@@ -133,7 +133,21 @@ workflows:
         # Clear of 102 with room to spare, and still close enough that a build
         # number in TestFlight reads as the next one rather than as a jump to
         # somewhere unrelated. Raise this, never lower it.
-        BUILD_NUMBER_OFFSET: 150
+        #
+        # ⚠️ Raised to 300 on 2026-09-09, and this is why the rule above is
+        # "raise, never lower": the offset is only half of the number. The
+        # other half is Codemagic's own build counter, and **that counter
+        # belongs to the Codemagic account, not to the app**. The first
+        # account ran out of free minutes, the project moved to a new one, and
+        # its counter started again at 1 -- so the next upload would have been
+        # 1 + 150 = 151, against a TestFlight that has already seen 219. App
+        # Store Connect refuses a number it has seen, and the rejection reads
+        # like a signing failure.
+        #
+        # 300 clears 219 with room for the counter to run. Any future move to
+        # another CI account needs this raised again, past whatever TestFlight
+        # holds at the time.
+        BUILD_NUMBER_OFFSET: 300
 
     scripts:
       - name: Install XcodeGen
