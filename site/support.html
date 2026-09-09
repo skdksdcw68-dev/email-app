@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/icon.png" type="image/png">
+<link rel="apple-touch-icon" href="/icon.png">
+<title>Support — Maily</title>
+<meta name="description" content="Help with Maily: connecting a mailbox, what the AI does, billing, and how to delete your account.">
+<style>
+  :root {
+    --bg: #ffffff; --ink: #101114; --muted: #5f6368;
+    --line: rgba(0,0,0,0.10); --accent: #3b6cf6; --card: #f7f8fa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0e11; --ink: #f2f3f5; --muted: #a0a4ad;
+      --line: rgba(255,255,255,0.12); --accent: #7ea2ff; --card: #16181d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px 80px; }
+  header { padding: 48px 0 8px; }
+  .mark {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-weight: 700; font-size: 18px; letter-spacing: -0.02em;
+    text-decoration: none; color: var(--ink);
+  }
+  .dot { width: 26px; height: 26px; border-radius: 7px; display: block; }
+  h1 { font-size: clamp(30px, 5vw, 40px); letter-spacing: -0.03em; margin: 32px 0 8px; }
+  .lede { color: var(--muted); font-size: 19px; margin: 0 0 40px; max-width: 32em; }
+  h2 { font-size: 21px; letter-spacing: -0.02em; margin: 44px 0 12px; }
+  h3 { font-size: 17px; margin: 28px 0 6px; }
+  p { margin: 0 0 16px; }
+  ul { padding-left: 22px; }
+  li { margin-bottom: 10px; }
+  a { color: var(--accent); }
+  .callout {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px 20px; margin: 24px 0;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  footer { margin-top: 64px; border-top: 1px solid var(--line); padding-top: 24px; font-size: 15px; color: var(--muted); }
+  footer a { margin-right: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header><a class="mark" href="/"><img class="dot" src="/icon.png" alt=""> Maily</a></header>
+
+<h1>Support</h1>
+<p class="lede">
+  Something not working, or a question the app does not answer? Write to us —
+  a person reads it.
+</p>
+
+<div class="callout">
+  <p>
+    <strong><a href="mailto:support@mailyco.com">support@mailyco.com</a></strong><br>
+    We answer within two working days. Tell us which mailbox provider you use
+    and what you saw, and it will be sorted faster.
+  </p>
+</div>
+
+<h2>Getting started</h2>
+
+<h3>Connecting a mailbox</h3>
+<p>
+  On the You tab, tap <em>Add account</em>, then the <em>+</em>, then Google or
+  another provider. Google opens its own sign-in screen; nothing is shared with
+  Maily until you allow it there.
+</p>
+<p>
+  Maily brings over the last three months to start with, which takes a few
+  minutes on a busy mailbox. Older mail stays searchable in your provider.
+</p>
+
+<h3>A mailbox that is not Gmail</h3>
+<p>
+  Choose the IMAP option and enter the address. Maily suggests the server
+  settings for common providers and checks both receiving and sending before it
+  saves anything. Your password goes to the iOS Keychain and never to our
+  servers.
+</p>
+<p>
+  Some providers — Yahoo and iCloud among them — need an <strong>app
+  password</strong> rather than your normal one. Your provider's account
+  settings will have a page for creating one.
+</p>
+
+<h2>The AI features</h2>
+
+<h3>What they do</h3>
+<p>
+  Maily sorts each message into a category, writes a one-line summary of what it
+  asks of you, answers questions about your own mail, and drafts replies. You
+  can add categories of your own and describe in plain words what belongs in
+  them.
+</p>
+
+<h3>Turning them off</h3>
+<p>
+  Settings → AI. With sorting and summaries off, no message content leaves your
+  phone at all, and the inbox, search, reading and sending carry on working.
+</p>
+
+<h3>Auto-Reply</h3>
+<p>
+  Off unless you turn it on. When on, it answers only messages it is confident
+  about, within a limit you set per hour, never twice in one conversation, and
+  it notifies you every time it sends. You can stop it at any moment.
+</p>
+
+<h2>Billing</h2>
+
+<h3>Plans</h3>
+<p>
+  Maily is free to use. Pro and Max add more AI for heavier inboxes and more
+  connected mailboxes. Prices are shown in the app before you buy.
+</p>
+
+<h3>Cancelling</h3>
+<p>
+  Subscriptions are handled by Apple, not by us. Cancel in
+  <em>Settings → your name → Subscriptions</em> on your iPhone. Deleting the app
+  does not cancel a subscription.
+</p>
+
+<h3>Refunds</h3>
+<p>
+  Refunds are handled by Apple under their policy. Request one at
+  <a href="https://reportaproblem.apple.com">reportaproblem.apple.com</a>. We
+  cannot issue them ourselves, but write to us if something went wrong and we
+  will help.
+</p>
+
+<h3>"You have used your allowance"</h3>
+<p>
+  Each plan includes a monthly amount of AI use. When it runs out the AI
+  features pause until the next month; reading, sending and search are
+  unaffected. The Usage screen under You shows how much is left.
+</p>
+
+<h2>Your data</h2>
+
+<h3>Deleting one mailbox</h3>
+<p>
+  Settings → <em>Sign out of this mailbox</em>. Its mail, cached photos and
+  preferences are removed from the phone and Maily's access to it ends. Your
+  mail itself is untouched.
+</p>
+
+<h3>Deleting your account</h3>
+<p>
+  You → <em>Edit profile</em> → <em>Delete account</em>. This removes your
+  Maily account and everything we hold about you — settings, conversations,
+  what it remembers, and every connected mailbox on the phone. It cannot be
+  undone, and your mail stays with your provider.
+</p>
+<p>
+  You can also remove Maily's access from your
+  <a href="https://myaccount.google.com/permissions">Google account permissions
+  page</a> at any time.
+</p>
+
+<h3>What is kept where</h3>
+<p>
+  Your messages are stored on your phone, not on our servers. The
+  <a href="/privacy">privacy policy</a> sets out exactly what we hold and why.
+</p>
+
+<h2>Known limits</h2>
+<ul>
+  <li>Archiving, deleting and marking as read apply inside Maily and are not
+      sent back to Gmail. That needs a permission this app deliberately does
+      not ask for.</li>
+  <li>Attachments you send are limited to 4MB.</li>
+  <li>Instagram and YouTube posting, and Outlook mailboxes, are not supported
+      yet.</li>
+</ul>
+
+<footer>
+  <a href="/">Home</a>
+  <a href="/privacy">Privacy</a>
+  <a href="/terms">Terms</a>
+  <div style="margin-top:14px">© 2026 Maily · <a href="mailto:support@mailyco.com">support@mailyco.com</a></div>
+</footer>
+
+</div>
+</body>
+</html>
