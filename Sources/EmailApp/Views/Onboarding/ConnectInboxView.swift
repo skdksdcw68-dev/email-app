@@ -5,9 +5,21 @@ import SwiftUI
 /// Separate from `AccountView` on purpose. The Maily account says who you are;
 /// this says which inbox the AI may read and manage. A user can disconnect the
 /// inbox without losing their account or preferences.
+///
+/// 🔴 This screen used to *be* the connection: one "Connect Google" button
+/// wired straight to `mail.connect()`. Somebody whose mail is not on Gmail
+/// reached the end of onboarding and found nothing they could do -- even
+/// though `AddMailboxFlow` has offered Google, Microsoft and IMAP for weeks,
+/// and has had a `firstRun` mode built for exactly this moment that nothing
+/// ever called.
+///
+/// So this is the pitch and the flow is the flow. One place that adds a
+/// mailbox, which is the rule settled on 2026-09-06 -- the provider question
+/// belongs to the flow's own first step, not to two screens that can disagree.
 struct ConnectInboxView: View {
     @Environment(UserStore.self) private var user
-    @Environment(MailStore.self) private var mail
+
+    @State private var isConnecting = false
 
     /// A struct rather than a tuple: Swift key paths cannot address tuple
     /// elements, so `ForEach(_, id: \.1)` does not compile.
@@ -20,7 +32,7 @@ struct ConnectInboxView: View {
     private let permissions: [Permission] = [
         .init(symbol: "tray.full.fill", text: "Read your email so it can sort and prioritise it"),
         .init(symbol: "square.and.pencil", text: "Draft replies for you to review"),
-        .init(symbol: "archivebox.fill", text: "Organize, label and archive on your behalf"),
+        .init(symbol: "sparkles", text: "Summarise what arrived so you know what needs you"),
     ]
 
     var body: some View {
@@ -36,7 +48,11 @@ struct ConnectInboxView: View {
                 .multilineTextAlignment(.center)
                 .padding(.top, 22)
 
-            Text("Maily needs access to your Google account to read, organize, draft and manage your email.")
+            // Gmail, Outlook and anything with an IMAP server -- said here
+            // rather than discovered on the next screen, because somebody
+            // whose mail is not on Gmail should not have to tap a button
+            // labelled with a competitor's name to find that out.
+            Text("Works with Gmail, iCloud, Yahoo and any other mail account. Your mail is read on this phone, not copied to a server of ours.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -61,37 +77,15 @@ struct ConnectInboxView: View {
             Spacer()
 
             Button {
-                Task {
-                    await mail.connect()
-                    // Only move on if a mailbox actually connected -- otherwise
-                    // the error stays on screen and the user can retry.
-                    if mail.isConnected { user.next() }
-                }
+                isConnecting = true
             } label: {
-                // Spinner replaces the label rather than sitting next to an
-                // ellipsis -- one indicator, in place.
-                Group {
-                    if mail.isConnecting {
-                        ProgressView().tint(.white)
-                    } else {
-                        Text("Connect Google").fontWeight(.semibold)
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 30)
+                Text("Connect a mailbox")
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity, minHeight: 30)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(mail.isConnecting)
             .padding(.horizontal, 24)
-
-            if let error = mail.connectionError {
-                Text(error)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 12)
-                    .padding(.horizontal, 32)
-            }
 
             Text("You can disconnect at any time in Settings.")
                 .font(.caption)
@@ -99,16 +93,14 @@ struct ConnectInboxView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
         }
-        // Takes over the whole screen once consent is granted. The import is
-        // the longest wait in the app and deserves more than a spinner on a
-        // button.
-        .overlay {
-            if mail.importProgress.isRunning {
-                ImportingMailView(progress: mail.importProgress)
-                    .transition(.opacity)
+        // Full screen rather than a sheet: this is the last step of onboarding
+        // rather than a detour from it, and the flow brings its own navigation
+        // bar. Its X returns here, so nobody is trapped in the provider list.
+        .fullScreenCover(isPresented: $isConnecting) {
+            AddMailboxFlow(firstRun: true) {
+                user.next()
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: mail.importProgress.isRunning)
     }
 }
 

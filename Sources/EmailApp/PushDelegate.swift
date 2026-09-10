@@ -136,10 +136,33 @@ final class PushDelegate: NSObject, UIApplicationDelegate {
         // yet: a message the classifier has not reached is not the same as a
         // message it judged unimportant, and silence on the first would be a
         // missed email rather than a quiet one.
-        let worthTelling = AppSettings.notifiesOnlyImportant
+        let interesting = AppSettings.notifiesOnlyImportant
             ? messages.filter { $0.topPriority != nil || $0.tags.isEmpty }
             : messages
 
+        guard !interesting.isEmpty else { return }
+
+        // 🔴 Already on the lock screen, put there by `MailyNotify`.
+        //
+        // The extension rewrites the push itself, so by the time this runs
+        // the newest arrival usually has a banner already -- and this used to
+        // add a second one saying the same thing in the same words. It shows
+        // up when the app is open (the push is presented *and* handed to the
+        // app) and again when somebody taps a banner, which wakes the app to
+        // catch up on the very message they just tapped.
+        //
+        // Matched on Gmail's id, which the extension writes into `userInfo`
+        // as `remoteID`. Not on the notification's identifier: APNs names its
+        // own, and the extension cannot change it.
+        let alreadyShown = Set(
+            await center.deliveredNotifications().compactMap {
+                $0.request.content.userInfo["remoteID"] as? String
+            }
+        )
+        let worthTelling = interesting.filter { message in
+            guard let remote = message.remoteID else { return true }
+            return !alreadyShown.contains(remote)
+        }
         guard !worthTelling.isEmpty else { return }
 
         // Three at most. Six arriving at once is a summary, not six banners.
@@ -166,6 +189,11 @@ final class PushDelegate: NSObject, UIApplicationDelegate {
             content.userInfo = [
                 "messageID": message.id.uuidString,
                 "mailbox": account.id.rawValue,
+                // Written in the same key the extension uses, so a later
+                // catch-up over the same mail does not announce it twice
+                // either. `?? ""` never matches a real id, which is the
+                // right answer for a message that has none.
+                "remoteID": message.remoteID ?? "",
             ]
 
             try? await center.add(

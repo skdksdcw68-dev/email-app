@@ -15,5 +15,19 @@
 	     matching aps-environment, so this signs. -->
 	<key>aps-environment</key>
 	<string>production</string>
+	<!-- Shared with MailyNotify, the notification service extension, which
+	     needs the mailbox's refresh grant to fetch the sender and subject
+	     before the banner is drawn. See `PushCredentials`.
+
+	     Adding a group does NOT move anything already stored: the app keeps
+	     its default group as well, so `Keychain` and the GoogleSignIn SDK go
+	     on reading exactly what they wrote. Only the new push record is
+	     written into the shared group, and only because two targets have to
+	     reach it. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.netro.maily</string>
+		<string>$(AppIdentifierPrefix)com.netro.maily.shared</string>
+	</array>
 </dict>
 </plist>

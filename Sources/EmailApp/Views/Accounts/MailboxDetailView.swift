@@ -183,10 +183,24 @@ struct MailboxDetailView: View {
     private func danger(_ account: MailAccount) -> some View {
         if case .needsReauth(let reason) = account.state {
             Section {
-                Button("Sign in again") {
-                    Task { await mail.connect() }
+                // 🔴 Only Google. `mail.connect()` *is* the Google consent
+                // flow, and this button offered it to every provider -- so an
+                // IMAP mailbox whose app password had been revoked answered
+                // "sign in again" by showing somebody a Google account picker
+                // that could not possibly fix it.
+                //
+                // There is no password editor yet, so the other case says the
+                // true thing rather than doing the wrong one.
+                if account.provider == .gmail {
+                    Button("Sign in again") {
+                        Task { await mail.connect() }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                } else {
+                    Text("Remove this mailbox and add it again with a new app password.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                .font(.subheadline.weight(.semibold))
             } header: {
                 Text("Needs attention")
             } footer: {

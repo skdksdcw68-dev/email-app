@@ -466,6 +466,10 @@ final class MailStore {
         if let refresh = session.refreshToken {
             Keychain.storeQuietly(refresh, .refreshToken, for: restoredID)
         }
+        // The notification extension reads its own copy, and this is the
+        // launch that backfills it for every mailbox connected before the
+        // extension existed. See `PushCredentialMirror`.
+        mirrorPushCredentials()
 
         // Update the record, do not build a new one. This used to construct a
         // whole fresh account on every launch, which is how the id managed to
@@ -660,6 +664,10 @@ final class MailStore {
             account = connected
             registry.upsert(connected)
             registry.setActive(connected.id)
+            // After the upsert, not before: the record's mailbox name depends
+            // on how many are connected, and this one is not counted until it
+            // is in the registry.
+            mirrorPushCredentials()
             // Point the scoped stores at it before anything is written, or
             // the first import would land in whatever suite was last active
             // and the chats and facts would be written to the wrong mailbox.
@@ -1653,6 +1661,12 @@ final class MailStore {
     func disconnect() {
         guard let going = account else { return }
 
+        // Before anything else, and before the revoke below can fail: the
+        // extension's copy is the one thing here that outlives the app's own
+        // process, so a mailbox that is going must stop being reachable from
+        // a lock screen first.
+        PushCredentialMirror.forget(going)
+
         // Tell Google to stop, then end the grant. That order is not
         // negotiable: revoking first makes the stop call impossible, which is
         // how Gmail ends up publishing notices for a mailbox the app dropped
@@ -1726,6 +1740,19 @@ final class MailStore {
     /// pass revokes that mailbox's grant, stops its Gmail watch, drops its
     /// push row and clears its suite while it is the active one, which is the
     /// only state in which those clears are scoped to the right mailbox.
+    /// Rewrites what the notification extension is allowed to read.
+    ///
+    /// Called after anything that changes which mailboxes exist or what they
+    /// are called. Cheap enough not to think about -- a Keychain write per
+    /// Gmail mailbox -- and rebuilding the lot means a record can never be
+    /// left describing a mailbox that has since been renamed or removed.
+    func mirrorPushCredentials() {
+        PushCredentialMirror.rebuild(
+            from: registry.accounts,
+            severalConnected: registry.hasSeveral
+        )
+    }
+
     func disconnectEverything() {
         // Bounded: `disconnect` always removes the record it started with, so
         // this cannot spin, and the ceiling is there for the case it one day
@@ -1739,7 +1766,10 @@ final class MailStore {
         // Records the active pointer never reached -- a mailbox saved by a
         // build that crashed before it was made active. No token to revoke,
         // so the registry's own teardown is the whole job.
-        for stranded in registry.accounts { registry.forget(stranded.id) }
+        for stranded in registry.accounts {
+            PushCredentialMirror.forget(stranded)
+            registry.forget(stranded.id)
+        }
     }
 
     // MARK: - Reading

@@ -218,6 +218,19 @@ workflows:
             --type IOS_APP_STORE \
             --certificate-key "@env:CERTIFICATE_PRIVATE_KEY" \
             --create
+          # 🔴 The extension is a second bundle id and needs its own profile.
+          #
+          # `MailyNotify` rewrites the notification before iOS draws it, and
+          # it is a separate signed bundle embedded in the app. Archiving with
+          # a profile for the app alone fails inside `xcodebuild` on the
+          # extension target, which reads as the app failing to sign.
+          #
+          # `--create` makes the App ID as well as the profile, so nothing has
+          # to be clicked on the Developer Portal first.
+          app-store-connect fetch-signing-files "$BUNDLE_ID.notify" \
+            --type IOS_APP_STORE \
+            --certificate-key "@env:CERTIFICATE_PRIVATE_KEY" \
+            --create
           keychain initialize
           # The certificate has to be in the keychain as well as the profile
           # on disk, or the profile references an identity nothing can sign

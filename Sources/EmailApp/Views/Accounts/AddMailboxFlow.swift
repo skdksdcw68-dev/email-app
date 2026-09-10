@@ -251,7 +251,7 @@ struct AddMailboxFlow: View {
                         FlowBackButton {
                             withAnimation(.snappy(duration: 0.22)) { index -= 1 }
                         }
-                    } else if !firstRun && (step == .provider || step == .importing) {
+                    } else if step == .provider || (!firstRun && step == .importing) {
                         // Closeable during the import, and that is the point.
                         // The work is not owned by this screen: the task
                         // outlives it, `MailStore` holds the mail, and

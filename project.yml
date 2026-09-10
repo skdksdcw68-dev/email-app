@@ -35,11 +35,19 @@ targets:
     platform: iOS
     sources:
       - path: Sources/EmailApp
+      # Compiled into both targets rather than linked as a framework. It is
+      # one file of Foundation and Security with no state of its own, and a
+      # framework to share it would be a build phase, a signing identity and
+      # an embed step for eighty lines.
+      - path: Sources/Shared
     dependencies:
       - package: Supabase
         product: Supabase
       - package: GoogleSignIn
         product: GoogleSignIn
+      # Embedded into the app bundle, which is what makes iOS hand it the
+      # push before drawing the banner.
+      - target: MailyNotify
     settings:
       base:
         # Registered on the Developer Portal under team TDMFXRJYN7.
@@ -103,6 +111,33 @@ targets:
         # Declares no non-exempt encryption. Without this TestFlight blocks
         # every build behind a manual export-compliance question.
         ITSAppUsesNonExemptEncryption: false
+
+  # Rewrites the notification before iOS draws it, so the lock screen says who
+  # the mail is from instead of "New mail". See `NotificationService`.
+  MailyNotify:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/MailyNotify
+      - path: Sources/Shared
+    settings:
+      base:
+        # 🔴 Must be the app's bundle id with a suffix. Apple refuses to
+        # install an extension whose identifier is not prefixed by its host's,
+        # and the error at upload time reads like a signing problem.
+        PRODUCT_BUNDLE_IDENTIFIER: com.netro.maily.notify
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_ENTITLEMENTS: Support/MailyNotify.entitlements
+        INFOPLIST_FILE: Support/MailyNotify-Info.plist
+        # An extension is loaded into a host process, so it has to be built as
+        # one. Without this the archive fails on a bundle that cannot be
+        # embedded.
+        SKIP_INSTALL: YES
+        # No SDKs are linked here on purpose -- see `NotificationService`.
+        # Swift's own runtime still has to travel with it.
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: NO
 
   EmailAppTests:
     type: bundle.unit-test

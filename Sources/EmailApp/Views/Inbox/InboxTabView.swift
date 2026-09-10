@@ -9,6 +9,8 @@ import SwiftUI
 struct InboxTabView: View {
     @Environment(MailStore.self) private var mail
 
+    @State private var isConnecting = false
+
     var body: some View {
         NavigationStack {
             Group {
@@ -22,28 +24,26 @@ struct InboxTabView: View {
                 MessageDetailView(messageID: id)
             }
         }
+        // The same flow the + on Manage accounts opens, so the provider
+        // question is asked in one place and answered the same way wherever
+        // somebody starts from. This used to call `mail.connect()` directly,
+        // which meant Google or nothing.
+        .sheet(isPresented: $isConnecting) { AddMailboxFlow() }
     }
 
     private var reconnect: some View {
         ContentUnavailableView {
             Label("No Inbox Connected", systemImage: "envelope.badge.shield.half.filled")
         } description: {
-            Text("Connect your Google account to let Maily read and organize your email.")
+            Text("Connect a mailbox to let Maily read and organize your email. Gmail, iCloud, Yahoo and any other mail account.")
         } actions: {
             Button {
-                Task { await mail.connect() }
+                isConnecting = true
             } label: {
-                Group {
-                    if mail.isConnecting {
-                        ProgressView().tint(.white)
-                    } else {
-                        Text("Connect Google")
-                    }
-                }
-                .frame(minWidth: 140)
+                Text("Connect a mailbox")
+                    .frame(minWidth: 140)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(mail.isConnecting)
         }
         .navigationTitle("Inbox")
     }

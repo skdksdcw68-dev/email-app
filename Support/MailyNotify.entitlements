@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The only entitlement this extension has, and the only one it needs.
+	     Keychain sharing is not a Developer Portal capability -- a group is
+	     allowed as long as it is prefixed by the team id -- so this adds
+	     nothing to the App ID and nothing to the signing dance.
+
+	     It must match `PushCredentials.accessGroup` exactly. A mismatch is
+	     silent: the app writes, the extension reads nothing, and the only
+	     symptom is a notification that never improves. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.netro.maily.shared</string>
+	</array>
+</dict>
+</plist>
